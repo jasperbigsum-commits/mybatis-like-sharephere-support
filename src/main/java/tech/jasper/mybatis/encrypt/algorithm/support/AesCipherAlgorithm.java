@@ -1,0 +1,77 @@
+package tech.jasper.mybatis.encrypt.algorithm.support;
+
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Arrays;
+import java.util.Base64;
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import tech.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
+import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+
+public class AesCipherAlgorithm implements CipherAlgorithm {
+
+    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final int IV_SIZE = 12;
+    private static final int TAG_SIZE_BITS = 128;
+
+    private final SecretKeySpec keySpec;
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    public AesCipherAlgorithm(String keyMaterial) {
+        this.keySpec = new SecretKeySpec(deriveKey(keyMaterial), "AES");
+    }
+
+    @Override
+    public String encrypt(String plainText) {
+        if (plainText == null) {
+            return null;
+        }
+        try {
+            byte[] iv = new byte[IV_SIZE];
+            secureRandom.nextBytes(iv);
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec, new GCMParameterSpec(TAG_SIZE_BITS, iv));
+            byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(ByteBuffer.allocate(iv.length + encrypted.length)
+                    .put(iv)
+                    .put(encrypted)
+                    .array());
+        } catch (GeneralSecurityException ex) {
+            throw new EncryptionConfigurationException("Failed to encrypt value.", ex);
+        }
+    }
+
+    @Override
+    public String decrypt(String cipherText) {
+        if (cipherText == null) {
+            return null;
+        }
+        try {
+            byte[] payload = Base64.getDecoder().decode(cipherText);
+            byte[] iv = Arrays.copyOfRange(payload, 0, IV_SIZE);
+            byte[] encrypted = Arrays.copyOfRange(payload, IV_SIZE, payload.length);
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(TAG_SIZE_BITS, iv));
+            return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
+        } catch (GeneralSecurityException | IllegalArgumentException ex) {
+            throw new EncryptionConfigurationException("Failed to decrypt value.", ex);
+        }
+    }
+
+    private byte[] deriveKey(String keyMaterial) {
+        if (keyMaterial == null || keyMaterial.isBlank()) {
+            throw new EncryptionConfigurationException("mybatis.encrypt.default-cipher-key must not be blank.");
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return Arrays.copyOf(digest.digest(keyMaterial.getBytes(StandardCharsets.UTF_8)), 16);
+        } catch (GeneralSecurityException ex) {
+            throw new EncryptionConfigurationException("Failed to initialize AES key.", ex);
+        }
+    }
+}

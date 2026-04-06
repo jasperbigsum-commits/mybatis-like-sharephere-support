@@ -8,10 +8,11 @@ import java.lang.annotation.Target;
 import tech.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 
 /**
- * 声明实体字段的加密规则。
+ * Declares encryption metadata for an entity property.
  *
- * <p>该注解用于把业务属性映射到数据库中的主加密列、辅助等值查询列和 LIKE 查询列。
- * 当字段上未显式指定列名时，框架会基于属性名按下划线风格推导默认列名。</p>
+ * <p>{@code column} always means the original business table column referenced by application SQL.
+ * {@code storageColumn} means the real ciphertext storage column and defaults to {@code column}
+ * when not configured.</p>
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
@@ -19,62 +20,66 @@ import tech.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 public @interface EncryptField {
 
     /**
-     * 主加密列名，默认根据属性名推导。
+     * Original business column name.
+     *
+     * <p>When omitted, the loader resolves it in this order:
+     * {@code @TableField(value)}, JPA {@code @Column(name)}, then property-name snake_case.</p>
      */
     String column() default "";
 
     /**
-     * 字段存储模式，默认与业务表存储在同一张表。
+     * Storage mode for ciphertext persistence.
      */
     FieldStorageMode storageMode() default FieldStorageMode.SAME_TABLE;
 
     /**
-     * 独立加密表名，仅在 storageMode=SEPARATE_TABLE 时生效。
+     * External table used when {@code storageMode=SEPARATE_TABLE}.
      */
     String storageTable() default "";
 
     /**
-     * 独立加密表中的密文列名，默认与 column 相同。
+     * Real ciphertext storage column. Defaults to {@link #column()} when omitted.
      */
     String storageColumn() default "";
 
     /**
-     * 业务实体中的主键属性名，用于和独立加密表做关联。
+     * Entity property used as the business row identifier for separate-table storage.
+     * When omitted, the loader infers it from {@link #sourceIdColumn()}.
      */
-    String sourceIdProperty() default "id";
+    String sourceIdProperty() default "";
 
     /**
-     * 业务主表中的主键列名，默认根据 sourceIdProperty 推导。
+     * Business-table identifier column. When omitted, the loader resolves the entity id column internally.
      */
     String sourceIdColumn() default "";
 
     /**
-     * 独立加密表中的关联列名，默认与 sourceIdColumn 相同。
+     * Separate-table identifier column. Defaults to {@code sourceIdColumn}.
      */
     String storageIdColumn() default "";
 
     /**
-     * 主加密算法 Bean 名称，默认使用 sm4。
+     * Cipher algorithm bean name.
      */
     String cipherAlgorithm() default "sm4";
 
     /**
-     * 辅助等值查询列名。
+     * Assisted equality query column.
      */
     String assistedQueryColumn() default "";
 
     /**
-     * 辅助等值查询算法 Bean 名称，默认使用 sm3。
+     * Assisted equality algorithm bean name.
      */
     String assistedQueryAlgorithm() default "sm3";
 
     /**
-     * LIKE 查询辅助列名。
+     * LIKE helper column.
      */
     String likeQueryColumn() default "";
 
     /**
-     * LIKE 查询算法 Bean 名称。
+     * LIKE helper algorithm bean name.
      */
     String likeQueryAlgorithm() default "normalizedLike";
 }

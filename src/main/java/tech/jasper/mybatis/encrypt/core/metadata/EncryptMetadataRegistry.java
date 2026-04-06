@@ -64,7 +64,9 @@ public class EncryptMetadataRegistry {
                 return Optional.of(cached);
             }
             EncryptTableRule rule = loadEntityRule(entityType);
-            entityRules.put(entityType, rule);
+            if (rule != null) {
+                entityRules.put(entityType, rule);
+            }
             return Optional.ofNullable(rule);
         }
     }
@@ -133,10 +135,14 @@ public class EncryptMetadataRegistry {
 
     private EncryptColumnRule toColumnRule(String property, FieldRuleProperties properties) {
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
-        String sourceIdProperty = properties.getSourceIdProperty() != null ? properties.getSourceIdProperty() : "id";
-        String sourceIdColumn = properties.getSourceIdColumn() != null
-                ? properties.getSourceIdColumn()
-                : NameUtils.camelToSnake(sourceIdProperty);
+        String sourceIdColumn = firstNonBlank(properties.getSourceIdColumn(), "id");
+        String sourceIdProperty = firstNonBlank(
+                properties.getSourceIdProperty(),
+                inferSourceIdProperty(sourceIdColumn)
+        );
+        if (properties.getSourceIdColumn() == null || properties.getSourceIdColumn().isBlank()) {
+            sourceIdColumn = NameUtils.camelToSnake(sourceIdProperty);
+        }
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
                 column,
@@ -168,6 +174,38 @@ public class EncryptMetadataRegistry {
             throw new IllegalArgumentException(
                     "Separate-table encrypted field must define assistedQueryColumn: " + rule.property());
         }
+    }
+
+    private String inferSourceIdProperty(String sourceIdColumn) {
+        if (sourceIdColumn == null || sourceIdColumn.isBlank()) {
+            return "id";
+        }
+        String normalized = NameUtils.normalizeIdentifier(sourceIdColumn);
+        return "id".equals(normalized) ? "id" : toCamelCase(normalized);
+    }
+
+    private String toCamelCase(String value) {
+        StringBuilder builder = new StringBuilder(value.length());
+        boolean upperNext = false;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current == '_') {
+                upperNext = builder.length() > 0;
+                continue;
+            }
+            builder.append(upperNext ? Character.toUpperCase(current) : current);
+            upperNext = false;
+        }
+        return builder.length() == 0 ? "id" : builder.toString();
+    }
+
+    private String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private boolean isCandidateType(Class<?> type) {

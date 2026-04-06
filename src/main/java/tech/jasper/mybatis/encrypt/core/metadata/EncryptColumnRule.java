@@ -1,15 +1,21 @@
 package tech.jasper.mybatis.encrypt.core.metadata;
 
 /**
- * 字段级加密规则。
+ * Field-level encryption rule.
  *
- * @param property 实体属性名
- * @param column 主加密列名
- * @param cipherAlgorithm 主加密算法 Bean 名称
- * @param assistedQueryColumn 辅助等值查询列名
- * @param assistedQueryAlgorithm 辅助等值查询算法 Bean 名称
- * @param likeQueryColumn LIKE 查询辅助列名
- * @param likeQueryAlgorithm LIKE 查询算法 Bean 名称
+ * @param property entity property name
+ * @param column original business column name used by application SQL
+ * @param cipherAlgorithm cipher algorithm bean name
+ * @param assistedQueryColumn assisted equality query column
+ * @param assistedQueryAlgorithm assisted equality algorithm bean name
+ * @param likeQueryColumn LIKE helper column
+ * @param likeQueryAlgorithm LIKE helper algorithm bean name
+ * @param storageMode ciphertext storage mode
+ * @param storageTable external ciphertext table when separate-table mode is enabled
+ * @param storageColumn real ciphertext storage column, defaulting to {@code column}
+ * @param sourceIdProperty entity identifier property used for separate-table linkage, inferred from sourceIdColumn when omitted
+ * @param sourceIdColumn business-table identifier column
+ * @param storageIdColumn external-table identifier column
  */
 public record EncryptColumnRule(String property,
                                 String column,

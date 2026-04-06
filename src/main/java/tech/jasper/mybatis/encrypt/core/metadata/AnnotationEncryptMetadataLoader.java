@@ -2,24 +2,20 @@ package tech.jasper.mybatis.encrypt.core.metadata;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.util.Arrays;
 import tech.jasper.mybatis.encrypt.annotation.EncryptField;
 import tech.jasper.mybatis.encrypt.annotation.EncryptTable;
 import tech.jasper.mybatis.encrypt.util.NameUtils;
 
 /**
- * 注解规则加载器。
+ * Loads encryption metadata from entity annotations.
  *
- * <p>负责从实体类上的 {@link EncryptTable} 和 {@link EncryptField} 注解中提取加密规则，
- * 并兼容读取 MyBatis-Plus 的 {@code @TableName}/{@code @TableField} 信息。</p>
+ * <p>Column resolution order for {@link EncryptField#column()} is:
+ * explicit {@code @EncryptField.column}, MyBatis-Plus {@code @TableField(value)},
+ * JPA {@code @Column(name)}, then property-name snake_case.</p>
  */
 public class AnnotationEncryptMetadataLoader {
 
-    /**
-     * 从实体类加载表级与字段级加密规则。
-     *
-     * @param type 实体类型
-     * @return 解析出的表规则；如果类上没有任何加密字段则返回 null
-     */
     public EncryptTableRule load(Class<?> type) {
         EncryptTableRule rule = new EncryptTableRule(resolveTableName(type));
         boolean found = false;
@@ -31,6 +27,8 @@ public class AnnotationEncryptMetadataLoader {
             found = true;
             String property = field.getName();
             String column = blankToDefault(encryptField.column(), resolveColumnName(field));
+            String sourceIdColumn = blankToDefault(encryptField.sourceIdColumn(), inferSourceIdColumn(type, encryptField));
+            String sourceIdProperty = blankToDefault(encryptField.sourceIdProperty(), inferSourceIdProperty(type, sourceIdColumn));
             rule.addColumnRule(new EncryptColumnRule(
                     property,
                     column,
@@ -42,10 +40,9 @@ public class AnnotationEncryptMetadataLoader {
                     encryptField.storageMode(),
                     blankToNull(encryptField.storageTable()),
                     blankToDefault(encryptField.storageColumn(), column),
-                    blankToDefault(encryptField.sourceIdProperty(), "id"),
-                    blankToDefault(encryptField.sourceIdColumn(), NameUtils.camelToSnake(encryptField.sourceIdProperty())),
-                    blankToDefault(encryptField.storageIdColumn(),
-                            blankToDefault(encryptField.sourceIdColumn(), NameUtils.camelToSnake(encryptField.sourceIdProperty())))
+                    sourceIdProperty,
+                    sourceIdColumn,
+                    blankToDefault(encryptField.storageIdColumn(), sourceIdColumn)
             ));
         }
         return found ? rule : null;
@@ -56,16 +53,71 @@ public class AnnotationEncryptMetadataLoader {
         if (encryptTable != null && !encryptTable.value().isBlank()) {
             return encryptTable.value();
         }
-        String tableName = extractThirdPartyAnnotationValue(type, "com.baomidou.mybatisplus.annotation.TableName");
+        String tableName = firstNonBlank(
+                extractAnnotationStringValue(type, "com.baomidou.mybatisplus.annotation.TableName", "value"),
+                extractAnnotationStringValue(type, "jakarta.persistence.Table", "name"),
+                extractAnnotationStringValue(type, "javax.persistence.Table", "name")
+        );
         return tableName != null ? tableName : NameUtils.camelToSnake(type.getSimpleName());
     }
 
     private String resolveColumnName(Field field) {
-        String tableField = extractThirdPartyAnnotationValue(field, "com.baomidou.mybatisplus.annotation.TableField");
-        return tableField != null ? tableField : NameUtils.camelToSnake(field.getName());
+        String resolved = firstNonBlank(
+                extractAnnotationStringValue(field, "com.baomidou.mybatisplus.annotation.TableId", "value"),
+                extractAnnotationStringValue(field, "com.baomidou.mybatisplus.annotation.TableField", "value"),
+                extractAnnotationStringValue(field, "jakarta.persistence.Column", "name"),
+                extractAnnotationStringValue(field, "javax.persistence.Column", "name")
+        );
+        return resolved != null ? resolved : NameUtils.camelToSnake(field.getName());
     }
 
-    private String extractThirdPartyAnnotationValue(Object source, String className) {
+    private String inferSourceIdColumn(Class<?> type, EncryptField encryptField) {
+        String explicitSourceIdProperty = blankToNull(encryptField.sourceIdProperty());
+        if (explicitSourceIdProperty != null) {
+            return NameUtils.camelToSnake(explicitSourceIdProperty);
+        }
+        Field idField = resolveIdField(type);
+        return idField != null ? resolveColumnName(idField) : "id";
+    }
+
+    private String inferSourceIdProperty(Class<?> type, String sourceIdColumn) {
+        if (sourceIdColumn == null || sourceIdColumn.isBlank()) {
+            return "id";
+        }
+        String normalizedSourceIdColumn = NameUtils.normalizeIdentifier(sourceIdColumn);
+        return Arrays.stream(type.getDeclaredFields())
+                .filter(field -> normalizedSourceIdColumn.equals(NameUtils.normalizeIdentifier(resolveColumnName(field))))
+                .map(Field::getName)
+                .findFirst()
+                .orElse("id");
+    }
+
+    private Field resolveIdField(Class<?> type) {
+        Field namedIdField = Arrays.stream(type.getDeclaredFields())
+                .filter(field -> "id".equals(field.getName()))
+                .findFirst()
+                .orElse(null);
+        if (namedIdField != null) {
+            return namedIdField;
+        }
+        return Arrays.stream(type.getDeclaredFields())
+                .filter(this::isIdField)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean isIdField(Field field) {
+        return hasAnnotation(field, "com.baomidou.mybatisplus.annotation.TableId")
+                || hasAnnotation(field, "jakarta.persistence.Id")
+                || hasAnnotation(field, "javax.persistence.Id");
+    }
+
+    private boolean hasAnnotation(Field field, String className) {
+        return Arrays.stream(field.getAnnotations())
+                .anyMatch(annotation -> annotation.annotationType().getName().equals(className));
+    }
+
+    private String extractAnnotationStringValue(Object source, String className, String attributeName) {
         Annotation[] annotations = source instanceof Class<?>
                 ? ((Class<?>) source).getAnnotations()
                 : ((Field) source).getAnnotations();
@@ -74,10 +126,19 @@ public class AnnotationEncryptMetadataLoader {
                 continue;
             }
             try {
-                Object value = annotation.annotationType().getMethod("value").invoke(annotation);
+                Object value = annotation.annotationType().getMethod(attributeName).invoke(annotation);
                 return value instanceof String string && !string.isBlank() ? string : null;
             } catch (ReflectiveOperationException ignore) {
                 return null;
+            }
+        }
+        return null;
+    }
+
+    private String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
             }
         }
         return null;

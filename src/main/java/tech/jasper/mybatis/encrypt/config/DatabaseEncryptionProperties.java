@@ -157,7 +157,7 @@ public class DatabaseEncryptionProperties {
     public static class FieldRuleProperties {
 
         /**
-         * Physical column name in the business table.
+         * Original business column name used by application SQL. When omitted in configuration, property-name snake_case is used.
          */
         private String column;
 
@@ -172,14 +172,14 @@ public class DatabaseEncryptionProperties {
         private String storageTable;
 
         /**
-         * Ciphertext column in the external storage table.
+         * Real ciphertext storage column. Defaults to column when omitted.
          */
         private String storageColumn;
 
         /**
-         * Entity property used as the business row identifier.
+         * Entity property used as the business row identifier. When omitted, it is inferred internally.
          */
-        private String sourceIdProperty = "id";
+        private String sourceIdProperty = "";
 
         /**
          * Source identifier column in the business table.
@@ -313,3 +313,4 @@ public class DatabaseEncryptionProperties {
         }
     }
 }
+

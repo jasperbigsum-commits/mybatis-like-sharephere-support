@@ -67,7 +67,7 @@
 4. 插件层：在 MyBatis 生命周期中接入 SQL 改写和结果解密
 5. 自动配置层：通过 Spring Boot 自动注册算法、规则中心和拦截器
 
-详细架构见 [docs/architecture.md](E:/MyProject/IdeaProject/mybatis-like-sharephere-support/docs/architecture.md)。
+详细架构见 [docs/architecture.md](docs/architecture.md)。
 
 ## 注释规范
 
@@ -401,24 +401,26 @@ src/main/java/tech/jasper/mybatis/encrypt
 
 ## 测试与开发状态
 
-当前仓库已补充基础单元测试，覆盖：
+当前仓库已补充多层测试覆盖，包括：
 
-- SQL 改写主流程
-- 结果自动解密主流程
+- 元数据推断与规则注册单元测试
+- SQL 改写矩阵单元测试
+- 结果自动解密主流程测试
+- 纯 MyBatis + H2 集成测试
+- Spring Boot 自动装配 + MyBatis + H2 集成测试
 
 本仓库当前没有 `mvnw`，本地开发需自行提供 Maven 环境。
 
 ## 后续建议
 
 - 增加 Maven Wrapper，降低接入和测试门槛
-- 增加集成测试，覆盖真实 MyBatis 执行链路
-- 增加复杂 SQL 场景测试矩阵
+- 继续扩展复杂 SQL 场景测试矩阵
 - 完善 SQL 日志脱敏策略与扩展点
 - 补充生产可用配置示例与兼容性说明
 
 ## SQL Support Matrix
 
-详细 SQL 支持矩阵见 [docs/sql-support-matrix.md](E:/MyProject/IdeaProject/mybatis-like-sharephere-support/docs/sql-support-matrix.md)。
+详细 SQL 支持矩阵见 [docs/sql-support-matrix.md](docs/sql-support-matrix.md)。
 
 当前文档会明确区分：
 

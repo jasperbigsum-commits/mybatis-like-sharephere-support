@@ -203,8 +203,6 @@ class MybatisEncryptionIntegrationTest {
                 storageMode = FieldStorageMode.SEPARATE_TABLE,
                 storageTable = "user_id_card_encrypt",
                 storageColumn = "id_card_cipher",
-                sourceIdProperty = "id",
-                sourceIdColumn = "id",
                 storageIdColumn = "user_id",
                 assistedQueryColumn = "id_card_hash",
                 likeQueryColumn = "id_card_like"

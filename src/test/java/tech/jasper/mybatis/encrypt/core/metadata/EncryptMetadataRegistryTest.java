@@ -65,7 +65,6 @@ class EncryptMetadataRegistryTest {
                 new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
 
         assertTrue(registry.findByEntity(PlainEntity.class).isEmpty());
-        assertTrue(registry.findByEntity(PlainEntity.class).isEmpty());
     }
 
     static class PlainEntity {

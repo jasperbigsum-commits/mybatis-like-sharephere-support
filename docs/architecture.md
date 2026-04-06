@@ -46,7 +46,7 @@
 - `MybatisEncryptionAutoConfiguration`
   - 注册默认算法
   - 注册规则中心
-  - 通过 `ConfigurationCustomizer` 将拦截器注入 MyBatis
+  - 注册 `DatabaseEncryptionInterceptor` 并交由 MyBatis 自动装配链路接入
 
 ## 执行链路
 
@@ -96,4 +96,4 @@
 - 独立加密表的真实同步、查询改写与结果回填
 - Spring Boot 自动装配场景下拦截器单次注册与执行链路正确性
 
-能力边界的细化说明见 [sql-support-matrix.md](E:/MyProject/IdeaProject/mybatis-like-sharephere-support/docs/sql-support-matrix.md)。
+能力边界的细化说明见 [sql-support-matrix.md](sql-support-matrix.md)。

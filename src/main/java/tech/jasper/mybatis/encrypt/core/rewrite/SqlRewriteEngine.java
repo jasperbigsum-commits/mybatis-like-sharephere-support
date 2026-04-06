@@ -243,7 +243,7 @@ public class SqlRewriteEngine {
         validateOrderBy(plainSelect.getOrderByElements(), tableContext);
     }
 
-    // Parenthesis 鍦?JSqlParser 5.x 涓凡搴熷純浣嗕粛鐢ㄤ簬琛ㄧず鏉′欢鎷彿
+    // Parenthesized expression lists are still used by JSqlParser 5.x to represent grouped conditions.
     private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
         if (expression == null) {
             return null;
@@ -1196,7 +1196,7 @@ public class SqlRewriteEngine {
     private Column buildColumn(Column source, String targetColumn) {
         Column column = new Column(quote(targetColumn));
         if (source.getTable() != null && source.getTable().getName() != null) {
-            // 鍙繚鐣欒〃寮曠敤鍚嶏紙鍙兘鏄〃鍚嶆垨鍒悕锛夛紝涓嶅鍒?alias 浠ラ伩鍏嶇敓鎴?"t AS t.`col`" 杩欐牱鐨勯敊璇?SQL
+            // Keep only the table reference name (table name or alias) to avoid generating invalid SQL like "t AS t.`col`".
             column.setTable(new Table(source.getTable().getName()));
         }
         return column;

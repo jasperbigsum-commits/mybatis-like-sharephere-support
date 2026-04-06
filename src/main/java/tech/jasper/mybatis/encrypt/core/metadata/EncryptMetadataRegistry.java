@@ -11,10 +11,10 @@ import tech.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRule
 import tech.jasper.mybatis.encrypt.util.NameUtils;
 
 /**
- * 加密元数据注册中心。
+ * Central registry for encryption metadata.
  *
- * <p>负责合并配置文件规则与注解规则，并按表名和实体类型建立缓存。
- * SQL 改写阶段主要按表名取规则，结果解密阶段主要按实体类型取规则。</p>
+ * <p>The registry merges configuration-driven rules with annotation-driven rules and caches
+ * them by both physical table name and entity type.</p>
  */
 public class EncryptMetadataRegistry {
 
@@ -29,34 +29,45 @@ public class EncryptMetadataRegistry {
     }
 
     /**
-     * 按表名查询规则。
+     * Finds a table rule by physical table name.
      *
-     * @param table 数据库表名
-     * @return 表规则
+     * @param table database table name
+     * @return matched table rule if present
      */
     public Optional<EncryptTableRule> findByTable(String table) {
+        if (table == null || table.isBlank()) {
+            return Optional.empty();
+        }
         return Optional.ofNullable(tableRules.get(NameUtils.normalizeIdentifier(table)));
     }
 
     /**
-     * 按实体类型查询规则，首次访问时会尝试从注解加载并缓存。
+     * Finds or lazily loads a table rule for the given entity type.
      *
-     * @param entityType 实体类型
-     * @return 表规则
+     * @param entityType entity class
+     * @return matched table rule if present
      */
     public Optional<EncryptTableRule> findByEntity(Class<?> entityType) {
+        if (!isCandidateType(entityType)) {
+            return Optional.empty();
+        }
         return Optional.ofNullable(entityRules.computeIfAbsent(entityType, this::loadEntityRule));
     }
 
+    /**
+     * Forces metadata registration for a specific entity class.
+     *
+     * @param entityType entity class to preload
+     */
     public void registerEntityType(Class<?> entityType) {
         findByEntity(entityType);
     }
 
     /**
-     * 在 SQL 执行前预热可能使用到的实体规则，减少首次查询时的延迟抖动。
+     * Preloads metadata that may be needed by the current mapped statement execution.
      *
-     * @param mappedStatement 当前执行的 MappedStatement
-     * @param parameterObject 当前入参对象
+     * @param mappedStatement current mapped statement
+     * @param parameterObject current MyBatis parameter object
      */
     public void warmUp(MappedStatement mappedStatement, Object parameterObject) {
         mappedStatement.getResultMaps().stream()
@@ -88,7 +99,6 @@ public class EncryptMetadataRegistry {
         annotationRule.getColumnRules().forEach(this::validateRule);
         EncryptTableRule existing = tableRules.get(annotationRule.getTableName());
         if (existing != null) {
-            // 配置规则优先级高于注解规则，注解只补齐缺失字段，避免启动后行为漂移。
             existing.mergeMissing(annotationRule);
             return existing;
         }
@@ -98,7 +108,6 @@ public class EncryptMetadataRegistry {
 
     private void registerConfiguredRules(DatabaseEncryptionProperties properties) {
         properties.getTables().forEach((name, tableProperties) -> {
-            // 外层 map key 既可以作为逻辑名，也可以直接作为默认表名。
             String tableName = tableProperties.getTable() != null ? tableProperties.getTable() : name;
             EncryptTableRule tableRule = new EncryptTableRule(tableName);
             tableProperties.getFields().forEach((property, fieldProperties) ->
@@ -109,6 +118,10 @@ public class EncryptMetadataRegistry {
 
     private EncryptColumnRule toColumnRule(String property, FieldRuleProperties properties) {
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
+        String sourceIdProperty = properties.getSourceIdProperty() != null ? properties.getSourceIdProperty() : "id";
+        String sourceIdColumn = properties.getSourceIdColumn() != null
+                ? properties.getSourceIdColumn()
+                : NameUtils.camelToSnake(sourceIdProperty);
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
                 column,
@@ -120,11 +133,9 @@ public class EncryptMetadataRegistry {
                 properties.getStorageMode(),
                 properties.getStorageTable(),
                 properties.getStorageColumn() != null ? properties.getStorageColumn() : column,
-                properties.getSourceIdProperty() != null ? properties.getSourceIdProperty() : "id",
-                properties.getSourceIdColumn() != null ? properties.getSourceIdColumn() : NameUtils.camelToSnake(properties.getSourceIdProperty()),
-                properties.getStorageIdColumn() != null ? properties.getStorageIdColumn()
-                        : (properties.getSourceIdColumn() != null ? properties.getSourceIdColumn()
-                        : NameUtils.camelToSnake(properties.getSourceIdProperty()))
+                sourceIdProperty,
+                sourceIdColumn,
+                properties.getStorageIdColumn() != null ? properties.getStorageIdColumn() : sourceIdColumn
         );
         validateRule(rule);
         return rule;
@@ -135,15 +146,16 @@ public class EncryptMetadataRegistry {
             return;
         }
         if (rule.storageTable() == null || rule.storageTable().isBlank()) {
-            throw new IllegalArgumentException("Separate-table encrypted field must define storageTable: " + rule.property());
+            throw new IllegalArgumentException(
+                    "Separate-table encrypted field must define storageTable: " + rule.property());
         }
         if (!rule.hasAssistedQueryColumn()) {
-            throw new IllegalArgumentException("Separate-table encrypted field must define assistedQueryColumn: " + rule.property());
+            throw new IllegalArgumentException(
+                    "Separate-table encrypted field must define assistedQueryColumn: " + rule.property());
         }
     }
 
     private boolean isCandidateType(Class<?> type) {
-        // 只对“像实体”的类型做规则解析，避免把 String、基础类型或 JDK 类型误当成业务对象。
         return type != null
                 && !type.isPrimitive()
                 && !type.getName().startsWith("java.")

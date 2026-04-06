@@ -11,10 +11,10 @@ import tech.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import tech.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 
 /**
- * 查询结果解密器。
+ * Decrypts MyBatis query results in place.
  *
- * <p>只对声明过加密规则的实体对象执行字段解密，避免对普通 DTO、Map 或无关对象做误处理。
- * 当前实现按对象属性进行原地修改，因此要求结果对象具备可读写属性。</p>
+ * <p>The decryptor only handles entity types that have registered encryption metadata.
+ * Plain maps and unrelated result objects are ignored.</p>
  */
 public class ResultDecryptor {
 
@@ -31,12 +31,10 @@ public class ResultDecryptor {
     }
 
     /**
-     * 对查询结果做统一解密。
+     * Decrypts a single result object or a collection result returned by MyBatis.
      *
-     * <p>支持单对象和集合结果，集合场景会逐个元素处理。</p>
-     *
-     * @param resultObject MyBatis 返回的结果对象
-     * @return 解密后的原对象
+     * @param resultObject query result
+     * @return the same instance after decryption and optional separate-table hydration
      */
     public Object decrypt(Object resultObject) {
         if (resultObject == null) {
@@ -53,6 +51,11 @@ public class ResultDecryptor {
         return resultObject;
     }
 
+    /**
+     * Decrypts encrypted properties for a single entity instance.
+     *
+     * @param candidate entity instance returned by MyBatis
+     */
     private void decryptSingle(Object candidate) {
         if (candidate == null || candidate instanceof Map<?, ?>) {
             return;

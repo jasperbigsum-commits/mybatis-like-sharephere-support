@@ -28,10 +28,10 @@ import tech.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
         @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class})
 })
 /**
- * MyBatis 插件入口。
+ * MyBatis plugin entry point.
  *
- * <p>在 SQL 发送到数据库前完成改写，在结果对象返回业务层前完成解密。
- * 该类只做生命周期接入和上下文拼装，具体规则判断与改写实现下沉到核心组件。</p>
+ * <p>Rewrites SQL before execution, synchronizes separate encrypted tables after writes,
+ * and decrypts query results before they are returned to business code.</p>
  */
 public class DatabaseEncryptionInterceptor implements Interceptor {
 

@@ -62,9 +62,11 @@ import tech.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationExcept
 import tech.jasper.mybatis.encrypt.util.NameUtils;
 
 /**
- * SQL 闂傚倷娴囬妴鈧柛瀣崌閺岋綁鎮㈤崨濠勫嚒闂佸搫鎳庨幗婊堝焵椤掍緡鍟忛柛鐘愁殔鐓ゆ慨妞诲亾妤犵偞鐗犻獮鏍ㄦ媴閼? *
- * <p>闂備浇宕垫慨鏉懨洪姀銈呯？鐎规洖娲﹂崑鏍ㄣ亜閹板墎鐣遍柛娆忥攻閵囧嫰寮介妸褉妲堢紓浣藉蔼椤曆囨箒闂佺粯蓱瑜板啴銆傞搹顐ょ闁割偆鍠庨悘瀵糕偓娈垮枤閺咁偆鍒掑▎鎴炲磯闁靛鍎哄ú顓㈡⒒閸屾瑧璐伴柛瀣噹鍗遍柟鐑樻⒐椤愯姤銇勯幇鍫曟闁哄拋鍓涢埀顒€鍘滈崑鎾绘煕閹板吀鎲炬俊鎻掔秺閺岋綁鎮╅崘鎻捫佺紓鍌氱М閸嬫捇鎮跺顓犳噰闁?MyBatis 闂傚倷绀侀幉锟犮€冮崨鏉戠柈闁秆勵殕閸庡秹鏌曡箛瀣偓鏇犵不閵壯勫枑闁硅揪璐熼埀顑跨窔楠炲鏁傞挊澶婂?SQL闂傚倷鐒︾€笛呯矙閹达附鍤愭い鏍仦閸ゆ劙鏌ｉ弮鍌氬付闁哄嫨鍎靛鍫曟倷閺夋埈妫嗛梺鐓庣秺缁犳牠骞冨畡鎵虫瀻闊洦鎼╂禒濂告⒑閸撹尙鍘涢柛銊ョ埣閻涱喗鎯旈姀銏㈢槇婵炶揪绲介幗婊兾ｉ敐澶嬧拺闁告稑锕ラ埛鎺戔攽椤旇姤灏﹂柟顖欑窔楠炲鏁冮埀顒傜矆閸℃ü绻嗛柣鎰皺濮ｇ偤鏌? * 闂備礁鎼ˇ顖炴偋閸℃稑绠犻幖娣灪閸欏繑銇勮箛鎾跺闁藉啰鍠栭弻鏇熷緞濡厧甯ラ梺鎼炲€曠€氫即寮诲☉銏犵闁瑰灝鍟悾鍫曟⒑?LIKE 闂傚倷绀侀幖顐ゆ偖椤愶箑纾块柟缁㈠櫘閺佸淇婇妶鍛櫣缂佲偓閸℃ü绻嗛柕鍫濆閸斿秹鏌￠崱鈺佸籍闁哄本鐩獮鍥敇閻樺啿娅戦梻浣虹《閺呮盯鎳熼鐑囩稏闁靛繈鍊栭弲鏌ユ煕閵夘垳宀涢柛瀣尭椤粓鍩€椤掑嫬绠氶柛鎰靛枛缁€瀣亜韫囨挻顥犵€涙繄绱撻崒姘偓鎼佸窗濮樿泛绐楅柟鎹愵嚙閻掑灚銇勯幒鍡椾壕闂佺锕ら幗婊呮閻愮鍋撻敐搴℃灈缂佲偓閸懇鍋撻獮鍨姎闁硅櫕鍔欏鑸电鐎ｎ偆鍘藉┑鐘诧工閹冲酣銆傞崗闂寸箚闁告瑥顦悘鈺傜箾閹寸姵鏆い銏＄懇濮婅崵鈧數顭堟晶楣冩⒒娴ｅ憡鍟炵痪鏉跨Ч瀹曞綊鎮㈤悡搴ｅ姦濡炪倖甯婇懗鍫曟儗閸℃瑧纾肩紓浣股戦惃鎴︽煃瑜滈崜娑㈠箠閹剧粯鍋嬪┑鐘叉祩閺佸棙绻濇繝鍌涘櫤闁稿繑绮嶉妵鍕棘閸喖杈呴梺绋款儐閹告悂鍩為幋锕€绠婚柛鎾茶兌瀹?
- * 闂備浇顕х花鑲╁緤婵犳熬缍栧璺好″☉銏犖ч柛娑变簼閻忓啴姊洪崫鍕婵ǜ鍔庣划缁樼鐎ｎ偄浠梺鎼炲劵闂勫嫮绮婇悧鍫涗簻闁哄洦锚閻忣亞绱掔€ｎ亷鏀荤€垫澘瀚埀顒婄秮濞佳勪繆瑜忕槐鎺旂磼閵忕姴瀛ｉ梺鍝ュУ閼归箖鍩㈤幘璇茬闁挎洍鍋撶紒鐘冲▕閺岀喖鎮滃Ο铏逛患缂佺偓婢樼粔褰掑蓟閺囥垹骞㈤柡鍥╁枔閵堜即鏌ｆ惔锛勪粵闁绘濮撮悾鐑藉礈娴ｆ彃浜炬繛鎴炵懐閻掍粙鏌涘▎灞戒壕闂備浇宕垫慨鏉懨洪姀銈呭瀭鐟滅増甯掔粻顖炴煟濡も偓閻楀棛娆㈤悙纰樺亾楠炲灝鍔氭俊顐ｇ懅瀵板﹥绂掔€ｎ偄鈧灚绻涢幋鐐垫噧濠殿喖鐗撻弻锝夊箼閸曨厾锛熼梺褰掝棑婵炩偓濠殿喒鍋撻梺闈涢獜缁辨洟宕欐禒瀣拺閻熸瑥瀚懜顏堟煕鎼淬劋鎲惧┑锛勬暬楠炲鎮╅崘宸紩闂備線娼ч¨鈧紒鍙夋そ瀹?/p>
+ * SQL rewrite engine.
+ *
+ * <p>Parses MyBatis SQL and rewrites encrypted fields, assisted query fields,
+ * and LIKE helper fields before execution. The implementation fails fast for
+ * unsupported range, sort, and ambiguous query scenarios.</p>
  */
 public class SqlRewriteEngine {
 
@@ -83,11 +85,11 @@ public class SqlRewriteEngine {
     }
 
     /**
-     * 闂傚倷娴囬妴鈧柛瀣崌閺岋綁鎮㈤崨濠勫嚒闂佸搫鎳愰…鍫ュ煡婢舵劕绠绘い鏍ㄧ煯婢规洘绻?MyBatis 闂傚倷绀佸﹢閬嶆偡閹惰棄骞㈤柍鍝勫€归弶鎼佹⒑閼姐倕孝婵炲樊鍙冨銊╂焼瀹ュ棗鍓虫繛鏉戝悑濞兼瑨绻?     *
-     * <p>婵犵數濮烽。浠嬪焵椤掆偓閸熷潡鍩€椤掆偓缂嶅﹪骞?SQL 婵犵數鍋為崹鍫曞箰閸濄儳鐭撻柣銏㈡暩閻挾鎲搁悧鍫濈瑨闁活厽顨呴埞鎴︽偐閹绘巻鍋撻幖浣稿惞闁圭儤鍩堥悢鍡涙煕閿旇骞栨い锝呭悑娣囧﹪宕ｆ径濠勪紝闂佽鍨伴崯鏉戠暦閻旂⒈鏁冮柕蹇婃櫆婵傛牠姊虹拠鏌ュ弰婵炰匠鍏炬稑顭ㄩ崼婢儵鏌涢幇闈涙灈缂佺媴缍侀弻鈥崇暤椤旂厧鏋ゆ繛濂镐憾閺岋絾鎯旈妸锔介敪濠碘槅鍋呴〃濠囧箖妤︽妲婚梺宕囩帛閹搁箖宕版繝鍐ㄧ窞鐎光偓閳ь剟藝椤曗偓閺岋綀绠涢幘鍓侇唶濠碘槅鍋呯划搴ㄥ箲閵忋倕绠ｉ柨鏇楀亾闁?unchanged 缂傚倸鍊搁崐鐑芥倿閿曞倸绠板┑鐘崇閸婅泛顭块懜闈涘鏉?/p>
+     * Rewrite one MyBatis execution request.
      *
-     * @param mappedStatement 闂佽崵鍠愮划搴㈡櫠濡ゅ懎绠伴柛娑橈攻濞呯娀鏌ｅΟ娆惧殭缂佺姰鍎抽幉鎼佸箣閿旇　鍋撴笟鈧獮瀣晜閽樺澹勯梻浣告啞濞诧箓宕滃鐐解偓鏍⒑鐠囪尙绠扮紒缁樺姉閳ь剚鍑归崹鍫曘€佸璺侯潊闁靛牆鎳愰悡?     * @param boundSql MyBatis 闂傚倷鐒﹂惇褰掑垂婵犳艾绐楅柟鐗堟緲閸ㄥ倹鎱ㄥΟ鍨厫闁?SQL 婵犵數鍋為崹鍫曞箰閸涘娈界紒瀣儥閸ゆ洘銇勯幒鎴濐仼闁哄绀佽灋濡娴囬崗宀勬煟閻旂濮囬柍钘夘樀楠炴﹢骞囨担绋垮闂?
-     * @return 闂傚倷娴囬妴鈧柛瀣崌閺岋綁鎮㈤崨濠勫嚒闂佸搫鎳庨幗婊呮閹惧瓨濯撮悷娆忓闂夊秹姊?
+     * @param mappedStatement current mapped statement
+     * @param boundSql original SQL and parameter context
+     * @return rewrite result; unchanged when no encryption rule matches
      */
     public RewriteResult rewrite(MappedStatement mappedStatement, BoundSql boundSql) {
         metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject());
@@ -240,7 +242,7 @@ public class SqlRewriteEngine {
         }
         plainSelect.setWhere(rewriteCondition(plainSelect.getWhere(), tableContext, context));
         stripSeparateTableSelectItems(plainSelect, tableContext);
-        // 闂傚倷绀佸﹢閬嶅磿閵堝洦鏆滈柟鐑樻婵櫕銇勯幘璺盒ｉ悗姘閵囧嫰骞樼€靛摜鐣奸梺姹囧€曢幊姗€寮婚敓鐘茬妞ゅ繐瀚呴敐鍥╂／妞ゆ挾鍋熼崺锝夋煙椤旇崵鐭欑€规洩绻濋幃娆戔偓娑櫭崜楣冩⒑濮瑰洤鐒洪柛銊ゅ嵆閹崇喖顢涢悙鎻掔€銈呯箰閻楀棛绮婚敐澶嬬厸鐎广儱娴烽崢鎺懨归敐鍛儓閻庡灚褰冮埞鎴︽偐閹绘巻鍋撻幖浣瑰€舵繛鍡樻尰閻撴洘绻涢崱妯忣亪鎮橀敂鐣岀缁炬澘宕晶瀵糕偓娈垮枛閻°劌顕ラ崟顓犵煓闁圭瀛╁▓銊╂⒒娴ｇ懓顕滅紒瀣灴閹崇喖顢涘В顓炴惈椤劑宕橀悙顒併€冮梻渚€娼ч悧鍡涙偋韫囨洜涓嶇憸鐗堝笚閳锋垿鏌熺紒妯虹闁诲繗椴哥换娑㈠箵閹烘挸浠村Δ鐘靛仦鐢剝淇婇悜钘壩ㄩ柨婵嗗濠⑩偓闂備浇宕垫慨鐢稿礉閹达箑纾块柟缁㈠枛閻掑灚銇勯幒鍡椾壕婵犻潧鍊瑰鑽ゅ垝椤撶喎绶為柟閭﹀墮瀵嘲顪冮妶鍡欏闁活収鍠氬Σ鎰板Ω閳哄倻鍘遍柣搴秵閸犳寮柆宥嗙厸闁稿本鐟ч崝宥嗙箾閻撳寒鐓肩€规洖鐖兼俊鐑藉閻樺崬顥?        validateOrderBy(plainSelect.getOrderByElements(), tableContext);
+        // ORDER BY on encrypted fields is rejected because helper columns cannot preserve sort semantics safely.
     }
 
     private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
@@ -716,6 +718,7 @@ public class SqlRewriteEngine {
             // Shadow-column parameters must be inserted at the current position so that SQL placeholders stay aligned.
             parameterMappings.add(currentParameterIndex, new ParameterMapping.Builder(configuration, property,
                     value == null ? String.class : value.getClass()).build());
+            boundSql.setAdditionalParameter(property, value);
             maskedParameters.put(property, mask(maskingMode, value));
             currentParameterIndex++;
             changed = true;
@@ -733,6 +736,7 @@ public class SqlRewriteEngine {
                     value == null ? String.class : value.getClass())
                     .jdbcType(original.getJdbcType())
                     .build();
+            parameterMappings.set(parameterIndex, rewritten);
             boundSql.setAdditionalParameter(property, value);
             maskedParameters.put(property, mask(maskingMode, value));
             changed = true;

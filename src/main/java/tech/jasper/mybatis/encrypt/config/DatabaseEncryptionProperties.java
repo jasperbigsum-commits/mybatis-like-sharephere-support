@@ -6,29 +6,53 @@ import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import tech.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 
-@ConfigurationProperties(prefix = "mybatis.encrypt")
 /**
- * 数据库字段加密插件配置。
+ * External configuration for the database encryption plugin.
  *
- * <p>配置模型分为全局开关和按表、按字段的规则定义两层。该类只负责承载外部配置，
- * 不承担规则合并或推导逻辑，真正的规则组装由 {@code EncryptMetadataRegistry} 完成。</p>
+ * <p>The properties include global switches, SQL dialect selection, automatic entity scanning,
+ * and per-table field encryption rules.</p>
  */
+@ConfigurationProperties(prefix = "mybatis.encrypt")
 public class DatabaseEncryptionProperties {
 
+    /**
+     * Master switch for the plugin.
+     */
     private boolean enabled = true;
 
+    /**
+     * Whether missing metadata should fail fast instead of silently skipping encryption.
+     */
     private boolean failOnMissingRule = true;
 
+    /**
+     * Whether rewritten SQL should be logged with masked parameter values.
+     */
     private boolean logMaskedSql = true;
 
+    /**
+     * Default key used by built-in cipher algorithms when no custom bean configuration overrides it.
+     */
     private String defaultCipherKey = "change-me-before-production";
 
+    /**
+     * Enables startup scanning of entity annotations to pre-register encryption metadata.
+     */
     private boolean scanEntityAnnotations = true;
 
+    /**
+     * Base packages used by the entity scanner. When empty, Spring Boot auto-configuration packages are used.
+     */
     private List<String> scanPackages = List.of();
 
+    /**
+     * SQL dialect used for quoting identifiers in rewritten SQL.
+     */
     private SqlDialect sqlDialect = SqlDialect.MYSQL;
 
+    /**
+     * Explicit per-table encryption rules keyed by logical name or table alias in configuration.
+     */
     private Map<String, TableRuleProperties> tables = new LinkedHashMap<>();
 
     public boolean isEnabled() {
@@ -95,10 +119,19 @@ public class DatabaseEncryptionProperties {
         this.tables = tables;
     }
 
+    /**
+     * Table-level rule definition bound from configuration.
+     */
     public static class TableRuleProperties {
 
+        /**
+         * Physical table name. When omitted, the outer map key is treated as the default table name.
+         */
         private String table;
 
+        /**
+         * Field rules keyed by entity property name.
+         */
         private Map<String, FieldRuleProperties> fields = new LinkedHashMap<>();
 
         public String getTable() {
@@ -118,30 +151,69 @@ public class DatabaseEncryptionProperties {
         }
     }
 
+    /**
+     * Field-level encryption rule definition.
+     */
     public static class FieldRuleProperties {
 
+        /**
+         * Physical column name in the business table.
+         */
         private String column;
 
+        /**
+         * Storage mode for the encrypted field.
+         */
         private FieldStorageMode storageMode = FieldStorageMode.SAME_TABLE;
 
+        /**
+         * External storage table used when {@link #storageMode} is {@code SEPARATE_TABLE}.
+         */
         private String storageTable;
 
+        /**
+         * Ciphertext column in the external storage table.
+         */
         private String storageColumn;
 
+        /**
+         * Entity property used as the business row identifier.
+         */
         private String sourceIdProperty = "id";
 
+        /**
+         * Source identifier column in the business table.
+         */
         private String sourceIdColumn;
 
+        /**
+         * Identifier column in the external storage table.
+         */
         private String storageIdColumn;
 
+        /**
+         * Cipher algorithm bean name.
+         */
         private String cipherAlgorithm = "sm4";
 
+        /**
+         * Assisted equality lookup column that stores hash or deterministic token values.
+         */
         private String assistedQueryColumn;
 
+        /**
+         * Assisted equality algorithm bean name.
+         */
         private String assistedQueryAlgorithm = "sm3";
 
+        /**
+         * Optional LIKE lookup column.
+         */
         private String likeQueryColumn;
 
+        /**
+         * LIKE lookup algorithm bean name.
+         */
         private String likeQueryAlgorithm = "normalizedLike";
 
         public String getColumn() {
@@ -150,14 +222,6 @@ public class DatabaseEncryptionProperties {
 
         public void setColumn(String column) {
             this.column = column;
-        }
-
-        public String getCipherAlgorithm() {
-            return cipherAlgorithm;
-        }
-
-        public void setCipherAlgorithm(String cipherAlgorithm) {
-            this.cipherAlgorithm = cipherAlgorithm;
         }
 
         public FieldStorageMode getStorageMode() {
@@ -206,6 +270,14 @@ public class DatabaseEncryptionProperties {
 
         public void setStorageIdColumn(String storageIdColumn) {
             this.storageIdColumn = storageIdColumn;
+        }
+
+        public String getCipherAlgorithm() {
+            return cipherAlgorithm;
+        }
+
+        public void setCipherAlgorithm(String cipherAlgorithm) {
+            this.cipherAlgorithm = cipherAlgorithm;
         }
 
         public String getAssistedQueryColumn() {

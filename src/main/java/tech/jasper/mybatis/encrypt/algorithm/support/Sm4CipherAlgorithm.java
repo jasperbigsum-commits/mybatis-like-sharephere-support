@@ -13,6 +13,12 @@ import javax.crypto.spec.SecretKeySpec;
 import tech.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
+/**
+ * 基于 SM4-GCM 的国密主加密算法实现。
+ *
+ * <p>每次加密使用独立随机 IV，输出格式为 Base64([IV][ciphertext+tag])。
+ * 密钥由任意字符串经 SM3 摘要后截取前 16 字节派生。依赖 BouncyCastle 提供 SM4/SM3 支持。</p>
+ */
 public class Sm4CipherAlgorithm implements CipherAlgorithm {
 
     private static final String TRANSFORMATION = "SM4/GCM/NoPadding";

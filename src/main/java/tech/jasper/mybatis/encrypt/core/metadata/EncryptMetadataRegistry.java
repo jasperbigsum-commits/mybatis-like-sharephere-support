@@ -51,7 +51,22 @@ public class EncryptMetadataRegistry {
         if (!isCandidateType(entityType)) {
             return Optional.empty();
         }
-        return Optional.ofNullable(entityRules.computeIfAbsent(entityType, this::loadEntityRule));
+        // 先尝试无锁读取，避免每次都进入 synchronized 块
+        EncryptTableRule cached = entityRules.get(entityType);
+        if (cached != null) {
+            return Optional.of(cached);
+        }
+        // loadEntityRule 内部会操作 tableRules，不能在 ConcurrentHashMap.computeIfAbsent 中执行，
+        // 否则可能触发递归更新或死锁。改用 synchronized 保证安全。
+        synchronized (entityRules) {
+            cached = entityRules.get(entityType);
+            if (cached != null) {
+                return Optional.of(cached);
+            }
+            EncryptTableRule rule = loadEntityRule(entityType);
+            entityRules.put(entityType, rule);
+            return Optional.ofNullable(rule);
+        }
     }
 
     /**

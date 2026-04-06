@@ -20,6 +20,10 @@ public enum SqlDialect {
         if (identifier == null || identifier.isBlank()) {
             return identifier;
         }
+        // 避免对已引用的标识符重复添加引号
+        if (identifier.startsWith(openQuote) && identifier.endsWith(closeQuote)) {
+            return identifier;
+        }
         return openQuote + identifier + closeQuote;
     }
 }

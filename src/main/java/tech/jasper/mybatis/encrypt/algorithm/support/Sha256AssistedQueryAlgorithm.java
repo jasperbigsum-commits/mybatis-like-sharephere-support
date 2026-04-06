@@ -6,6 +6,11 @@ import java.security.MessageDigest;
 import tech.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
+/**
+ * 基于 SHA-256 的辅助等值查询算法实现。
+ *
+ * <p>将明文做 SHA-256 摘要后输出为小写十六进制字符串，用于辅助查询列的等值匹配。</p>
+ */
 public class Sha256AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
 
     @Override

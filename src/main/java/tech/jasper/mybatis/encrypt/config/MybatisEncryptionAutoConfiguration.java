@@ -29,16 +29,16 @@ import tech.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import tech.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import tech.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 
-@AutoConfiguration(after = MybatisAutoConfiguration.class)
-@ConditionalOnClass({MybatisAutoConfiguration.class, Interceptor.class})
-@ConditionalOnProperty(prefix = "mybatis.encrypt", name = "enabled", havingValue = "true", matchIfMissing = true)
-@EnableConfigurationProperties(DatabaseEncryptionProperties.class)
 /**
  * 字段加密插件自动配置入口。
  *
  * <p>负责注册默认算法、规则中心、SQL 改写器、结果解密器和 MyBatis 拦截器。
  * 业务方可以通过声明同名 Bean 覆盖默认算法实现。</p>
  */
+@AutoConfiguration(after = MybatisAutoConfiguration.class)
+@ConditionalOnClass({MybatisAutoConfiguration.class, Interceptor.class})
+@ConditionalOnProperty(prefix = "mybatis.encrypt", name = "enabled", havingValue = "true", matchIfMissing = true)
+@EnableConfigurationProperties(DatabaseEncryptionProperties.class)
 public class MybatisEncryptionAutoConfiguration {
 
     @Bean(name = "sm4")

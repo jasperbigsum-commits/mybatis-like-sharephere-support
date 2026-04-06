@@ -22,17 +22,17 @@ import tech.jasper.mybatis.encrypt.core.rewrite.RewriteResult;
 import tech.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import tech.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 
-@Intercepts({
-        @Signature(type = StatementHandler.class, method = "prepare", args = {Connection.class, Integer.class}),
-        @Signature(type = ResultSetHandler.class, method = "handleResultSets", args = {Statement.class}),
-        @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class})
-})
 /**
  * MyBatis plugin entry point.
  *
  * <p>Rewrites SQL before execution, synchronizes separate encrypted tables after writes,
  * and decrypts query results before they are returned to business code.</p>
  */
+@Intercepts({
+        @Signature(type = StatementHandler.class, method = "prepare", args = {Connection.class, Integer.class}),
+        @Signature(type = ResultSetHandler.class, method = "handleResultSets", args = {Statement.class}),
+        @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class})
+})
 public class DatabaseEncryptionInterceptor implements Interceptor {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseEncryptionInterceptor.class);

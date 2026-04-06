@@ -7,15 +7,15 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import tech.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 
-@Documented
-@Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.FIELD)
 /**
  * 声明实体字段的加密规则。
  *
  * <p>该注解用于把业务属性映射到数据库中的主加密列、辅助等值查询列和 LIKE 查询列。
  * 当字段上未显式指定列名时，框架会基于属性名按下划线风格推导默认列名。</p>
  */
+@Documented
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.FIELD)
 public @interface EncryptField {
 
     /**

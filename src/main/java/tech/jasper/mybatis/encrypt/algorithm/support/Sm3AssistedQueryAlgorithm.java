@@ -6,6 +6,12 @@ import java.security.MessageDigest;
 import tech.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
+/**
+ * 基于 SM3 的国密辅助等值查询算法实现。
+ *
+ * <p>将明文做 SM3 摘要后输出为小写十六进制字符串。使用 ThreadLocal 复用摘要实例以兼顾线程安全和吞吐。
+ * 依赖 BouncyCastle 提供 SM3 支持。</p>
+ */
 public class Sm3AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
 
     // 摘要对象本身不是线程安全的，按线程复用可以兼顾安全性和吞吐。

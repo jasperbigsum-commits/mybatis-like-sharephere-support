@@ -29,6 +29,10 @@ import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
  *
  * <p>负责两类工作：一是在写操作后同步独立加密表，二是在查询结果返回后按主键批量回填并解密
  * 独立加密表中的字段。</p>
+ *
+ * <p><strong>事务限制：</strong>当前实现通过 DataSource 获取独立连接执行 SQL，
+ * 不参与 MyBatis 当前事务。如果业务写操作回滚，独立加密表的变更不会自动回滚。
+ * 在强一致性场景下，建议配合事务型 DataSource（如 Spring 的 TransactionAwareDataSourceProxy）使用。</p>
  */
 public class SeparateTableEncryptionManager {
 
@@ -100,16 +104,16 @@ public class SeparateTableEncryptionManager {
     }
 
     private void hydrateCollection(Collection<?> results) {
-        Map<Class<?>, List<Object>> groups = results.stream()
+        Map<? extends Class<?>, ? extends List<?>> groups = results.stream()
                 .filter(Objects::nonNull)
                 .filter(candidate -> !(candidate instanceof Map<?, ?>))
                 .collect(Collectors.groupingBy(Object::getClass, LinkedHashMap::new, Collectors.toList()));
-        for (Map.Entry<Class<?>, List<Object>> entry : groups.entrySet()) {
+        for (Map.Entry<? extends Class<?>, ? extends List<?>> entry : groups.entrySet()) {
             EncryptTableRule tableRule = metadataRegistry.findByEntity(entry.getKey()).orElse(null);
             if (tableRule == null) {
                 continue;
             }
-            List<Object> candidates = entry.getValue();
+            List<?> candidates = entry.getValue();
             for (EncryptColumnRule rule : tableRule.getColumnRules()) {
                 if (!rule.isStoredInSeparateTable()) {
                     continue;
@@ -119,7 +123,7 @@ public class SeparateTableEncryptionManager {
         }
     }
 
-    private void hydrateRule(List<Object> candidates, EncryptColumnRule rule) {
+    private void hydrateRule(List<?> candidates, EncryptColumnRule rule) {
         Map<Object, Object> metaById = new LinkedHashMap<>();
         for (Object candidate : candidates) {
             MetaObject metaObject = SystemMetaObject.forObject(candidate);

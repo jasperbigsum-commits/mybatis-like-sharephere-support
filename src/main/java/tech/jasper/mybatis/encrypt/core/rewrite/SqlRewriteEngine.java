@@ -1,47 +1,16 @@
 package tech.jasper.mybatis.encrypt.core.rewrite;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import net.sf.jsqlparser.expression.Alias;
-import net.sf.jsqlparser.expression.BinaryExpression;
-import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.expression.Function;
-import net.sf.jsqlparser.expression.JdbcParameter;
-import net.sf.jsqlparser.expression.LongValue;
-import net.sf.jsqlparser.expression.NullValue;
-import net.sf.jsqlparser.expression.Parenthesis;
-import net.sf.jsqlparser.expression.StringValue;
-import net.sf.jsqlparser.expression.operators.relational.ExistsExpression;
+import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
-import net.sf.jsqlparser.expression.operators.relational.Between;
-import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
-import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
-import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
-import net.sf.jsqlparser.expression.operators.relational.InExpression;
-import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
-import net.sf.jsqlparser.expression.operators.relational.MinorThan;
-import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
-import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.*;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.delete.Delete;
 import net.sf.jsqlparser.statement.insert.Insert;
-import net.sf.jsqlparser.statement.select.FromItem;
-import net.sf.jsqlparser.statement.select.Join;
-import net.sf.jsqlparser.statement.select.OrderByElement;
-import net.sf.jsqlparser.statement.select.PlainSelect;
-import net.sf.jsqlparser.statement.select.Select;
-import net.sf.jsqlparser.statement.select.SelectItem;
-import net.sf.jsqlparser.statement.select.SelectItemVisitorAdapter;
-import net.sf.jsqlparser.statement.select.Values;
+import net.sf.jsqlparser.statement.select.*;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.update.UpdateSet;
 import org.apache.ibatis.mapping.BoundSql;
@@ -60,6 +29,8 @@ import tech.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import tech.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import tech.jasper.mybatis.encrypt.util.NameUtils;
+
+import java.util.*;
 
 /**
  * SQL rewrite engine.
@@ -127,12 +98,11 @@ public class SqlRewriteEngine {
             return;
         }
         Values values = insert.getValues();
-        if (values == null || !(values.getExpressions() instanceof ExpressionList)) {
+        if (values == null || values.getExpressions() == null) {
             throw new UnsupportedEncryptedOperationException("Only VALUES inserts are supported for encrypted tables.");
         }
-        ExpressionList expressionList = (ExpressionList) values.getExpressions();
+        ExpressionList<?> originalExpressions = values.getExpressions();
         List<Column> originalColumns = new ArrayList<>(insert.getColumns());
-        List<Expression> originalExpressions = new ArrayList<>(expressionList.getExpressions());
         List<Column> rewrittenColumns = new ArrayList<>();
         List<Expression> rewrittenExpressions = new ArrayList<>();
         for (int index = 0; index < originalColumns.size(); index++) {
@@ -177,18 +147,18 @@ public class SqlRewriteEngine {
         for (UpdateSet updateSet : update.getUpdateSets()) {
             List<Column> originalColumns = new ArrayList<>(updateSet.getColumns());
             ExpressionList<Expression> updateValues = (ExpressionList<Expression>) updateSet.getValues();
-            List<Expression> originalExpressions = new ArrayList<>(updateValues.getExpressions());
             List<Column> rewrittenColumns = new ArrayList<>();
             List<Expression> rewrittenExpressions = new ArrayList<>();
             for (int index = 0; index < originalColumns.size(); index++) {
                 Column column = originalColumns.get(index);
-                Expression expression = originalExpressions.get(index);
+                Expression expression = updateValues.get(index);
                 EncryptColumnRule rule = tableContext.resolve(column).orElse(null);
                 if (rule == null) {
                     rewrittenColumns.add(column);
                     rewrittenExpressions.add(passthroughWriteExpression(expression, context));
                     continue;
                 }
+
                 if (rule.isStoredInSeparateTable()) {
                     consumeExpression(expression, context);
                     context.changed = true;
@@ -210,8 +180,8 @@ public class SqlRewriteEngine {
             }
             updateSet.getColumns().clear();
             updateSet.getColumns().addAll(rewrittenColumns);
-            updateValues.getExpressions().clear();
-            updateValues.getExpressions().addAll(rewrittenExpressions);
+            updateValues.clear();
+            updateValues.addAll(rewrittenExpressions);
         }
         // Only the WHERE clause is redirected to query columns; the SET clause still writes ciphertext to the main column.
         update.setWhere(rewriteCondition(update.getWhere(), tableContext, context));
@@ -227,7 +197,8 @@ public class SqlRewriteEngine {
     }
 
     private void rewriteSelect(Select select, RewriteContext context) {
-        if (!(select.getSelectBody() instanceof PlainSelect plainSelect)) {
+        // JSqlParser 4.9+: Select 本身即 SelectBody，直接判断是否为 PlainSelect
+        if (!(select instanceof PlainSelect plainSelect)) {
             throw new UnsupportedEncryptedOperationException("Only plain select is supported for encrypted SQL rewrite.");
         }
         TableContext tableContext = new TableContext();
@@ -242,15 +213,21 @@ public class SqlRewriteEngine {
         }
         plainSelect.setWhere(rewriteCondition(plainSelect.getWhere(), tableContext, context));
         stripSeparateTableSelectItems(plainSelect, tableContext);
-        // ORDER BY on encrypted fields is rejected because helper columns cannot preserve sort semantics safely.
+        validateOrderBy(plainSelect.getOrderByElements(), tableContext);
     }
 
+    // Parenthesis 在 JSqlParser 5.x 中已废弃但仍用于表示条件括号
     private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
         if (expression == null) {
             return null;
         }
-        if (expression instanceof Parenthesis parenthesis) {
-            parenthesis.setExpression(rewriteCondition(parenthesis.getExpression(), tableContext, context));
+        if (expression instanceof ParenthesedExpressionList parenthesis) {
+            parenthesis.replaceAll(o -> {
+                if (o instanceof Expression exp) {
+                    rewriteCondition(exp, tableContext, context);
+                }
+                return o;
+            });
             return parenthesis;
         }
         if (expression instanceof AndExpression andExpression) {
@@ -296,8 +273,8 @@ public class SqlRewriteEngine {
             return binaryExpression;
         }
         if (expression instanceof Function function && function.getParameters() != null) {
-            for (Object item : function.getParameters().getExpressions()) {
-                rewriteCondition((Expression) item, tableContext, context);
+            for (Expression item : function.getParameters()) {
+                rewriteCondition(item, tableContext, context);
             }
             return expression;
         }
@@ -375,14 +352,14 @@ public class SqlRewriteEngine {
         }
         // IN query uses the same target-column selection strategy as equality queries.
         String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.column();
-        if (!(expression.getRightExpression() instanceof ExpressionList expressionList)) {
+        expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
+        if (!(expression.getRightExpression() instanceof ExpressionList<?> expressionList)) {
             throw new UnsupportedEncryptedOperationException("Sub query IN is not supported on encrypted fields.");
         }
-        for (Object item : expressionList.getExpressions()) {
-            Expression current = (Expression) item;
-            rewriteOperand(current, context,
-                    rule.hasAssistedQueryColumn() ? transformAssisted(rule, readOperandValue(current, context))
-                            : transformCipher(rule, readOperandValue(current, context)),
+        for (Expression item : expressionList) {
+            rewriteOperand(item, context,
+                    rule.hasAssistedQueryColumn() ? transformAssisted(rule, readOperandValue(item, context))
+                            : transformCipher(rule, readOperandValue(item, context)),
                     rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
         }
         context.changed = true;
@@ -480,9 +457,6 @@ public class SqlRewriteEngine {
         if (expression instanceof LongValue longValue) {
             return longValue.getStringValue();
         }
-        if (expression instanceof NullValue) {
-            return null;
-        }
         return null;
     }
 
@@ -494,8 +468,12 @@ public class SqlRewriteEngine {
             context.consumeOriginal();
             return;
         }
-        if (expression instanceof Parenthesis parenthesis) {
-            consumeExpression(parenthesis.getExpression(), context);
+        if (expression instanceof ParenthesedExpressionList parenthesis) {
+            parenthesis.forEach(o -> {
+                if (o instanceof Expression exp) {
+                    consumeExpression(exp, context);
+                }
+            });
             return;
         }
         if (expression instanceof BinaryExpression binaryExpression) {
@@ -504,16 +482,16 @@ public class SqlRewriteEngine {
             return;
         }
         if (expression instanceof Function function && function.getParameters() != null) {
-            for (Object item : function.getParameters().getExpressions()) {
-                consumeExpression((Expression) item, context);
+            for (Expression item : function.getParameters()) {
+                consumeExpression(item, context);
             }
         }
     }
 
     private void consumeItemsList(Object itemsList, RewriteContext context) {
-        if (itemsList instanceof ExpressionList expressionList) {
-            for (Object item : expressionList.getExpressions()) {
-                consumeExpression((Expression) item, context);
+        if (itemsList instanceof ExpressionList<?> expressionList) {
+            for (Expression item : expressionList) {
+                consumeExpression(item, context);
             }
         }
     }
@@ -551,15 +529,9 @@ public class SqlRewriteEngine {
     }
 
     private boolean isSeparateTableSelectItem(SelectItem<?> item, TableContext tableContext) {
-        final boolean[] removable = {false};
-        item.accept(new SelectItemVisitorAdapter() {
-            @Override
-            public void visit(SelectItem selectExpressionItem) {
-                ColumnResolution resolution = resolveEncryptedColumn(selectExpressionItem.getExpression(), tableContext);
-                removable[0] = resolution != null && resolution.rule().isStoredInSeparateTable();
-            }
-        });
-        return removable[0];
+        Expression expression = item.getExpression();
+        ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+        return resolution != null && resolution.rule().isStoredInSeparateTable();
     }
 
     private void validateOrderBy(List<OrderByElement> orderByElements, TableContext tableContext) {
@@ -644,11 +616,8 @@ public class SqlRewriteEngine {
     private Column buildColumn(Column source, String targetColumn) {
         Column column = new Column(quote(targetColumn));
         if (source.getTable() != null && source.getTable().getName() != null) {
-            Table table = new Table(source.getTable().getName());
-            if (source.getTable().getAlias() != null) {
-                table.setAlias(new Alias(source.getTable().getAlias().getName(), false));
-            }
-            column.setTable(table);
+            // 只保留表引用名（可能是表名或别名），不复制 alias 以避免生成 "t AS t.`col`" 这样的错误 SQL
+            column.setTable(new Table(source.getTable().getName()));
         }
         return column;
     }

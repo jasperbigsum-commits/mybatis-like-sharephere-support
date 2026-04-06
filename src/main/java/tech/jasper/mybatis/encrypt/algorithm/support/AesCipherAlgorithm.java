@@ -13,6 +13,12 @@ import javax.crypto.spec.SecretKeySpec;
 import tech.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
+/**
+ * 基于 AES-256-GCM 的主加密算法实现。
+ *
+ * <p>每次加密使用独立随机 IV，输出格式为 Base64([IV][ciphertext+tag])。
+ * 密钥由任意字符串经 SHA-256 摘要后截取前 16 字节派生。</p>
+ */
 public class AesCipherAlgorithm implements CipherAlgorithm {
 
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";

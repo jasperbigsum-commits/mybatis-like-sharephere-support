@@ -81,3 +81,19 @@
 - 多表复杂子查询的深度重写
 - 自定义 SQL 日志框架的完全接管
 - 数据库函数中包裹加密字段的复杂表达式重写
+
+## 验证状态
+
+当前实现已经具备三层验证：
+
+1. 元数据与算法层单元测试
+2. SQL 改写矩阵单元测试
+3. 真实 MyBatis / Spring Boot 自动装配集成测试
+
+其中集成测试已经覆盖：
+
+- 同表加密字段的真实写入和解密读取
+- 独立加密表的真实同步、查询改写与结果回填
+- Spring Boot 自动装配场景下拦截器单次注册与执行链路正确性
+
+能力边界的细化说明见 [sql-support-matrix.md](E:/MyProject/IdeaProject/mybatis-like-sharephere-support/docs/sql-support-matrix.md)。

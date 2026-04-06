@@ -3,7 +3,6 @@ package tech.jasper.mybatis.encrypt.config;
 import java.util.Map;
 import javax.sql.DataSource;
 import org.apache.ibatis.plugin.Interceptor;
-import org.mybatis.spring.boot.autoconfigure.ConfigurationCustomizer;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -129,8 +128,4 @@ public class MybatisEncryptionAutoConfiguration {
         return new SeparateTableEncryptionManager(dataSource, metadataRegistry, algorithmRegistry, properties);
     }
 
-    @Bean
-    public ConfigurationCustomizer encryptionConfigurationCustomizer(DatabaseEncryptionInterceptor interceptor) {
-        return configuration -> configuration.addInterceptor(interceptor);
-    }
 }

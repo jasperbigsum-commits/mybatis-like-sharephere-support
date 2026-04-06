@@ -26,6 +26,7 @@ import tech.jasper.mybatis.encrypt.config.SqlDialect;
 import tech.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import tech.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import tech.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
+import tech.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import tech.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import tech.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import tech.jasper.mybatis.encrypt.util.NameUtils;
@@ -115,11 +116,11 @@ public class SqlRewriteEngine {
                 continue;
             }
             if (rule.isStoredInSeparateTable()) {
-                consumeExpression(expression, context);
+                discardExpression(expression, context);
                 context.changed = true;
                 continue;
             }
-            rewrittenColumns.add(column);
+            rewrittenColumns.add(new Column(quote(rule.storageColumn())));
             WriteValue writeValue = rewriteEncryptedWriteExpression(expression, rule, context);
             rewrittenExpressions.add(writeValue.expression());
             if (rule.hasAssistedQueryColumn()) {
@@ -160,11 +161,11 @@ public class SqlRewriteEngine {
                 }
 
                 if (rule.isStoredInSeparateTable()) {
-                    consumeExpression(expression, context);
+                    discardExpression(expression, context);
                     context.changed = true;
                     continue;
                 }
-                rewrittenColumns.add(column);
+                rewrittenColumns.add(buildColumn(column, rule.storageColumn()));
                 WriteValue writeValue = rewriteEncryptedWriteExpression(expression, rule, context);
                 rewrittenExpressions.add(writeValue.expression());
                 if (rule.hasAssistedQueryColumn()) {
@@ -197,26 +198,52 @@ public class SqlRewriteEngine {
     }
 
     private void rewriteSelect(Select select, RewriteContext context) {
-        // JSqlParser 4.9+: Select 本身即 SelectBody，直接判断是否为 PlainSelect
+        rewriteSelect(select, context, ProjectionMode.NORMAL);
+    }
+
+    private void rewriteSelect(Select select, RewriteContext context, ProjectionMode projectionMode) {
+        if (select instanceof SetOperationList setOperationList) {
+            for (Select child : setOperationList.getSelects()) {
+                rewriteSelect(child, context, projectionMode);
+            }
+            return;
+        }
+        if (select instanceof ParenthesedSelect parenthesedSelect) {
+            if (parenthesedSelect.getSelect() != null) {
+                rewriteSelect(parenthesedSelect.getSelect(), context, projectionMode);
+            }
+            return;
+        }
         if (!(select instanceof PlainSelect plainSelect)) {
-            throw new UnsupportedEncryptedOperationException("Only plain select is supported for encrypted SQL rewrite.");
+            throw new UnsupportedEncryptedOperationException("Only plain select and set-operation select are supported for encrypted SQL rewrite.");
         }
         TableContext tableContext = new TableContext();
-        registerFromItem(tableContext, plainSelect.getFromItem());
+        registerFromItem(tableContext, plainSelect.getFromItem(), context);
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
-                registerFromItem(tableContext, join.getRightItem());
+                registerFromItem(tableContext, join.getRightItem(), context);
             }
         }
+        plainSelect.setWhere(rewriteCondition(plainSelect.getWhere(), tableContext, context));
+        plainSelect.setHaving(rewriteCondition(plainSelect.getHaving(), tableContext, context));
+        plainSelect.setQualify(rewriteCondition(plainSelect.getQualify(), tableContext, context));
         if (tableContext.isEmpty()) {
             return;
         }
-        plainSelect.setWhere(rewriteCondition(plainSelect.getWhere(), tableContext, context));
-        stripSeparateTableSelectItems(plainSelect, tableContext);
+        validateDistinct(plainSelect.getDistinct(), plainSelect.getSelectItems(), tableContext);
+        validateAggregateExpressions(plainSelect.getSelectItems(), plainSelect.getHaving(), plainSelect.getQualify(), tableContext);
+        if (projectionMode == ProjectionMode.COMPARISON) {
+            rewriteComparisonSelectItems(plainSelect, tableContext);
+        } else {
+            rewriteSelectItems(plainSelect, tableContext, projectionMode);
+        }
+        validateAnalyticExpressions(plainSelect.getSelectItems(), tableContext);
+        validateWindowDefinitions(plainSelect.getWindowDefinitions(), tableContext);
+        validateGroupBy(plainSelect.getGroupBy(), tableContext);
         validateOrderBy(plainSelect.getOrderByElements(), tableContext);
     }
 
-    // Parenthesis 在 JSqlParser 5.x 中已废弃但仍用于表示条件括号
+    // Parenthesis 鍦?JSqlParser 5.x 涓凡搴熷純浣嗕粛鐢ㄤ簬琛ㄧず鏉′欢鎷彿
     private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
         if (expression == null) {
             return null;
@@ -229,6 +256,35 @@ public class SqlRewriteEngine {
                 return o;
             });
             return parenthesis;
+        }
+        if (expression instanceof ExistsExpression existsExpression) {
+            if (existsExpression.getRightExpression() instanceof Select subquery) {
+                rewriteSelect(subquery, context);
+            }
+            return existsExpression;
+        }
+        if (expression instanceof NotExpression notExpression) {
+            notExpression.setExpression(rewriteCondition(notExpression.getExpression(), tableContext, context));
+            return notExpression;
+        }
+        if (expression instanceof CaseExpression caseExpression) {
+            if (caseExpression.getSwitchExpression() != null) {
+                caseExpression.setSwitchExpression(rewriteCondition(caseExpression.getSwitchExpression(), tableContext, context));
+            }
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    whenClause.setWhenExpression(rewriteCondition(whenClause.getWhenExpression(), tableContext, context));
+                    whenClause.setThenExpression(rewriteCondition(whenClause.getThenExpression(), tableContext, context));
+                }
+            }
+            if (caseExpression.getElseExpression() != null) {
+                caseExpression.setElseExpression(rewriteCondition(caseExpression.getElseExpression(), tableContext, context));
+            }
+            return caseExpression;
+        }
+        if (expression instanceof Select select) {
+            rewriteSelect(select, context);
+            return expression;
         }
         if (expression instanceof AndExpression andExpression) {
             andExpression.setLeftExpression(rewriteCondition(andExpression.getLeftExpression(), tableContext, context));
@@ -251,6 +307,9 @@ public class SqlRewriteEngine {
         }
         if (expression instanceof InExpression inExpression) {
             return rewriteInCondition(inExpression, tableContext, context);
+        }
+        if (expression instanceof IsNullExpression isNullExpression) {
+            return rewriteIsNullCondition(isNullExpression, tableContext, context);
         }
         if (expression instanceof Between between) {
             validateNonRangeEncryptedColumn(between.getLeftExpression(), tableContext,
@@ -296,7 +355,7 @@ public class SqlRewriteEngine {
             return rewriteSeparateTableCondition(resolution, expression.getRightExpression(), context,
                     rule.assistedQueryColumn(), true);
         }
-        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.column();
+        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
         if (resolution.leftColumn()) {
             expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
             rewriteOperand(expression.getRightExpression(), context,
@@ -342,6 +401,9 @@ public class SqlRewriteEngine {
     private Expression rewriteInCondition(InExpression expression, TableContext tableContext, RewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
+            if (expression.getRightExpression() instanceof Select subquery) {
+                rewriteSelect(subquery, context);
+            }
             consumeItemsList(expression.getRightExpression(), context);
             return expression;
         }
@@ -351,10 +413,15 @@ public class SqlRewriteEngine {
                     + rule.property());
         }
         // IN query uses the same target-column selection strategy as equality queries.
-        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.column();
+        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
         expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
+        if (expression.getRightExpression() instanceof Select subquery) {
+            rewriteSelect(subquery, context, ProjectionMode.COMPARISON);
+            context.changed = true;
+            return expression;
+        }
         if (!(expression.getRightExpression() instanceof ExpressionList<?> expressionList)) {
-            throw new UnsupportedEncryptedOperationException("Sub query IN is not supported on encrypted fields.");
+            throw new UnsupportedEncryptedOperationException("Unsupported IN operand for encrypted fields.");
         }
         for (Expression item : expressionList) {
             rewriteOperand(item, context,
@@ -362,6 +429,22 @@ public class SqlRewriteEngine {
                             : transformCipher(rule, readOperandValue(item, context)),
                     rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
         }
+        context.changed = true;
+        return expression;
+    }
+
+    private Expression rewriteIsNullCondition(IsNullExpression expression, TableContext tableContext, RewriteContext context) {
+        ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
+        if (resolution == null) {
+            expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
+            return expression;
+        }
+        EncryptColumnRule rule = resolution.rule();
+        if (rule.isStoredInSeparateTable()) {
+            context.changed = true;
+            return buildExistsPresenceSubQuery(resolution.column(), rule, expression.isNot());
+        }
+        expression.setLeftExpression(buildColumn(resolution.column(), rule.storageColumn()));
         context.changed = true;
         return expression;
     }
@@ -512,26 +595,162 @@ public class SqlRewriteEngine {
         throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
     }
 
-    private void stripSeparateTableSelectItems(PlainSelect plainSelect, TableContext tableContext) {
+    private void rewriteSelectItems(PlainSelect plainSelect, TableContext tableContext, ProjectionMode projectionMode) {
         if (plainSelect.getSelectItems() == null) {
             return;
         }
-        List<SelectItem<?>> retained = new ArrayList<>();
+        List<SelectItem<?>> rewritten = new ArrayList<>();
         for (SelectItem<?> item : plainSelect.getSelectItems()) {
-            boolean removable = isSeparateTableSelectItem(item, tableContext);
-            if (!removable) {
-                retained.add(item);
+            Expression expression = item.getExpression();
+            if (expression instanceof AllTableColumns allTableColumns) {
+                rewritten.add(item);
+                appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
+                        allTableColumns.getTable(), projectionMode);
+                continue;
+            }
+            if (expression instanceof AllColumns) {
+                rewritten.add(item);
+                appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(null), null, projectionMode);
+                continue;
+            }
+            ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+            if (resolution == null) {
+                rewritten.add(item);
+                continue;
+            }
+            if (resolution.rule().isStoredInSeparateTable()) {
+                continue;
+            }
+            rewritten.add(buildSelectStorageItem(item, resolution));
+            if (projectionMode == ProjectionMode.DERIVED) {
+                appendDerivedHelperSelectItems(rewritten, item, resolution);
             }
         }
-        if (!retained.isEmpty()) {
-            plainSelect.setSelectItems(retained);
+        if (!rewritten.isEmpty()) {
+            plainSelect.setSelectItems(rewritten);
         }
     }
 
-    private boolean isSeparateTableSelectItem(SelectItem<?> item, TableContext tableContext) {
-        Expression expression = item.getExpression();
-        ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
-        return resolution != null && resolution.rule().isStoredInSeparateTable();
+    private void discardExpression(Expression expression, RewriteContext context) {
+        if (expression == null) {
+            return;
+        }
+        if (expression instanceof JdbcParameter) {
+            int parameterIndex = context.consumeOriginal();
+            context.removeParameter(parameterIndex);
+            return;
+        }
+        if (expression instanceof ParenthesedExpressionList parenthesis) {
+            parenthesis.forEach(o -> {
+                if (o instanceof Expression exp) {
+                    discardExpression(exp, context);
+                }
+            });
+            return;
+        }
+        if (expression instanceof BinaryExpression binaryExpression) {
+            discardExpression(binaryExpression.getLeftExpression(), context);
+            discardExpression(binaryExpression.getRightExpression(), context);
+            return;
+        }
+        if (expression instanceof Function function && function.getParameters() != null) {
+            for (Expression item : function.getParameters()) {
+                discardExpression(item, context);
+            }
+        }
+    }
+
+    private void rewriteComparisonSelectItems(PlainSelect plainSelect, TableContext tableContext) {
+        if (plainSelect.getSelectItems() == null) {
+            return;
+        }
+        List<SelectItem<?>> rewritten = new ArrayList<>();
+        for (SelectItem<?> item : plainSelect.getSelectItems()) {
+            Expression expression = item.getExpression();
+            if (expression instanceof AllColumns || expression instanceof AllTableColumns) {
+                throw new UnsupportedEncryptedOperationException("Wildcard select is not supported in encrypted IN subquery.");
+            }
+            ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+            if (resolution == null) {
+                rewritten.add(item);
+                continue;
+            }
+            if (resolution.rule().isStoredInSeparateTable()) {
+                throw new UnsupportedEncryptedOperationException("Separate-table encrypted field is not supported in IN subquery.");
+            }
+            rewritten.add(buildComparisonSelectItem(item, resolution));
+        }
+        if (!rewritten.isEmpty()) {
+            plainSelect.setSelectItems(rewritten);
+        }
+    }
+
+    private void appendSelectAliasesForWildcard(List<SelectItem<?>> target,
+                                                List<EncryptColumnRule> rules,
+                                                Table tableReference,
+                                                ProjectionMode projectionMode) {
+        for (EncryptColumnRule rule : rules) {
+            if (rule.isStoredInSeparateTable()) {
+                continue;
+            }
+            Column sourceColumn = new Column(rule.column());
+            if (tableReference != null && tableReference.getName() != null && !tableReference.getName().isBlank()) {
+                sourceColumn.setTable(new Table(tableReference.getName()));
+            }
+            SelectItem<?> storageItem = buildSelectStorageItem(new SelectItem<>(sourceColumn), new ColumnResolution(sourceColumn, rule, true));
+            target.add(storageItem);
+            if (projectionMode == ProjectionMode.DERIVED) {
+                appendDerivedHelperSelectItems(target, storageItem, new ColumnResolution(sourceColumn, rule, true));
+            }
+        }
+    }
+
+    private void appendDerivedHelperSelectItems(List<SelectItem<?>> target,
+                                                SelectItem<?> originalItem,
+                                                ColumnResolution resolution) {
+        String logicalAlias = selectAliasName(originalItem, resolution);
+        if (resolution.rule().hasAssistedQueryColumn()) {
+            target.add(SelectItem.from(
+                    buildColumn(resolution.column(), resolution.rule().assistedQueryColumn()),
+                    new Alias(hiddenAssistedAlias(logicalAlias), false)
+            ));
+        }
+        if (resolution.rule().hasLikeQueryColumn()) {
+            target.add(SelectItem.from(
+                    buildColumn(resolution.column(), resolution.rule().likeQueryColumn()),
+                    new Alias(hiddenLikeAlias(logicalAlias), false)
+            ));
+        }
+    }
+
+    private SelectItem<?> buildSelectStorageItem(SelectItem<?> originalItem, ColumnResolution resolution) {
+        Alias alias = originalItem.getAlias() != null
+                ? originalItem.getAlias()
+                : new Alias(resolution.column().getColumnName(), false);
+        return SelectItem.from(buildColumn(resolution.column(), resolution.rule().storageColumn()), alias);
+    }
+
+    private SelectItem<?> buildComparisonSelectItem(SelectItem<?> originalItem, ColumnResolution resolution) {
+        EncryptColumnRule rule = resolution.rule();
+        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
+        Alias alias = originalItem.getAlias() != null
+                ? originalItem.getAlias()
+                : new Alias(resolution.column().getColumnName(), false);
+        return SelectItem.from(buildColumn(resolution.column(), targetColumn), alias);
+    }
+
+    private String selectAliasName(SelectItem<?> item, ColumnResolution resolution) {
+        return item.getAlias() != null && item.getAlias().getName() != null && !item.getAlias().getName().isBlank()
+                ? item.getAlias().getName()
+                : resolution.column().getColumnName();
+    }
+
+    private String hiddenAssistedAlias(String logicalAlias) {
+        return "__enc_assisted_" + logicalAlias;
+    }
+
+    private String hiddenLikeAlias(String logicalAlias) {
+        return "__enc_like_" + logicalAlias;
     }
 
     private void validateOrderBy(List<OrderByElement> orderByElements, TableContext tableContext) {
@@ -572,7 +791,23 @@ public class SqlRewriteEngine {
         }
         subQueryBody.setWhere(new AndExpression(joinEquals, valuePredicate));
         ExistsExpression existsExpression = new ExistsExpression();
-        existsExpression.setRightExpression(subQueryBody);
+        existsExpression.setRightExpression(new ParenthesedSelect().withSelect(subQueryBody));
+        return existsExpression;
+    }
+
+    private Expression buildExistsPresenceSubQuery(Column sourceColumn,
+                                                   EncryptColumnRule rule,
+                                                   boolean shouldExist) {
+        PlainSelect subQueryBody = new PlainSelect();
+        subQueryBody.addSelectItems(SelectItem.from(new LongValue(1)));
+        subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
+        EqualsTo joinEquals = new EqualsTo();
+        joinEquals.setLeftExpression(new Column(quote(rule.storageIdColumn())));
+        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.sourceIdColumn()));
+        subQueryBody.setWhere(joinEquals);
+        ExistsExpression existsExpression = new ExistsExpression();
+        existsExpression.setRightExpression(new ParenthesedSelect().withSelect(subQueryBody));
+        existsExpression.setNot(!shouldExist);
         return existsExpression;
     }
 
@@ -599,10 +834,355 @@ public class SqlRewriteEngine {
         return rule == null ? null : new ColumnResolution(column, rule, true);
     }
 
-    private void registerFromItem(TableContext tableContext, FromItem fromItem) {
+    private void registerFromItem(TableContext tableContext, FromItem fromItem, RewriteContext context) {
         if (fromItem instanceof Table table) {
             registerTable(tableContext, table);
+            return;
         }
+        if (fromItem instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
+            rewriteSelect(parenthesedSelect.getSelect(), context, ProjectionMode.DERIVED);
+            if (parenthesedSelect.getAlias() != null && parenthesedSelect.getAlias().getName() != null
+                    && !parenthesedSelect.getAlias().getName().isBlank()) {
+                EncryptTableRule derivedRule = buildDerivedTableRule(parenthesedSelect.getAlias().getName(),
+                        parenthesedSelect.getSelect());
+                if (derivedRule != null) {
+                    tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
+                }
+            }
+        }
+    }
+
+    private void validateDistinct(Distinct distinct, List<SelectItem<?>> selectItems, TableContext tableContext) {
+        if (distinct == null || selectItems == null) {
+            return;
+        }
+        for (SelectItem<?> item : selectItems) {
+            if (containsEncryptedReference(item.getExpression(), tableContext)) {
+                throw new UnsupportedEncryptedOperationException("DISTINCT is not supported on encrypted fields.");
+            }
+        }
+    }
+
+    private void validateAggregateExpressions(List<SelectItem<?>> selectItems,
+                                              Expression having,
+                                              Expression qualify,
+                                              TableContext tableContext) {
+        if (selectItems != null) {
+            for (SelectItem<?> item : selectItems) {
+                if (containsUnsupportedAggregate(item.getExpression(), tableContext)) {
+                    throw new UnsupportedEncryptedOperationException(
+                            "Aggregate function is not supported on encrypted fields.");
+                }
+            }
+        }
+        if (containsUnsupportedAggregate(having, tableContext) || containsUnsupportedAggregate(qualify, tableContext)) {
+            throw new UnsupportedEncryptedOperationException(
+                    "Aggregate function is not supported on encrypted fields.");
+        }
+    }
+
+    private void validateAnalyticExpressions(List<SelectItem<?>> selectItems, TableContext tableContext) {
+        if (selectItems == null) {
+            return;
+        }
+        for (SelectItem<?> item : selectItems) {
+            Expression expression = item.getExpression();
+            if (expression instanceof AnalyticExpression analyticExpression
+                    && containsEncryptedReference(analyticExpression, tableContext)) {
+                throw new UnsupportedEncryptedOperationException(
+                        "Window function is not supported on encrypted fields.");
+            }
+        }
+    }
+
+    private void validateWindowDefinitions(List<WindowDefinition> windowDefinitions, TableContext tableContext) {
+        if (windowDefinitions == null) {
+            return;
+        }
+        for (WindowDefinition windowDefinition : windowDefinitions) {
+            if (containsEncryptedReference(windowDefinition, tableContext)) {
+                throw new UnsupportedEncryptedOperationException(
+                        "Named window definition is not supported on encrypted fields.");
+            }
+        }
+    }
+
+    private void validateGroupBy(GroupByElement groupByElement, TableContext tableContext) {
+        if (groupByElement == null || groupByElement.getGroupByExpressions() == null) {
+            return;
+        }
+        for (Object item : groupByElement.getGroupByExpressions()) {
+            if (item instanceof Expression expression && containsEncryptedReference(expression, tableContext)) {
+                throw new UnsupportedEncryptedOperationException("GROUP BY is not supported on encrypted fields.");
+            }
+        }
+    }
+
+    private boolean containsEncryptedReference(Expression expression, TableContext tableContext) {
+        if (expression == null) {
+            return false;
+        }
+        if (resolveEncryptedColumn(expression, tableContext) != null) {
+            return true;
+        }
+        if (expression instanceof ParenthesedExpressionList parenthesis) {
+            for (Object item : parenthesis) {
+                if (item instanceof Expression child && containsEncryptedReference(child, tableContext)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (expression instanceof BinaryExpression binaryExpression) {
+            return containsEncryptedReference(binaryExpression.getLeftExpression(), tableContext)
+                    || containsEncryptedReference(binaryExpression.getRightExpression(), tableContext);
+        }
+        if (expression instanceof Function function && function.getParameters() != null) {
+            for (Expression item : function.getParameters()) {
+                if (containsEncryptedReference(item, tableContext)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (expression instanceof CaseExpression caseExpression) {
+            if (containsEncryptedReference(caseExpression.getSwitchExpression(), tableContext)) {
+                return true;
+            }
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    if (containsEncryptedReference(whenClause.getWhenExpression(), tableContext)
+                            || containsEncryptedReference(whenClause.getThenExpression(), tableContext)) {
+                        return true;
+                    }
+                }
+            }
+            return containsEncryptedReference(caseExpression.getElseExpression(), tableContext);
+        }
+        if (expression instanceof NotExpression notExpression) {
+            return containsEncryptedReference(notExpression.getExpression(), tableContext);
+        }
+        if (expression instanceof AnalyticExpression analyticExpression) {
+            if (containsEncryptedReference(analyticExpression.getExpression(), tableContext)
+                    || containsEncryptedReference(analyticExpression.getFilterExpression(), tableContext)
+                    || containsEncryptedReference(analyticExpression.getOffset(), tableContext)
+                    || containsEncryptedReference(analyticExpression.getDefaultValue(), tableContext)) {
+                return true;
+            }
+            if (analyticExpression.getPartitionExpressionList() != null) {
+                for (Object item : analyticExpression.getPartitionExpressionList()) {
+                    if (item instanceof Expression child && containsEncryptedReference(child, tableContext)) {
+                        return true;
+                    }
+                }
+            }
+            if (analyticExpression.getOrderByElements() != null) {
+                for (OrderByElement element : analyticExpression.getOrderByElements()) {
+                    if (containsEncryptedReference(element.getExpression(), tableContext)) {
+                        return true;
+                    }
+                }
+            }
+            if (analyticExpression.getWindowDefinition() != null) {
+                return containsEncryptedReference(analyticExpression.getWindowDefinition(), tableContext);
+            }
+            return false;
+        }
+        return false;
+    }
+
+    private boolean containsEncryptedReference(WindowDefinition windowDefinition, TableContext tableContext) {
+        if (windowDefinition == null) {
+            return false;
+        }
+        if (windowDefinition.getPartitionExpressionList() != null) {
+            for (Object item : windowDefinition.getPartitionExpressionList()) {
+                if (item instanceof Expression expression && containsEncryptedReference(expression, tableContext)) {
+                    return true;
+                }
+            }
+        }
+        if (windowDefinition.getOrderByElements() != null) {
+            for (OrderByElement element : windowDefinition.getOrderByElements()) {
+                if (containsEncryptedReference(element.getExpression(), tableContext)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean containsUnsupportedAggregate(Expression expression, TableContext tableContext) {
+        if (expression == null) {
+            return false;
+        }
+        if (expression instanceof Function function) {
+            if (isAggregateFunction(function)) {
+                if (function.isAllColumns()) {
+                    return false;
+                }
+                if (function.getParameters() != null) {
+                    for (Expression item : function.getParameters()) {
+                        if (containsEncryptedReference(item, tableContext) || containsUnsupportedAggregate(item, tableContext)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            if (function.getParameters() != null) {
+                for (Expression item : function.getParameters()) {
+                    if (containsUnsupportedAggregate(item, tableContext)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        if (expression instanceof BinaryExpression binaryExpression) {
+            return containsUnsupportedAggregate(binaryExpression.getLeftExpression(), tableContext)
+                    || containsUnsupportedAggregate(binaryExpression.getRightExpression(), tableContext);
+        }
+        if (expression instanceof ParenthesedExpressionList parenthesis) {
+            for (Object item : parenthesis) {
+                if (item instanceof Expression child && containsUnsupportedAggregate(child, tableContext)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (expression instanceof NotExpression notExpression) {
+            return containsUnsupportedAggregate(notExpression.getExpression(), tableContext);
+        }
+        if (expression instanceof CaseExpression caseExpression) {
+            if (containsUnsupportedAggregate(caseExpression.getSwitchExpression(), tableContext)
+                    || containsUnsupportedAggregate(caseExpression.getElseExpression(), tableContext)) {
+                return true;
+            }
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    if (containsUnsupportedAggregate(whenClause.getWhenExpression(), tableContext)
+                            || containsUnsupportedAggregate(whenClause.getThenExpression(), tableContext)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        if (expression instanceof AnalyticExpression analyticExpression) {
+            return containsUnsupportedAggregate(analyticExpression.getExpression(), tableContext)
+                    || containsUnsupportedAggregate(analyticExpression.getFilterExpression(), tableContext)
+                    || containsUnsupportedAggregate(analyticExpression.getOffset(), tableContext)
+                    || containsUnsupportedAggregate(analyticExpression.getDefaultValue(), tableContext);
+        }
+        if (expression instanceof Select select) {
+            if (select instanceof PlainSelect plainSelect) {
+                return containsUnsupportedAggregate(plainSelect.getHaving(), tableContext)
+                        || containsUnsupportedAggregate(plainSelect.getQualify(), tableContext);
+            }
+            return false;
+        }
+        return false;
+    }
+
+    private boolean isAggregateFunction(Function function) {
+        String name = function.getName();
+        if (name == null) {
+            return false;
+        }
+        return switch (name.toUpperCase(Locale.ROOT)) {
+            case "COUNT", "SUM", "AVG", "MIN", "MAX", "LISTAGG", "STRING_AGG", "GROUP_CONCAT", "ARRAY_AGG" -> true;
+            default -> false;
+        };
+    }
+
+    private EncryptTableRule buildDerivedTableRule(String alias, Select select) {
+        if (select instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
+            return buildDerivedTableRule(alias, parenthesedSelect.getSelect());
+        }
+        if (select instanceof SetOperationList setOperationList) {
+            return setOperationList.getSelects().isEmpty() ? null : buildDerivedTableRule(alias, setOperationList.getSelect(0));
+        }
+        if (!(select instanceof PlainSelect plainSelect)) {
+            return null;
+        }
+        TableContext childContext = new TableContext();
+        registerLookupFromItem(childContext, plainSelect.getFromItem());
+        if (plainSelect.getJoins() != null) {
+            for (Join join : plainSelect.getJoins()) {
+                registerLookupFromItem(childContext, join.getRightItem());
+            }
+        }
+        EncryptTableRule derivedRule = new EncryptTableRule(alias);
+        if (plainSelect.getSelectItems() == null) {
+            return null;
+        }
+        for (SelectItem<?> item : plainSelect.getSelectItems()) {
+            Expression expression = item.getExpression();
+            if (expression instanceof AllTableColumns allTableColumns) {
+                for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(allTableColumns.getTable())) {
+                    if (!rule.isStoredInSeparateTable()) {
+                        derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
+                    }
+                }
+                continue;
+            }
+            if (expression instanceof AllColumns) {
+                for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(null)) {
+                    if (!rule.isStoredInSeparateTable()) {
+                        derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
+                    }
+                }
+                continue;
+            }
+            if (!(expression instanceof Column column)) {
+                continue;
+            }
+            EncryptColumnRule sourceRule = childContext.resolveProjected(column).orElse(null);
+            if (sourceRule == null || sourceRule.isStoredInSeparateTable()) {
+                continue;
+            }
+            String aliasName = item.getAlias() != null && item.getAlias().getName() != null && !item.getAlias().getName().isBlank()
+                    ? item.getAlias().getName()
+                    : column.getColumnName();
+            if (aliasName.startsWith("__enc_assisted_") || aliasName.startsWith("__enc_like_")) {
+                continue;
+            }
+            derivedRule.addColumnRule(projectDerivedRule(aliasName, sourceRule));
+        }
+        return derivedRule.getColumnRules().isEmpty() ? null : derivedRule;
+    }
+
+    private void registerLookupFromItem(TableContext tableContext, FromItem fromItem) {
+        if (fromItem instanceof Table table) {
+            registerTable(tableContext, table);
+            return;
+        }
+        if (fromItem instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getAlias() != null
+                && parenthesedSelect.getAlias().getName() != null && parenthesedSelect.getSelect() != null) {
+            EncryptTableRule derivedRule = buildDerivedTableRule(parenthesedSelect.getAlias().getName(), parenthesedSelect.getSelect());
+            if (derivedRule != null) {
+                tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
+            }
+        }
+    }
+
+    private EncryptColumnRule projectDerivedRule(String projectedColumn, EncryptColumnRule sourceRule) {
+        return new EncryptColumnRule(
+                projectedColumn,
+                projectedColumn,
+                sourceRule.cipherAlgorithm(),
+                sourceRule.hasAssistedQueryColumn() ? hiddenAssistedAlias(projectedColumn) : null,
+                sourceRule.assistedQueryAlgorithm(),
+                sourceRule.hasLikeQueryColumn() ? hiddenLikeAlias(projectedColumn) : null,
+                sourceRule.likeQueryAlgorithm(),
+                FieldStorageMode.SAME_TABLE,
+                null,
+                projectedColumn,
+                sourceRule.sourceIdProperty(),
+                sourceRule.sourceIdColumn(),
+                sourceRule.storageIdColumn()
+        );
     }
 
     private void registerTable(TableContext tableContext, Table table) {
@@ -616,7 +1196,7 @@ public class SqlRewriteEngine {
     private Column buildColumn(Column source, String targetColumn) {
         Column column = new Column(quote(targetColumn));
         if (source.getTable() != null && source.getTable().getName() != null) {
-            // 只保留表引用名（可能是表名或别名），不复制 alias 以避免生成 "t AS t.`col`" 这样的错误 SQL
+            // 鍙繚鐣欒〃寮曠敤鍚嶏紙鍙兘鏄〃鍚嶆垨鍒悕锛夛紝涓嶅鍒?alias 浠ラ伩鍏嶇敓鎴?"t AS t.`col`" 杩欐牱鐨勯敊璇?SQL
             column.setTable(new Table(source.getTable().getName()));
         }
         return column;
@@ -711,6 +1291,17 @@ public class SqlRewriteEngine {
             changed = true;
         }
 
+        private void removeParameter(int parameterIndex) {
+            if (parameterIndex < 0 || parameterIndex >= parameterMappings.size()) {
+                return;
+            }
+            parameterMappings.remove(parameterIndex);
+            if (parameterIndex < currentParameterIndex) {
+                currentParameterIndex--;
+            }
+            changed = true;
+        }
+
         private String nextSyntheticName() {
             generatedIndex++;
             return "__encrypt_generated_" + generatedIndex;
@@ -738,6 +1329,12 @@ public class SqlRewriteEngine {
             }
         }
 
+        private void registerDerived(String alias, EncryptTableRule rule) {
+            if (alias != null && !alias.isBlank()) {
+                ruleByAlias.put(NameUtils.normalizeIdentifier(alias), rule);
+            }
+        }
+
         private Optional<EncryptColumnRule> resolve(Column column) {
             if (column.getTable() != null && column.getTable().getName() != null && !column.getTable().getName().isBlank()) {
                 EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
@@ -746,19 +1343,71 @@ public class SqlRewriteEngine {
                 }
             }
             EncryptColumnRule candidate = null;
-            for (EncryptTableRule tableRule : ruleByAlias.values()) {
+            for (EncryptTableRule tableRule : uniqueRules()) {
                 EncryptColumnRule rule = tableRule.findByColumn(column.getColumnName()).orElse(null);
                 if (rule == null) {
                     continue;
                 }
                 if (candidate != null) {
-                    // Unqualified encrypted columns are rejected when multiple encrypted tables match the same name.
                     throw new UnsupportedEncryptedOperationException(
                             "Ambiguous encrypted column reference: " + column.getFullyQualifiedName());
                 }
                 candidate = rule;
             }
             return Optional.ofNullable(candidate);
+        }
+
+        private List<EncryptColumnRule> rulesForSelectExpansion(Table table) {
+            if (table != null && table.getName() != null && !table.getName().isBlank()) {
+                EncryptTableRule rule = ruleByAlias.get(NameUtils.normalizeIdentifier(table.getName()));
+                return rule == null ? List.of() : new ArrayList<>(rule.getColumnRules());
+            }
+            Collection<EncryptTableRule> uniqueRules = uniqueRules();
+            if (uniqueRules.size() != 1) {
+                return List.of();
+            }
+            return new ArrayList<>(uniqueRules.iterator().next().getColumnRules());
+        }
+
+        private Optional<EncryptColumnRule> resolveProjected(Column column) {
+            if (column.getTable() != null && column.getTable().getName() != null && !column.getTable().getName().isBlank()) {
+                EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
+                if (tableRule != null) {
+                    return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName()));
+                }
+            }
+            EncryptColumnRule candidate = null;
+            for (EncryptTableRule tableRule : uniqueRules()) {
+                EncryptColumnRule rule = matchProjectedRule(tableRule, column.getColumnName());
+                if (rule == null) {
+                    continue;
+                }
+                if (candidate != null) {
+                    throw new UnsupportedEncryptedOperationException(
+                            "Ambiguous encrypted projection reference: " + column.getFullyQualifiedName());
+                }
+                candidate = rule;
+            }
+            return Optional.ofNullable(candidate);
+        }
+
+        private EncryptColumnRule matchProjectedRule(EncryptTableRule tableRule, String columnName) {
+            String normalized = NameUtils.normalizeIdentifier(columnName);
+            for (EncryptColumnRule rule : tableRule.getColumnRules()) {
+                if (NameUtils.normalizeIdentifier(rule.column()).equals(normalized)
+                        || NameUtils.normalizeIdentifier(rule.storageColumn()).equals(normalized)
+                        || (rule.hasAssistedQueryColumn()
+                        && NameUtils.normalizeIdentifier(rule.assistedQueryColumn()).equals(normalized))
+                        || (rule.hasLikeQueryColumn()
+                        && NameUtils.normalizeIdentifier(rule.likeQueryColumn()).equals(normalized))) {
+                    return rule;
+                }
+            }
+            return null;
+        }
+
+        private Collection<EncryptTableRule> uniqueRules() {
+            return new LinkedHashSet<>(ruleByAlias.values());
         }
 
         private boolean isEmpty() {
@@ -775,6 +1424,12 @@ public class SqlRewriteEngine {
     private enum MaskingMode {
         MASKED,
         HASH
+    }
+
+    private enum ProjectionMode {
+        NORMAL,
+        COMPARISON,
+        DERIVED
     }
 
     private String quote(String identifier) {

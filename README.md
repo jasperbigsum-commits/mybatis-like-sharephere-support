@@ -415,3 +415,26 @@ src/main/java/tech/jasper/mybatis/encrypt
 - 增加复杂 SQL 场景测试矩阵
 - 完善 SQL 日志脱敏策略与扩展点
 - 补充生产可用配置示例与兼容性说明
+
+## SQL Support Matrix
+
+详细 SQL 支持矩阵见 [docs/sql-support-matrix.md](E:/MyProject/IdeaProject/mybatis-like-sharephere-support/docs/sql-support-matrix.md)。
+
+当前文档会明确区分：
+
+- 已支持并经过验证的 SQL 形态
+- 出于语义安全考虑而失败快的 SQL 形态
+- 仍保持保守处理或尚未完整覆盖的高级场景
+
+## Integration Coverage
+
+当前仓库除了 SQL 改写单元测试外，还包含两类端到端验证：
+
+- 纯 MyBatis + H2 集成测试
+- Spring Boot 自动装配 + MyBatis + H2 集成测试
+
+这些测试会验证：
+
+- 同表密文字段写入、条件查询与结果解密
+- 独立加密表同步、条件查询与回填解密
+- 自动装配下拦截器只注册一次，避免重复改写或重复解密

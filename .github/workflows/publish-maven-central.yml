@@ -1,0 +1,33 @@
+name: Publish to Maven Central
+
+# 触发时机：创建 tag 如 v1.0.0 时自动发布
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+          # 自动配置 Maven 认证
+          server-id: central
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          # gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Publish to Central
+        run: mvn clean deploy -DskipTests --batch-mode
+        env:
+          MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
+          # GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

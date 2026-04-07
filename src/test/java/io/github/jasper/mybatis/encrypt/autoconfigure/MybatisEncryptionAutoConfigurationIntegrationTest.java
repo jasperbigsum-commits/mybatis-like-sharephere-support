@@ -1,26 +1,24 @@
 package io.github.jasper.mybatis.encrypt.autoconfigure;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
-import javax.sql.DataSource;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
+import jakarta.annotation.Resource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.annotation.MapperScan;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
-import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(
         classes = MybatisEncryptionAutoConfigurationIntegrationTest.TestApplication.class,
@@ -35,19 +33,19 @@ import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 )
 class MybatisEncryptionAutoConfigurationIntegrationTest {
 
-    @Autowired
+    @Resource
     private DataSource dataSource;
 
-    @Autowired
+    @Resource
     private AutoConfiguredUserMapper mapper;
 
-    @Autowired
+    @Resource
     private EncryptMetadataRegistry metadataRegistry;
 
-    @Autowired
+    @Resource
     private DatabaseEncryptionInterceptor interceptor;
 
-    @Autowired
+    @Resource
     private SqlSessionFactory sqlSessionFactory;
 
     @BeforeEach

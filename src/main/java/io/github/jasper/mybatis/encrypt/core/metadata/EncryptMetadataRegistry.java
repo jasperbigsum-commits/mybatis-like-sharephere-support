@@ -10,10 +10,9 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.Fiel
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 
 /**
- * Central registry for encryption metadata.
+ * 加密元数据中心注册表。
  *
- * <p>The registry merges configuration-driven rules with annotation-driven rules and caches
- * them by both physical table name and entity type.</p>
+ * <p>负责合并配置驱动规则与注解驱动规则，并按物理表名和实体类型两条维度缓存结果。</p>
  */
 public class EncryptMetadataRegistry {
 
@@ -28,10 +27,10 @@ public class EncryptMetadataRegistry {
     }
 
     /**
-     * Finds a table rule by physical table name.
+     * 按物理表名查找表规则。
      *
-     * @param table database table name
-     * @return matched table rule if present
+     * @param table 数据库表名
+     * @return 命中的表规则，存在时返回
      */
     public Optional<EncryptTableRule> findByTable(String table) {
         if (table == null || table.isBlank()) {
@@ -41,10 +40,10 @@ public class EncryptMetadataRegistry {
     }
 
     /**
-     * Finds or lazily loads a table rule for the given entity type.
+     * 按实体类型查找或懒加载表规则。
      *
-     * @param entityType entity class
-     * @return matched table rule if present
+     * @param entityType 实体类型
+     * @return 命中的表规则，存在时返回
      */
     public Optional<EncryptTableRule> findByEntity(Class<?> entityType) {
         if (!isCandidateType(entityType)) {
@@ -71,19 +70,19 @@ public class EncryptMetadataRegistry {
     }
 
     /**
-     * Forces metadata registration for a specific entity class.
+     * 强制注册指定实体类型的元数据。
      *
-     * @param entityType entity class to preload
+     * @param entityType 需要预加载的实体类型
      */
     public void registerEntityType(Class<?> entityType) {
         findByEntity(entityType);
     }
 
     /**
-     * Preloads metadata that may be needed by the current mapped statement execution.
+     * 预加载当前 mapped statement 执行可能用到的元数据。
      *
-     * @param mappedStatement current mapped statement
-     * @param parameterObject current MyBatis parameter object
+     * @param mappedStatement 当前 mapped statement
+     * @param parameterObject 当前 MyBatis 参数对象
      */
     public void warmUp(MappedStatement mappedStatement, Object parameterObject) {
         mappedStatement.getResultMaps().stream()

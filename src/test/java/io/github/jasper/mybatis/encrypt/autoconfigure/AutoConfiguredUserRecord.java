@@ -3,7 +3,9 @@ package io.github.jasper.mybatis.encrypt.autoconfigure;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import lombok.Data;
 
+@Data
 @EncryptTable("user_account")
 public class AutoConfiguredUserRecord {
 
@@ -28,36 +30,4 @@ public class AutoConfiguredUserRecord {
             likeQueryColumn = "id_card_like"
     )
     private String idCard;
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getPhone() {
-        return phone;
-    }
-
-    public void setPhone(String phone) {
-        this.phone = phone;
-    }
-
-    public String getIdCard() {
-        return idCard;
-    }
-
-    public void setIdCard(String idCard) {
-        this.idCard = idCard;
-    }
 }

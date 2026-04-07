@@ -8,11 +8,10 @@ import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 
 /**
- * Loads encryption metadata from entity annotations.
+ * 从实体注解中加载加密元数据。
  *
- * <p>Column resolution order for {@link EncryptField#column()} is:
- * explicit {@code @EncryptField.column}, MyBatis-Plus {@code @TableField(value)},
- * JPA {@code @Column(name)}, then property-name snake_case.</p>
+ * <p>{@link EncryptField#column()} 的列名解析顺序为：显式配置的 {@code @EncryptField.column}、
+ * MyBatis-Plus 的 {@code @TableField(value)}、JPA 的 {@code @Column(name)}，最后退回到属性名 snake_case。</p>
  */
 public class AnnotationEncryptMetadataLoader {
 

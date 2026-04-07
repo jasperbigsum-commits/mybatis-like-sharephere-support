@@ -34,11 +34,10 @@ import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import java.util.*;
 
 /**
- * SQL rewrite engine.
+ * SQL 改写引擎。
  *
- * <p>Parses MyBatis SQL and rewrites encrypted fields, assisted query fields,
- * and LIKE helper fields before execution. The implementation fails fast for
- * unsupported range, sort, and ambiguous query scenarios.</p>
+ * <p>负责解析 MyBatis SQL，并在执行前改写加密字段、辅助查询字段和 LIKE 辅助字段；
+ * 对不支持的范围查询、排序和存在歧义的查询场景会快速失败。</p>
  */
 public class SqlRewriteEngine {
 
@@ -57,11 +56,11 @@ public class SqlRewriteEngine {
     }
 
     /**
-     * Rewrite one MyBatis execution request.
+     * 改写一次 MyBatis 执行请求。
      *
-     * @param mappedStatement current mapped statement
-     * @param boundSql original SQL and parameter context
-     * @return rewrite result; unchanged when no encryption rule matches
+     * @param mappedStatement 当前 mapped statement
+     * @param boundSql 原始 SQL 与参数上下文
+     * @return 改写结果；当没有命中加密规则时返回未变更结果
      */
     public RewriteResult rewrite(MappedStatement mappedStatement, BoundSql boundSql) {
         metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject());
@@ -184,7 +183,7 @@ public class SqlRewriteEngine {
             updateValues.clear();
             updateValues.addAll(rewrittenExpressions);
         }
-        // Only the WHERE clause is redirected to query columns; the SET clause still writes ciphertext to the main column.
+        // 只有 WHERE 子句会被改写到查询辅助列，SET 子句仍然写入主密文列。
         update.setWhere(rewriteCondition(update.getWhere(), tableContext, context));
     }
 
@@ -243,7 +242,7 @@ public class SqlRewriteEngine {
         validateOrderBy(plainSelect.getOrderByElements(), tableContext);
     }
 
-    // Parenthesized expression lists are still used by JSqlParser 5.x to represent grouped conditions.
+    // JSqlParser 5.x 仍然使用带括号的表达式列表来表示分组条件。
     private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
         if (expression == null) {
             return null;
@@ -412,7 +411,7 @@ public class SqlRewriteEngine {
             throw new UnsupportedEncryptedOperationException("IN query is not supported for separate-table encrypted field: "
                     + rule.property());
         }
-        // IN query uses the same target-column selection strategy as equality queries.
+        // IN 查询与等值查询使用同一套目标列选择策略。
         String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
         expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
         if (expression.getRightExpression() instanceof Select subquery) {
@@ -1193,7 +1192,7 @@ public class SqlRewriteEngine {
     private Column buildColumn(Column source, String targetColumn) {
         Column column = new Column(quote(targetColumn));
         if (source.getTable() != null && source.getTable().getName() != null) {
-            // Keep only the table reference name (table name or alias) to avoid generating invalid SQL like "t AS t.`col`".
+            // 这里只保留表引用名（表名或别名），避免生成类似 "t AS t.`col`" 的非法 SQL。
             column.setTable(new Table(source.getTable().getName()));
         }
         return column;
@@ -1261,7 +1260,7 @@ public class SqlRewriteEngine {
 
         private JdbcParameter insertSynthetic(Object value, MaskingMode maskingMode) {
             String property = nextSyntheticName();
-            // Shadow-column parameters must be inserted at the current position so that SQL placeholders stay aligned.
+            // 辅助列参数必须插入当前位置，才能保证 SQL 占位符顺序始终对齐。
             parameterMappings.add(currentParameterIndex, new ParameterMapping.Builder(configuration, property,
                     value == null ? String.class : value.getClass()).build());
             boundSql.setAdditionalParameter(property, value);
@@ -1277,7 +1276,7 @@ public class SqlRewriteEngine {
             }
             ParameterMapping original = parameterMappings.get(parameterIndex);
             String property = nextSyntheticName();
-            // Do not reuse the original property name, or MyBatis may overwrite values from the business parameter object.
+            // 不能复用原始属性名，否则 MyBatis 可能会被业务参数对象中的同名值覆盖。
             ParameterMapping rewritten = new ParameterMapping.Builder(configuration, property,
                     value == null ? String.class : value.getClass())
                     .jdbcType(original.getJdbcType())

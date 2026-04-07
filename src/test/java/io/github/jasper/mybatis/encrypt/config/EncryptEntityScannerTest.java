@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.config;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import lombok.Data;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -27,6 +28,7 @@ class EncryptEntityScannerTest {
         });
     }
 
+    @Data
     static class ScannedEntity {
 
         private Long id;

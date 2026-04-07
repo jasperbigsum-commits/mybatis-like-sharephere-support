@@ -7,51 +7,50 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 
 /**
- * External configuration for the database encryption plugin.
+ * 数据库加密插件的外部配置。
  *
- * <p>The properties include global switches, SQL dialect selection, automatic entity scanning,
- * and per-table field encryption rules.</p>
+ * <p>包含全局开关、SQL 方言选择、自动扫描实体以及按表配置的字段加密规则。</p>
  */
 @ConfigurationProperties(prefix = "mybatis.encrypt")
 public class DatabaseEncryptionProperties {
 
     /**
-     * Master switch for the plugin.
+     * 插件总开关。
      */
     private boolean enabled = true;
 
     /**
-     * Whether missing metadata should fail fast instead of silently skipping encryption.
+     * 缺少元数据时是否快速失败，而不是静默跳过加密处理。
      */
     private boolean failOnMissingRule = true;
 
     /**
-     * Whether rewritten SQL should be logged with masked parameter values.
+     * 是否记录带参数脱敏值的改写后 SQL。
      */
     private boolean logMaskedSql = true;
 
     /**
-     * Default key used by built-in cipher algorithms when no custom bean configuration overrides it.
+     * 内置加密算法在没有自定义 bean 覆盖时使用的默认密钥。
      */
     private String defaultCipherKey = "change-me-before-production";
 
     /**
-     * Enables startup scanning of entity annotations to pre-register encryption metadata.
+     * 是否在启动阶段扫描实体注解并预注册加密元数据。
      */
     private boolean scanEntityAnnotations = true;
 
     /**
-     * Base packages used by the entity scanner. When empty, Spring Boot auto-configuration packages are used.
+     * 实体扫描器使用的基础包列表；为空时使用 Spring Boot 自动配置包。
      */
     private List<String> scanPackages = List.of();
 
     /**
-     * SQL dialect used for quoting identifiers in rewritten SQL.
+     * 改写 SQL 时用于引用标识符的 SQL 方言。
      */
     private SqlDialect sqlDialect = SqlDialect.MYSQL;
 
     /**
-     * Explicit per-table encryption rules keyed by logical name or table alias in configuration.
+     * 配置中显式声明的按表加密规则，键可以是逻辑名或表别名。
      */
     private Map<String, TableRuleProperties> tables = new LinkedHashMap<>();
 
@@ -120,17 +119,17 @@ public class DatabaseEncryptionProperties {
     }
 
     /**
-     * Table-level rule definition bound from configuration.
+     * 从配置绑定得到的表级规则定义。
      */
     public static class TableRuleProperties {
 
         /**
-         * Physical table name. When omitted, the outer map key is treated as the default table name.
+         * 物理表名；省略时外层 map 的键会作为默认表名。
          */
         private String table;
 
         /**
-         * Field rules keyed by entity property name.
+         * 以实体属性名为键的字段规则集合。
          */
         private Map<String, FieldRuleProperties> fields = new LinkedHashMap<>();
 
@@ -152,67 +151,67 @@ public class DatabaseEncryptionProperties {
     }
 
     /**
-     * Field-level encryption rule definition.
+     * 字段级加密规则定义。
      */
     public static class FieldRuleProperties {
 
         /**
-         * Original business column name used by application SQL. When omitted in configuration, property-name snake_case is used.
+         * 应用 SQL 使用的原始业务列名；配置省略时使用属性名的 snake_case。
          */
         private String column;
 
         /**
-         * Storage mode for the encrypted field.
+         * 加密字段的存储模式。
          */
         private FieldStorageMode storageMode = FieldStorageMode.SAME_TABLE;
 
         /**
-         * External storage table used when {@link #storageMode} is {@code SEPARATE_TABLE}.
+         * 当 {@link #storageMode} 为 {@code SEPARATE_TABLE} 时使用的外部存储表。
          */
         private String storageTable;
 
         /**
-         * Real ciphertext storage column. Defaults to column when omitted.
+         * 实际密文存储列；省略时默认使用 column。
          */
         private String storageColumn;
 
         /**
-         * Entity property used as the business row identifier. When omitted, it is inferred internally.
+         * 用作业务行标识的实体属性；省略时由框架内部推断。
          */
         private String sourceIdProperty = "";
 
         /**
-         * Source identifier column in the business table.
+         * 业务表中的来源标识列。
          */
         private String sourceIdColumn;
 
         /**
-         * Identifier column in the external storage table.
+         * 外部存储表中的标识列。
          */
         private String storageIdColumn;
 
         /**
-         * Cipher algorithm bean name.
+         * 加密算法 bean 名称。
          */
         private String cipherAlgorithm = "sm4";
 
         /**
-         * Assisted equality lookup column that stores hash or deterministic token values.
+         * 用于存储哈希或确定性标记值的辅助等值查询列。
          */
         private String assistedQueryColumn;
 
         /**
-         * Assisted equality algorithm bean name.
+         * 辅助等值查询算法 bean 名称。
          */
         private String assistedQueryAlgorithm = "sm3";
 
         /**
-         * Optional LIKE lookup column.
+         * 可选的 LIKE 查询列。
          */
         private String likeQueryColumn;
 
         /**
-         * LIKE lookup algorithm bean name.
+         * LIKE 查询算法 bean 名称。
          */
         private String likeQueryAlgorithm = "normalizedLike";
 

@@ -1,21 +1,21 @@
 package io.github.jasper.mybatis.encrypt.core.metadata;
 
 /**
- * Field-level encryption rule.
+ * 字段级加密规则。
  *
- * @param property entity property name
- * @param column original business column name used by application SQL
- * @param cipherAlgorithm cipher algorithm bean name
- * @param assistedQueryColumn assisted equality query column
- * @param assistedQueryAlgorithm assisted equality algorithm bean name
- * @param likeQueryColumn LIKE helper column
- * @param likeQueryAlgorithm LIKE helper algorithm bean name
- * @param storageMode ciphertext storage mode
- * @param storageTable external ciphertext table when separate-table mode is enabled
- * @param storageColumn real ciphertext storage column, defaulting to {@code column}
- * @param sourceIdProperty entity identifier property used for separate-table linkage, inferred from sourceIdColumn when omitted
- * @param sourceIdColumn business-table identifier column
- * @param storageIdColumn external-table identifier column
+ * @param property 实体属性名
+ * @param column 应用 SQL 使用的原始业务列名
+ * @param cipherAlgorithm 加密算法 bean 名称
+ * @param assistedQueryColumn 辅助等值查询列
+ * @param assistedQueryAlgorithm 辅助等值算法 bean 名称
+ * @param likeQueryColumn LIKE 辅助查询列
+ * @param likeQueryAlgorithm LIKE 辅助算法 bean 名称
+ * @param storageMode 密文存储模式
+ * @param storageTable 启用独立表模式时使用的外部密文表
+ * @param storageColumn 实际密文存储列，默认与 {@code column} 一致
+ * @param sourceIdProperty 独立表关联使用的实体标识属性，省略时根据 sourceIdColumn 推断
+ * @param sourceIdColumn 业务表标识列
+ * @param storageIdColumn 外部表标识列
  */
 public record EncryptColumnRule(String property,
                                 String column,

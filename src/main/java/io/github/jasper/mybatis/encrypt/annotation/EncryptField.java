@@ -8,11 +8,10 @@ import java.lang.annotation.Target;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 
 /**
- * Declares encryption metadata for an entity property.
+ * 为实体属性声明加密元数据。
  *
- * <p>{@code column} always means the original business table column referenced by application SQL.
- * {@code storageColumn} means the real ciphertext storage column and defaults to {@code column}
- * when not configured.</p>
+ * <p>{@code column} 始终表示应用 SQL 引用的原始业务列，{@code storageColumn} 表示真实密文存储列；
+ * 未配置时，{@code storageColumn} 默认与 {@code column} 保持一致。</p>
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
@@ -20,46 +19,45 @@ import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 public @interface EncryptField {
 
     /**
-     * Original business column name.
+     * 原始业务列名。
      *
-     * <p>When omitted, the loader resolves it in this order:
-     * {@code @TableField(value)}, JPA {@code @Column(name)}, then property-name snake_case.</p>
+     * <p>省略时，加载器会按以下顺序解析：{@code @TableField(value)}、JPA {@code @Column(name)}，最后退回到属性名 snake_case。</p>
      */
     String column() default "";
 
     /**
-     * Storage mode for ciphertext persistence.
+     * 密文持久化的存储模式。
      */
     FieldStorageMode storageMode() default FieldStorageMode.SAME_TABLE;
 
     /**
-     * External table used when {@code storageMode=SEPARATE_TABLE}.
+     * 当 {@code storageMode=SEPARATE_TABLE} 时使用的外部表。
      */
     String storageTable() default "";
 
     /**
-     * Real ciphertext storage column. Defaults to {@link #column()} when omitted.
+     * 实际密文存储列；省略时默认使用 {@link #column()}。
      */
     String storageColumn() default "";
 
     /**
-     * Entity property used as the business row identifier for separate-table storage.
-     * When omitted, the loader infers it from {@link #sourceIdColumn()}.
+     * 独立表存储时作为业务行标识的实体属性。
+     * 省略时，加载器会根据 {@link #sourceIdColumn()} 推断。
      */
     String sourceIdProperty() default "";
 
     /**
-     * Business-table identifier column. When omitted, the loader resolves the entity id column internally.
+     * 业务表标识列；省略时由加载器在内部解析实体 id 列。
      */
     String sourceIdColumn() default "";
 
     /**
-     * Separate-table identifier column. Defaults to {@code sourceIdColumn}.
+     * 独立表标识列；默认使用 {@code sourceIdColumn}。
      */
     String storageIdColumn() default "";
 
     /**
-     * Cipher algorithm bean name.
+     * 加密算法 bean 名称。
      */
     String cipherAlgorithm() default "sm4";
 

@@ -29,10 +29,9 @@ import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 
 /**
- * MyBatis plugin entry point.
+ * MyBatis 插件入口。
  *
- * <p>Rewrites SQL before execution, synchronizes separate encrypted tables after writes,
- * and decrypts query results before they are returned to business code.</p>
+ * <p>负责在 SQL 执行前改写语句，在写操作后同步独立加密表，并在查询结果返回给业务代码前完成解密。</p>
  */
 @Intercepts({
         @Signature(type = StatementHandler.class, method = "prepare", args = {Connection.class, Integer.class}),

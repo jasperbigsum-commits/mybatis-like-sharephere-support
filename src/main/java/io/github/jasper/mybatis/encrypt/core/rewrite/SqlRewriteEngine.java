@@ -17,6 +17,8 @@ import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.session.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
@@ -40,6 +42,8 @@ import java.util.*;
  * 对不支持的范围查询、排序和存在歧义的查询场景会快速失败。</p>
  */
 public class SqlRewriteEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(SqlRewriteEngine.class);
 
     private final EncryptMetadataRegistry metadataRegistry;
     private final AlgorithmRegistry algorithmRegistry;
@@ -80,18 +84,36 @@ public class SqlRewriteEngine {
                 return RewriteResult.unchanged();
             }
             String rewrittenSql = statement.toString();
-            return new RewriteResult(true, rewrittenSql, context.parameterMappings, context.maskedParameters,
-                    sqlLogMasker.mask(rewrittenSql, context.maskedParameters));
+            String maskedSql = sqlLogMasker.mask(rewrittenSql, context.maskedParameters);
+            if (properties.isLogMaskedSql() && log.isDebugEnabled()) {
+                log.debug("Encrypted SQL rewrite applied for statement [{}]: {}",
+                        mappedStatement.getId(), maskedSql);
+            }
+            return new RewriteResult(true, rewrittenSql, context.parameterMappings, context.maskedParameters, maskedSql);
         } catch (UnsupportedEncryptedOperationException ex) {
+            if (log.isDebugEnabled()) {
+                log.debug("Encrypted SQL rewrite rejected for statement [{}]: {}",
+                        mappedStatement.getId(), ex.getMessage());
+            }
             throw ex;
         } catch (Exception ex) {
             if (properties.isFailOnMissingRule()) {
                 throw new EncryptionConfigurationException("Failed to rewrite encrypted SQL: " + boundSql.getSql(), ex);
             }
+            if (log.isDebugEnabled()) {
+                log.debug("Encrypted SQL rewrite skipped for statement [{}] because failOnMissingRule=false: {}",
+                        mappedStatement.getId(), ex.getMessage(), ex);
+            }
             return RewriteResult.unchanged();
         }
     }
 
+    /**
+     * 改写 `INSERT` 语句中的逻辑加密列。
+     *
+     * <p>同表模式下，逻辑列会被替换为密文列，并按规则追加辅助查询列、LIKE 查询列。
+     * 独立表模式下，主表仍保留逻辑列本身，但参数值会被替换成写前准备好的外部引用 id。</p>
+     */
     private void rewriteInsert(Insert insert, RewriteContext context) {
         EncryptTableRule tableRule = metadataRegistry.findByTable(insert.getTable().getName()).orElse(null);
         if (tableRule == null) {
@@ -138,6 +160,12 @@ public class SqlRewriteEngine {
         context.changed = true;
     }
 
+    /**
+     * 改写 `UPDATE` 语句。
+     *
+     * <p>`SET` 子句负责把业务明文写成存储态值，`WHERE` 子句则统一走查询态列改写。
+     * 两段逻辑故意拆开，便于排查“写入值不对”和“查询条件不命中”这两类问题。</p>
+     */
     private void rewriteUpdate(Update update, RewriteContext context) {
         TableContext tableContext = new TableContext();
         registerTable(tableContext, update.getTable());
@@ -187,6 +215,12 @@ public class SqlRewriteEngine {
         update.setWhere(rewriteCondition(update.getWhere(), tableContext, context));
     }
 
+    /**
+     * 改写 `DELETE` 的条件部分。
+     *
+     * <p>删除操作不会改写列清单，只允许在条件里使用受支持的加密字段比较语义。
+     * 遇到不安全或不可靠的条件时，会在条件递归阶段直接失败。</p>
+     */
     private void rewriteDelete(Delete delete, RewriteContext context) {
         TableContext tableContext = new TableContext();
         registerTable(tableContext, delete.getTable());
@@ -200,6 +234,13 @@ public class SqlRewriteEngine {
         rewriteSelect(select, context, ProjectionMode.NORMAL);
     }
 
+    /**
+     * 改写 `SELECT` 语句。
+     *
+     * <p>这里同时处理三件事：注册当前查询块可见的表与别名、递归改写条件和子查询、
+     * 以及按 `ProjectionMode` 决定投影列展开方式。复杂 SQL 排查时，先确认当前查询块
+     * 落在哪个投影模式，通常能更快定位问题是在投影阶段还是条件阶段。</p>
+     */
     private void rewriteSelect(Select select, RewriteContext context, ProjectionMode projectionMode) {
         if (select instanceof SetOperationList setOperationList) {
             for (Select child : setOperationList.getSelects()) {
@@ -242,7 +283,15 @@ public class SqlRewriteEngine {
         validateOrderBy(plainSelect.getOrderByElements(), tableContext);
     }
 
-    // JSqlParser 5.x 仍然使用带括号的表达式列表来表示分组条件。
+    /**
+     * 递归改写条件表达式树。
+     *
+     * <p>这是排查查询条件问题的主入口。它统一处理 `WHERE`、`HAVING`、`QUALIFY`、
+     * `CASE WHEN`、`EXISTS` 子查询以及括号嵌套。某类表达式如果没有在这里被正确消费或改写，
+     * 往往会进一步表现为参数槽位错位或条件未命中。</p>
+     *
+     * <p>JSqlParser 5.x 仍然使用带括号的表达式列表来表示部分分组条件，因此需要显式递归。</p>
+     */
     private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
         if (expression == null) {
             return null;
@@ -342,6 +391,12 @@ public class SqlRewriteEngine {
         return expression;
     }
 
+    /**
+     * 改写等值与不等值比较。
+     *
+     * <p>同表模式优先落到辅助查询列；独立表模式则改写成 `EXISTS` 子查询，
+     * 通过主表逻辑列中保存的引用 id 去关联独立表记录。</p>
+     */
     private Expression rewriteEquality(BinaryExpression expression, TableContext tableContext, RewriteContext context) {
         ColumnResolution resolution = resolveComparison(expression, tableContext);
         if (resolution == null) {
@@ -374,6 +429,12 @@ public class SqlRewriteEngine {
         return expression;
     }
 
+    /**
+     * 改写 `LIKE` 条件。
+     *
+     * <p>同表模式要求配置 `likeQueryColumn`；独立表模式会改写成外层 `EXISTS`，
+     * 其中关联条件仍然是“独立表主键 = 主表逻辑列中的引用 id”。</p>
+     */
     private Expression rewriteLikeCondition(LikeExpression expression, TableContext tableContext, RewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
@@ -397,6 +458,12 @@ public class SqlRewriteEngine {
         return expression;
     }
 
+    /**
+     * 改写 `IN` / `NOT IN` 条件。
+     *
+     * <p>字面量列表和子查询比较都会走这里，但独立表字段目前明确不支持 `IN`，
+     * 因为它需要额外的 `EXISTS` 展开或 join 语义，参数顺序也更容易失真。</p>
+     */
     private Expression rewriteInCondition(InExpression expression, TableContext tableContext, RewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
@@ -432,6 +499,12 @@ public class SqlRewriteEngine {
         return expression;
     }
 
+    /**
+     * 改写 `IS NULL` / `IS NOT NULL`。
+     *
+     * <p>同表模式判断密文列本身；独立表模式判断的是主表中的引用 id 是否能在独立表中找到记录，
+     * 因而会被改写成存在性子查询。</p>
+     */
     private Expression rewriteIsNullCondition(IsNullExpression expression, TableContext tableContext, RewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
@@ -463,6 +536,12 @@ public class SqlRewriteEngine {
         throw new UnsupportedEncryptedOperationException("Encrypted query condition must use prepared parameter or string literal.");
     }
 
+    /**
+     * 把独立表字段条件改写成 `EXISTS` 子查询。
+     *
+     * <p>这个方法统一处理独立表等值和 LIKE 两种查询。它先把业务明文转换成查询态值，
+     * 再同步重建参数绑定，最后生成带有“引用 id 关联条件”的 `EXISTS`。</p>
+     */
     private Expression rewriteSeparateTableCondition(ColumnResolution resolution,
                                                      Expression operand,
                                                      RewriteContext context,
@@ -491,6 +570,12 @@ public class SqlRewriteEngine {
         throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
     }
 
+    /**
+     * 改写写路径上的业务明文表达式。
+     *
+     * <p>它只负责生成主密文列对应的值，不直接处理辅助列和 LIKE 列。
+     * 后两者由调用方基于返回的 `WriteValue` 再决定是否追加影子参数。</p>
+     */
     private WriteValue rewriteEncryptedWriteExpression(Expression expression,
                                                        EncryptColumnRule rule,
                                                        RewriteContext context) {
@@ -505,6 +590,7 @@ public class SqlRewriteEngine {
             return new WriteValue(stringValue, plainValue, false);
         }
         if (expression instanceof LongValue) {
+            // 当表达式是LongValue ?
             return new WriteValue(new StringValue(cipherValue), plainValue, false);
         }
         if (expression instanceof NullValue) {
@@ -611,6 +697,12 @@ public class SqlRewriteEngine {
         throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
     }
 
+    /**
+     * 改写普通 `SELECT` 的投影列表。
+     *
+     * <p>`NORMAL` 模式输出业务可见的逻辑列别名；`DERIVED` 模式会额外注入隐藏的辅助列别名，
+     * 供外层查询继续按逻辑字段名改写条件。独立表字段不会在这里展开，因为它依赖结果回填阶段解密。</p>
+     */
     private void rewriteSelectItems(PlainSelect plainSelect,
                                     TableContext tableContext,
                                     ProjectionMode projectionMode,
@@ -656,6 +748,12 @@ public class SqlRewriteEngine {
         }
     }
 
+    /**
+     * 改写 `IN (subquery)` 右侧子查询的投影列表。
+     *
+     * <p>比较型子查询不能保留业务逻辑列语义，只能输出真正参与比较的物理列，
+     * 否则外层 `IN` 左右两侧含义会不一致。</p>
+     */
     private void rewriteComparisonSelectItems(PlainSelect plainSelect, TableContext tableContext) {
         if (plainSelect.getSelectItems() == null) {
             return;
@@ -762,6 +860,12 @@ public class SqlRewriteEngine {
         }
     }
 
+    /**
+     * 构造独立表等值/LIKE 查询使用的 `EXISTS` 子查询。
+     *
+     * <p>子查询中始终同时包含两部分谓词：一是“独立表主键 = 主表逻辑列里的引用 id”，
+     * 二是目标查询列与转换后查询值的比较。排查独立表条件问题时，这两个条件缺一不可。</p>
+     */
     private Expression buildExistsSubQuery(Column sourceColumn,
                                            EncryptColumnRule rule,
                                            String targetColumn,
@@ -791,6 +895,11 @@ public class SqlRewriteEngine {
         return existsExpression;
     }
 
+    /**
+     * 构造独立表 `IS NULL` / `IS NOT NULL` 对应的存在性子查询。
+     *
+     * <p>这里判断的不是业务明文是否为空，而是主表中保存的引用 id 是否能在独立表中定位到记录。</p>
+     */
     private Expression buildExistsPresenceSubQuery(Column sourceColumn,
                                                    EncryptColumnRule rule,
                                                    boolean shouldExist) {
@@ -1092,6 +1201,12 @@ public class SqlRewriteEngine {
         };
     }
 
+    /**
+     * 为派生表生成一份可供外层继续解析的伪表规则。
+     *
+     * <p>外层查询块只能看到派生表投影列名，看不到内部真实物理列，因此这里要把子查询输出重新映射成
+     * 新的 `EncryptTableRule`，这样外层 `t.phone = ?` 之类的条件才有机会继续被改写。</p>
+     */
     private EncryptTableRule buildDerivedTableRule(String alias, Select select) {
         if (select instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
             return buildDerivedTableRule(alias, parenthesedSelect.getSelect());
@@ -1227,6 +1342,12 @@ public class SqlRewriteEngine {
         throw new EncryptionConfigurationException("Unsupported algorithm for field: " + rule.property());
     }
 
+    /**
+     * 一次 SQL 改写过程中的可变上下文。
+     *
+     * <p>它同时维护当前已消费到第几个原始参数、改写后的参数映射列表以及新增附加参数。
+     * 排查参数个数不一致、顺序错位或 `BoundSql.additionalParameter` 被覆盖时，应优先检查这里。</p>
+     */
     private static final class RewriteContext {
 
         private final Configuration configuration;
@@ -1258,6 +1379,12 @@ public class SqlRewriteEngine {
             replaceParameter(currentParameterIndex - 1, value, maskingMode);
         }
 
+        /**
+         * 在当前位置插入一个新的合成参数。
+         *
+         * <p>这主要服务于辅助列和 LIKE 列，因为它们会在原 SQL 的参数序列中新增占位符。
+         * 如果不是按当前位置插入，而是简单追加到末尾，JDBC 绑定顺序就会和 SQL 占位符顺序错开。</p>
+         */
         private JdbcParameter insertSynthetic(Object value, MaskingMode maskingMode) {
             String property = nextSyntheticName();
             // 辅助列参数必须插入当前位置，才能保证 SQL 占位符顺序始终对齐。
@@ -1270,6 +1397,12 @@ public class SqlRewriteEngine {
             return new JdbcParameter();
         }
 
+        /**
+         * 用新的合成属性替换原有参数槽位。
+         *
+         * <p>这里不能复用原属性名，否则 MyBatis 在运行时仍可能回到业务参数对象中取同名值，
+         * 导致已经改写完成的附加参数被原始明文覆盖。</p>
+         */
         private void replaceParameter(int parameterIndex, Object value, MaskingMode maskingMode) {
             if (parameterIndex < 0 || parameterIndex >= parameterMappings.size()) {
                 return;
@@ -1314,6 +1447,12 @@ public class SqlRewriteEngine {
         }
     }
 
+    /**
+     * 当前查询块可见表规则的解析上下文。
+     *
+     * <p>它把真实表名、别名和派生表别名统一收敛到一份查找表里，负责回答“当前列到底属于哪张表”。
+     * 复杂 JOIN、子查询、派生表场景下如果出现字段歧义或规则丢失，通常都和这里的注册结果有关。</p>
+     */
     private static final class TableContext {
 
         private final Map<String, EncryptTableRule> ruleByAlias = new LinkedHashMap<>();

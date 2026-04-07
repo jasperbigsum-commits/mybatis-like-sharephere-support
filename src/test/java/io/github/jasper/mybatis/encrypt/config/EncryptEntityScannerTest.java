@@ -16,7 +16,7 @@ class EncryptEntityScannerTest {
                     "mybatis.encrypt.enabled=true",
                     "mybatis.encrypt.default-cipher-key=test-key",
                     "mybatis.encrypt.scan-entity-annotations=true",
-                    "mybatis.encrypt.scan-packages=tech.jasper.mybatis.encrypt.config"
+                    "mybatis.encrypt.scan-packages=io.github.jasper.mybatis.encrypt.config"
             );
 
     @Test

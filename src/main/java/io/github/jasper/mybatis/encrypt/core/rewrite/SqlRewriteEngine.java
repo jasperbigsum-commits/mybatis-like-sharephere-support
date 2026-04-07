@@ -116,8 +116,8 @@ public class SqlRewriteEngine {
                 continue;
             }
             if (rule.isStoredInSeparateTable()) {
-                discardExpression(expression, context);
-                context.changed = true;
+                rewrittenColumns.add(column);
+                rewrittenExpressions.add(rewriteSeparateTableReferenceExpression(expression, context));
                 continue;
             }
             rewrittenColumns.add(new Column(quote(rule.storageColumn())));
@@ -161,8 +161,8 @@ public class SqlRewriteEngine {
                 }
 
                 if (rule.isStoredInSeparateTable()) {
-                    discardExpression(expression, context);
-                    context.changed = true;
+                    rewrittenColumns.add(column);
+                    rewrittenExpressions.add(rewriteSeparateTableReferenceExpression(expression, context));
                     continue;
                 }
                 rewrittenColumns.add(buildColumn(column, rule.storageColumn()));
@@ -235,7 +235,7 @@ public class SqlRewriteEngine {
         if (projectionMode == ProjectionMode.COMPARISON) {
             rewriteComparisonSelectItems(plainSelect, tableContext);
         } else {
-            rewriteSelectItems(plainSelect, tableContext, projectionMode);
+            rewriteSelectItems(plainSelect, tableContext, projectionMode, context);
         }
         validateAnalyticExpressions(plainSelect.getSelectItems(), tableContext);
         validateWindowDefinitions(plainSelect.getWindowDefinitions(), tableContext);
@@ -519,6 +519,23 @@ public class SqlRewriteEngine {
         return expression;
     }
 
+    /**
+     * 改写独立表字段在主表写 SQL 中对应的参数。
+     *
+     * <p>独立表模式下，主表逻辑列写入的不再是业务明文，而是写前阶段已经准备好的独立表引用 id。
+     * 这里会把原参数槽位替换成该引用值，并同步重建参数映射类型，避免运行时仍按原业务字段类型绑定。</p>
+     */
+    private Expression rewriteSeparateTableReferenceExpression(Expression expression, RewriteContext context) {
+        if (expression instanceof JdbcParameter) {
+            int parameterIndex = context.consumeOriginal();
+            Object referenceId = context.originalValue(parameterIndex, parameterValueResolver);
+            context.replaceParameter(parameterIndex, referenceId, MaskingMode.MASKED);
+            return expression;
+        }
+        consumeExpression(expression, context);
+        return expression;
+    }
+
     private Expression buildShadowExpression(WriteValue writeValue, String value, MaskingMode maskingMode, RewriteContext context) {
         if (value == null) {
             return new NullValue();
@@ -595,7 +612,10 @@ public class SqlRewriteEngine {
         throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
     }
 
-    private void rewriteSelectItems(PlainSelect plainSelect, TableContext tableContext, ProjectionMode projectionMode) {
+    private void rewriteSelectItems(PlainSelect plainSelect,
+                                    TableContext tableContext,
+                                    ProjectionMode projectionMode,
+                                    RewriteContext context) {
         if (plainSelect.getSelectItems() == null) {
             return;
         }
@@ -606,11 +626,13 @@ public class SqlRewriteEngine {
                 rewritten.add(item);
                 appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
                         allTableColumns.getTable(), projectionMode);
+                context.changed = true;
                 continue;
             }
             if (expression instanceof AllColumns) {
                 rewritten.add(item);
                 appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(null), null, projectionMode);
+                context.changed = true;
                 continue;
             }
             ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
@@ -619,44 +641,19 @@ public class SqlRewriteEngine {
                 continue;
             }
             if (resolution.rule().isStoredInSeparateTable()) {
+                rewritten.add(item);
+                context.changed = true;
                 continue;
             }
             rewritten.add(buildSelectStorageItem(item, resolution));
+            context.changed = true;
             if (projectionMode == ProjectionMode.DERIVED) {
                 appendDerivedHelperSelectItems(rewritten, item, resolution);
+                context.changed = true;
             }
         }
         if (!rewritten.isEmpty()) {
             plainSelect.setSelectItems(rewritten);
-        }
-    }
-
-    private void discardExpression(Expression expression, RewriteContext context) {
-        if (expression == null) {
-            return;
-        }
-        if (expression instanceof JdbcParameter) {
-            int parameterIndex = context.consumeOriginal();
-            context.removeParameter(parameterIndex);
-            return;
-        }
-        if (expression instanceof ParenthesedExpressionList parenthesis) {
-            parenthesis.forEach(o -> {
-                if (o instanceof Expression exp) {
-                    discardExpression(exp, context);
-                }
-            });
-            return;
-        }
-        if (expression instanceof BinaryExpression binaryExpression) {
-            discardExpression(binaryExpression.getLeftExpression(), context);
-            discardExpression(binaryExpression.getRightExpression(), context);
-            return;
-        }
-        if (expression instanceof Function function && function.getParameters() != null) {
-            for (Expression item : function.getParameters()) {
-                discardExpression(item, context);
-            }
         }
     }
 
@@ -667,7 +664,7 @@ public class SqlRewriteEngine {
         List<SelectItem<?>> rewritten = new ArrayList<>();
         for (SelectItem<?> item : plainSelect.getSelectItems()) {
             Expression expression = item.getExpression();
-            if (expression instanceof AllColumns || expression instanceof AllTableColumns) {
+            if (expression instanceof AllColumns) {
                 throw new UnsupportedEncryptedOperationException("Wildcard select is not supported in encrypted IN subquery.");
             }
             ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
@@ -776,7 +773,7 @@ public class SqlRewriteEngine {
         subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
         EqualsTo joinEquals = new EqualsTo();
         joinEquals.setLeftExpression(new Column(quote(rule.storageIdColumn())));
-        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.sourceIdColumn()));
+        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.column()));
         Expression valuePredicate;
         if (equality) {
             EqualsTo valueEquals = new EqualsTo();
@@ -803,7 +800,7 @@ public class SqlRewriteEngine {
         subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
         EqualsTo joinEquals = new EqualsTo();
         joinEquals.setLeftExpression(new Column(quote(rule.storageIdColumn())));
-        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.sourceIdColumn()));
+        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.column()));
         subQueryBody.setWhere(joinEquals);
         ExistsExpression existsExpression = new ExistsExpression();
         existsExpression.setRightExpression(new ParenthesedSelect().withSelect(subQueryBody));

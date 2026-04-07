@@ -23,7 +23,7 @@ public class AutoConfiguredUserRecord {
             storageMode = FieldStorageMode.SEPARATE_TABLE,
             storageTable = "user_id_card_encrypt",
             storageColumn = "id_card_cipher",
-            storageIdColumn = "user_id",
+            storageIdColumn = "id",
             assistedQueryColumn = "id_card_hash",
             likeQueryColumn = "id_card_like"
     )

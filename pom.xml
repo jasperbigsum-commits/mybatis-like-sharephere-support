@@ -102,6 +102,7 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.5.2</version>
         <configuration>
+          <argLine>-Dfile.encoding=UTF-8</argLine>
           <includes>
             <include>**/*Test.java</include>
           </includes>
@@ -124,21 +125,8 @@
           </execution>
         </executions>
       </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-javadoc-plugin</artifactId>
-        <version>3.11.2</version>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals>
-              <goal>jar</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
       <!-- GPG 签名 -->
-      <plugin>
+      <!--<plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-gpg-plugin</artifactId>
         <version>3.2.8</version>
@@ -152,12 +140,12 @@
         </executions>
         <configuration>
           <gpgArguments>
-            <arg>--pinentry-mode</arg>
+            <arg>&#45;&#45;pinentry-mode</arg>
             <arg>loopback</arg>
           </gpgArguments>
         </configuration>
       </plugin>
-      <!-- central 自动发布插件 -->
+      &lt;!&ndash; central 自动发布插件 &ndash;&gt;
       <plugin>
         <groupId>org.sonatype.central</groupId>
         <artifactId>central-publishing-maven-plugin</artifactId>
@@ -167,7 +155,7 @@
           <publishingServerId>central</publishingServerId>
           <autoPublish>true</autoPublish>
         </configuration>
-      </plugin>
+      </plugin>-->
     </plugins>
   </build>
 
@@ -186,16 +174,16 @@
     </developer>
   </developers>
 
-  <scm>
-    <connection>scm:git:git@github.com:jasperbigsum-commits/mybatis-like-sharephere-support.git</connection>
-    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
-  </scm>
+<!--  <scm>-->
+<!--    <connection>scm:git:git@github.com:jasperbigsum-commits/mybatis-like-sharephere-support.git</connection>-->
+<!--    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>-->
+<!--  </scm>-->
 
-  <distributionManagement>
-    <repository>
-      <id>central</id>
-      <url>https://central.sonatype.com/api/maven/v1</url>
-    </repository>
-  </distributionManagement>
+<!--  <distributionManagement>-->
+<!--    <repository>-->
+<!--      <id>central</id>-->
+<!--      <url>https://central.sonatype.com/api/maven/v1</url>-->
+<!--    </repository>-->
+<!--  </distributionManagement>-->
 
 </project>

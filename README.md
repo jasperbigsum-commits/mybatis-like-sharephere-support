@@ -96,7 +96,7 @@
 
 ```xml
 <dependency>
-  <groupId>tech.jasper</groupId>
+  <groupId>io.github.jasper</groupId>
   <artifactId>mybatis-like-sharephere-support</artifactId>
   <version>1.0.0-SNAPSHOT</version>
 </dependency>
@@ -105,7 +105,7 @@
 ### 2. Gradle
 
 ```gradle
-implementation "tech.jasper:mybatis-like-sharephere-support:1.0.0-SNAPSHOT"
+implementation "io.github.jasper:mybatis-like-sharephere-support:1.0.0-SNAPSHOT"
 ```
 
 ### 3. 多模块工程直接依赖

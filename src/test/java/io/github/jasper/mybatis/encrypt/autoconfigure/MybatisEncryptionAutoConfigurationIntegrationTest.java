@@ -28,8 +28,9 @@ import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
                 "mybatis.encrypt.enabled=true",
                 "mybatis.encrypt.default-cipher-key=boot-integration-key",
                 "mybatis.encrypt.scan-entity-annotations=true",
-                "mybatis.encrypt.scan-packages=tech.jasper.mybatis.encrypt.autoconfigure",
-                "mybatis.encrypt.log-masked-sql=false"
+                "mybatis.encrypt.scan-packages=io.github.jasper.mybatis.encrypt.autoconfigure",
+                "mybatis.encrypt.log-masked-sql=false",
+                "mybatis.configuration.map-underscore-to-camel-case=true"
         }
 )
 class MybatisEncryptionAutoConfigurationIntegrationTest {
@@ -60,12 +61,13 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
                         name varchar(64),
                         phone_cipher varchar(512),
                         phone_hash varchar(128),
-                        phone_like varchar(255)
+                        phone_like varchar(255),
+                        id_card bigint
                     )
                     """);
             statement.execute("""
                     create table user_id_card_encrypt (
-                        user_id bigint primary key,
+                        id bigint auto_increment primary key,
                         id_card_cipher varchar(512),
                         id_card_hash varchar(128),
                         id_card_like varchar(255)
@@ -117,9 +119,9 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
              ResultSet separateResult = statement.executeQuery(
-                     "select user_id, id_card_cipher, id_card_hash from user_id_card_encrypt where user_id = 11")) {
+                     "select id, id_card_cipher, id_card_hash from user_id_card_encrypt")) {
             separateResult.next();
-            assertEquals(11L, separateResult.getLong("user_id"));
+            assertTrue(separateResult.getLong("id") > 0L);
             assertNotEquals("320101199001011234", separateResult.getString("id_card_cipher"));
             assertNotNull(separateResult.getString("id_card_hash"));
         }

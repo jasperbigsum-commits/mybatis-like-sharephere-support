@@ -1,9 +1,5 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.List;
 import java.util.Map;
 import org.apache.ibatis.mapping.BoundSql;
@@ -24,6 +20,8 @@ import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataL
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 class SqlRewriteEngineTest {
 
@@ -54,7 +52,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_cipher`"));
         assertTrue(result.sql().contains("`phone_hash`"));
         assertTrue(result.sql().contains("`phone_like`"));
-        assertTrue(!result.sql().contains("INSERT INTO user_account (`phone`,"));
+        assertFalse(result.sql().contains("INSERT INTO user_account (`phone`,"));
         result.applyTo(boundSql);
         assertEquals(4, boundSql.getParameterMappings().size());
     }
@@ -343,6 +341,60 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteSeparateTableEqualityUsingReferencedStorageId() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.id_card = ?",
+                List.of(new ParameterMapping.Builder(configuration, "idCard", String.class).build()),
+                Map.of("idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+        System.out.println("EQUALITY SQL => " + result.sql());
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableIsNullUsingReferencedStorageId() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.id_card IS NULL",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+        System.out.println("IS NULL SQL => " + result.sql());
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("NOT EXISTS"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+    }
+
+    @Test
     void shouldRewriteSeparateTableIsNullAndIsNotNull() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -372,7 +424,7 @@ class SqlRewriteEngineTest {
         RewriteResult isNotNullResult = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), isNotNullSql);
         assertTrue(isNotNullResult.changed());
         assertTrue(isNotNullResult.sql().contains("EXISTS"));
-        assertTrue(!isNotNullResult.sql().contains("NOT EXISTS"));
+        assertFalse(isNotNullResult.sql().contains("NOT EXISTS"));
     }
 
     @Test
@@ -525,7 +577,7 @@ class SqlRewriteEngineTest {
         );
 
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
-        assertTrue(!result.changed());
+        assertFalse(result.changed());
     }
 
     @Test
@@ -577,7 +629,7 @@ class SqlRewriteEngineTest {
         );
 
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
-        assertTrue(!result.changed());
+        assertFalse(result.changed());
     }
 
     private DatabaseEncryptionProperties sampleProperties() {
@@ -596,8 +648,7 @@ class SqlRewriteEngineTest {
         separateFieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
         separateFieldRule.setStorageTable("user_id_card_encrypt");
         separateFieldRule.setStorageColumn("id_card_cipher");
-        separateFieldRule.setSourceIdColumn("id");
-        separateFieldRule.setStorageIdColumn("user_id");
+        separateFieldRule.setStorageIdColumn("id");
         separateFieldRule.setAssistedQueryColumn("id_card_hash");
         tableRule.getFields().put("idCard", separateFieldRule);
         properties.getTables().put("userAccount", tableRule);

@@ -118,9 +118,10 @@ public class MybatisEncryptionAutoConfiguration {
     public DatabaseEncryptionInterceptor databaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
                                                                        ResultDecryptor resultDecryptor,
                                                                        DatabaseEncryptionProperties properties,
+                                                                       EncryptMetadataRegistry metadataRegistry,
                                                                        Map<String, SeparateTableEncryptionManager> managers) {
         return new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties,
-                managers.values().stream().findFirst().orElse(null));
+                managers.values().stream().findFirst().orElse(null), metadataRegistry);
     }
 
     @Bean

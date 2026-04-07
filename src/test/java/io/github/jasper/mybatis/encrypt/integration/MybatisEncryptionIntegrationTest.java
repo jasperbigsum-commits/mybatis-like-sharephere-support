@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -12,7 +13,15 @@ import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.executor.statement.StatementHandler;
+import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Invocation;
+import org.apache.ibatis.plugin.Plugin;
+import org.apache.ibatis.plugin.Signature;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -40,6 +49,8 @@ class MybatisEncryptionIntegrationTest {
 
     private JdbcDataSource dataSource;
     private SqlSessionFactory sqlSessionFactory;
+    private ParameterCaptureInterceptor parameterCaptureInterceptor;
+    private TrackingSeparateTableEncryptionManager trackingSeparateTableManager;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -48,6 +59,7 @@ class MybatisEncryptionIntegrationTest {
         dataSource.setUser("sa");
         dataSource.setPassword("");
         initializeSchema();
+        parameterCaptureInterceptor = new ParameterCaptureInterceptor();
         sqlSessionFactory = buildSqlSessionFactory();
     }
 
@@ -79,7 +91,7 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
-    void shouldSynchronizeSeparateTableAndHydrateResult() throws Exception {
+    void shouldStoreSeparateTableIdInMainTableAndHydrateResultByReference() throws Exception {
         UserRecord user = new UserRecord();
         user.setId(2L);
         user.setName("Bob");
@@ -103,12 +115,105 @@ class MybatisEncryptionIntegrationTest {
 
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(
-                     "select user_id, id_card_cipher, id_card_hash from user_id_card_encrypt where user_id = 2")) {
+             ResultSet mainResult = statement.executeQuery(
+                     "select id_card from user_account where id = 2")) {
+            mainResult.next();
+            String encryptId = mainResult.getString("id_card");
+            assertNotNull(encryptId);
+            assertTrue(!encryptId.isBlank());
+
+            try (ResultSet encryptResult = statement.executeQuery(
+                    "select id, id_card_cipher, id_card_hash from user_id_card_encrypt where id = " + encryptId)) {
+                encryptResult.next();
+                assertEquals(encryptId, encryptResult.getString("id"));
+                assertNotEquals("320101199001011234", encryptResult.getString("id_card_cipher"));
+                assertNotNull(encryptResult.getString("id_card_hash"));
+            }
+        }
+    }
+
+    @Test
+    void shouldStoreSeparateTableReferenceAsStringInBoundSql() throws Exception {
+        UserRecord user = new UserRecord();
+        user.setId(4L);
+        user.setName("Dave");
+        user.setPhone("13600136000");
+        user.setIdCard("320101199001018888");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        Object referenceValue = parameterCaptureInterceptor.lastIdCardAdditionalParameter;
+        assertNotNull(referenceValue);
+        assertTrue(referenceValue instanceof String);
+    }
+
+    @Test
+    void shouldSkipSeparateTablePreparationForSameTableOnlyWrite() {
+        UserRecord user = new UserRecord();
+        user.setId(5L);
+        user.setName("Eve");
+        user.setPhone("13500135000");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        assertEquals(0, trackingSeparateTableManager.prepareWriteReferencesCalls);
+    }
+
+    @Test
+    void shouldUpdateReferencedSeparateTableRowOnUpdate() throws Exception {
+        UserRecord user = new UserRecord();
+        user.setId(3L);
+        user.setName("Carol");
+        user.setPhone("13700137000");
+        user.setIdCard("320101199001011234");
+
+        String originalReferenceId;
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+            UserRecord inserted = mapper.selectById(3L);
+            assertNotNull(inserted);
+            assertEquals("320101199001011234", inserted.getIdCard());
+        }
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("select id_card from user_account where id = 3")) {
             resultSet.next();
-            assertEquals(2L, resultSet.getLong("user_id"));
-            assertNotEquals("320101199001011234", resultSet.getString("id_card_cipher"));
-            assertNotNull(resultSet.getString("id_card_hash"));
+            originalReferenceId = resultSet.getString("id_card");
+            assertNotNull(originalReferenceId);
+            assertTrue(!originalReferenceId.isBlank());
+        }
+
+        UserRecord update = new UserRecord();
+        update.setId(3L);
+        update.setIdCard("320101199001019999");
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.updateIdCard(update));
+            UserRecord loaded = mapper.selectById(3L);
+            assertNotNull(loaded);
+            assertEquals("320101199001019999", loaded.getIdCard());
+        }
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet mainResult = statement.executeQuery("select id_card from user_account where id = 3")) {
+            mainResult.next();
+            assertEquals(originalReferenceId, mainResult.getString("id_card"));
+
+            try (ResultSet encryptResult = statement.executeQuery(
+                    "select id_card_cipher, id_card_hash from user_id_card_encrypt where id = " + originalReferenceId)) {
+                encryptResult.next();
+                assertNotEquals("320101199001019999", encryptResult.getString("id_card_cipher"));
+                assertNotNull(encryptResult.getString("id_card_hash"));
+            }
         }
     }
 
@@ -124,17 +229,20 @@ class MybatisEncryptionIntegrationTest {
                 Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
                 Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
         );
-        SeparateTableEncryptionManager separateTableManager =
-                new SeparateTableEncryptionManager(dataSource, metadataRegistry, algorithmRegistry, properties);
+        TrackingSeparateTableEncryptionManager separateTableManager =
+                new TrackingSeparateTableEncryptionManager(dataSource, metadataRegistry, algorithmRegistry, properties);
+        trackingSeparateTableManager = separateTableManager;
         ResultDecryptor resultDecryptor = new ResultDecryptor(metadataRegistry, algorithmRegistry, separateTableManager);
         SqlRewriteEngine sqlRewriteEngine = new SqlRewriteEngine(metadataRegistry, algorithmRegistry, properties);
         DatabaseEncryptionInterceptor interceptor =
-                new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties, separateTableManager);
+                new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties, separateTableManager,
+                        metadataRegistry);
 
         Environment environment = new Environment("test", new JdbcTransactionFactory(), dataSource);
         Configuration configuration = new Configuration(environment);
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.addInterceptor(interceptor);
+        configuration.addInterceptor(parameterCaptureInterceptor);
         configuration.addMapper(UserMapper.class);
         return new SqlSessionFactoryBuilder().build(configuration);
     }
@@ -147,12 +255,13 @@ class MybatisEncryptionIntegrationTest {
                         name varchar(64),
                         phone_cipher varchar(512),
                         phone_hash varchar(128),
-                        phone_like varchar(255)
+                        phone_like varchar(255),
+                        id_card bigint
                     )
                     """);
             statement.execute("""
                     create table user_id_card_encrypt (
-                        user_id bigint primary key,
+                        id bigint auto_increment primary key,
                         id_card_cipher varchar(512),
                         id_card_hash varchar(128),
                         id_card_like varchar(255)
@@ -182,6 +291,21 @@ class MybatisEncryptionIntegrationTest {
                 where id_card = #{idCard}
                 """)
         UserRecord selectByIdCard(@Param("idCard") String idCard);
+
+        @Select("""
+                select id, name, phone, id_card
+                from user_account
+                where id = #{id}
+                """)
+        UserRecord selectById(@Param("id") Long id);
+
+        @Update("""
+                update user_account
+                set id_card = #{idCard}
+                where id = #{id}
+                """)
+        int updateIdCard(UserRecord user);
+
     }
 
     @EncryptTable("user_account")
@@ -203,7 +327,7 @@ class MybatisEncryptionIntegrationTest {
                 storageMode = FieldStorageMode.SEPARATE_TABLE,
                 storageTable = "user_id_card_encrypt",
                 storageColumn = "id_card_cipher",
-                storageIdColumn = "user_id",
+                storageIdColumn = "id",
                 assistedQueryColumn = "id_card_hash",
                 likeQueryColumn = "id_card_like"
         )
@@ -239,6 +363,54 @@ class MybatisEncryptionIntegrationTest {
 
         public void setIdCard(String idCard) {
             this.idCard = idCard;
+        }
+    }
+
+    static class TrackingSeparateTableEncryptionManager extends SeparateTableEncryptionManager {
+
+        private int prepareWriteReferencesCalls;
+
+        TrackingSeparateTableEncryptionManager(JdbcDataSource dataSource,
+                                               EncryptMetadataRegistry metadataRegistry,
+                                               AlgorithmRegistry algorithmRegistry,
+                                               DatabaseEncryptionProperties properties) {
+            super(dataSource, metadataRegistry, algorithmRegistry, properties);
+        }
+
+        @Override
+        public void prepareWriteReferences(org.apache.ibatis.mapping.MappedStatement mappedStatement,
+                                           BoundSql boundSql) {
+            prepareWriteReferencesCalls++;
+            super.prepareWriteReferences(mappedStatement, boundSql);
+        }
+    }
+
+    @Intercepts({
+            @Signature(type = StatementHandler.class, method = "prepare", args = {Connection.class, Integer.class})
+    })
+    static class ParameterCaptureInterceptor implements Interceptor {
+
+        private Object lastIdCardAdditionalParameter;
+
+        @Override
+        public Object intercept(Invocation invocation) throws Throwable {
+            Object result = invocation.proceed();
+            if (invocation.getTarget() instanceof StatementHandler statementHandler) {
+                BoundSql boundSql = statementHandler.getBoundSql();
+                if (boundSql.hasAdditionalParameter("idCard")) {
+                    lastIdCardAdditionalParameter = boundSql.getAdditionalParameter("idCard");
+                }
+            }
+            return result;
+        }
+
+        @Override
+        public Object plugin(Object target) {
+            return Plugin.wrap(target, this);
+        }
+
+        @Override
+        public void setProperties(java.util.Properties properties) {
         }
     }
 }

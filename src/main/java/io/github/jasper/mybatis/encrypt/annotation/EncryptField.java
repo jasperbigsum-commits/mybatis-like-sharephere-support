@@ -62,22 +62,22 @@ public @interface EncryptField {
     String cipherAlgorithm() default "sm4";
 
     /**
-     * Assisted equality query column.
+     * 辅助等值查询列。
      */
     String assistedQueryColumn() default "";
 
     /**
-     * Assisted equality algorithm bean name.
+     * 辅助等值查询算法 bean 名称。
      */
     String assistedQueryAlgorithm() default "sm3";
 
     /**
-     * LIKE helper column.
+     * LIKE 辅助列。
      */
     String likeQueryColumn() default "";
 
     /**
-     * LIKE helper algorithm bean name.
+     * LIKE 辅助算法 bean 名称。
      */
     String likeQueryAlgorithm() default "normalizedLike";
 }

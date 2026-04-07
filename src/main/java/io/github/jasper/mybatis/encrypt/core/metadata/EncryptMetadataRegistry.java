@@ -54,7 +54,7 @@ public class EncryptMetadataRegistry {
         if (cached != null) {
             return Optional.of(cached);
         }
-        // loadEntityRule 内部会操作 tableRules，不能在 ConcurrentHashMap.computeIfAbsent 中执行，
+        // 实体规则加载过程中会写入 tableRules，不能放进 ConcurrentHashMap.computeIfAbsent，
         // 否则可能触发递归更新或死锁。改用 synchronized 保证安全。
         synchronized (entityRules) {
             cached = entityRules.get(entityType);

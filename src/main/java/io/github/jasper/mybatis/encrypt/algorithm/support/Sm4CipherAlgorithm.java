@@ -30,7 +30,7 @@ public class Sm4CipherAlgorithm implements CipherAlgorithm {
     private final SecureRandom secureRandom = new SecureRandom();
 
     public Sm4CipherAlgorithm(String keyMaterial) {
-        // Provider 只注册一次，避免每次创建算法实例都重复触发安全组件初始化。
+        //Provider 只注册一次，避免每次创建算法实例时重复触发安全组件初始化。
         BouncyCastleProviderHolder.ensureRegistered();
         this.keySpec = new SecretKeySpec(deriveKey(keyMaterial), "SM4");
     }

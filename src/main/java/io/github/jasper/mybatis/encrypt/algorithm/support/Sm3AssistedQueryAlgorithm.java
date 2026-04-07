@@ -30,7 +30,7 @@ public class Sm3AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
             return null;
         }
         MessageDigest digest = SM3_HOLDER.get();
-        // ThreadLocal 会复用同一个摘要实例，因此每次使用前必须显式 reset。
+        // ThreadLocal 量会复用同一个摘要实例，因此每次使用前都必须显式 reset。
         digest.reset();
         byte[] hash = digest.digest(plainText.getBytes(StandardCharsets.UTF_8));
         StringBuilder builder = new StringBuilder(hash.length * 2);

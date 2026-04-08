@@ -20,6 +20,12 @@ public class EncryptMetadataRegistry {
     private final Map<String, EncryptTableRule> tableRules = new ConcurrentHashMap<>();
     private final Map<Class<?>, EncryptTableRule> entityRules = new ConcurrentHashMap<>();
 
+    /**
+     * 创建加密元数据注册中心。
+     *
+     * @param properties 外部配置属性
+     * @param annotationLoader 注解元数据加载器
+     */
     public EncryptMetadataRegistry(DatabaseEncryptionProperties properties,
                                    AnnotationEncryptMetadataLoader annotationLoader) {
         this.annotationLoader = annotationLoader;

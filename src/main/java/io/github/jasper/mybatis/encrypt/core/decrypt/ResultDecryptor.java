@@ -21,6 +21,13 @@ public class ResultDecryptor {
     private final AlgorithmRegistry algorithmRegistry;
     private final SeparateTableEncryptionManager separateTableEncryptionManager;
 
+    /**
+     * 创建结果解密器。
+     *
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param separateTableEncryptionManager 独立表加密管理器
+     */
     public ResultDecryptor(EncryptMetadataRegistry metadataRegistry,
                            AlgorithmRegistry algorithmRegistry,
                            SeparateTableEncryptionManager separateTableEncryptionManager) {

@@ -1,6 +1,7 @@
 name: Publish to Maven Central
 
 # 触发时机：创建 tag 如 v1.0.0 时自动发布
+# 例如：git tag v1.0.0；git push origin v1.0.0；
 on:
   push:
     tags:
@@ -23,11 +24,11 @@ jobs:
           server-username: MAVEN_USERNAME
           server-password: MAVEN_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          # gpg-passphrase: GPG_PASSPHRASE
+          gpg-passphrase: GPG_PASSPHRASE
 
       - name: Publish to Central
         run: mvn clean deploy -DskipTests --batch-mode
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
-          # GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }

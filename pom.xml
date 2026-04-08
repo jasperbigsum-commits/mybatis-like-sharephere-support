@@ -116,51 +116,63 @@
           </systemPropertyVariables>
         </configuration>
       </plugin>
-      <!-- 源码包 -->
+      <!-- 1. 生成 Sources 和 Javadoc 包 -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-source-plugin</artifactId>
         <version>3.3.1</version>
         <executions>
           <execution>
-            <phase>package</phase>
-            <goals>
-              <goal>jar-no-fork</goal>
-            </goals>
+            <id>attach-sources</id>
+            <goals><goal>jar-no-fork</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.11.2</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals><goal>jar</goal></goals>
           </execution>
         </executions>
       </plugin>
       <!-- GPG 签名 -->
-      <!--<plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-gpg-plugin</artifactId>
-        <version>3.2.8</version>
-        <executions>
-          <execution>
-            <phase>verify</phase>
-            <goals>
-              <goal>sign</goal>
-            </goals>
-          </execution>
-        </executions>
-        <configuration>
-          <gpgArguments>
-            <arg>&#45;&#45;pinentry-mode</arg>
-            <arg>loopback</arg>
-          </gpgArguments>
-        </configuration>
-      </plugin>
-      &lt;!&ndash; central 自动发布插件 &ndash;&gt;
-      <plugin>
-        <groupId>org.sonatype.central</groupId>
-        <artifactId>central-publishing-maven-plugin</artifactId>
-        <version>0.10.0</version>
-        <extensions>true</extensions>
-        <configuration>
-          <publishingServerId>central</publishingServerId>
-          <autoPublish>true</autoPublish>
-        </configuration>
-      </plugin>-->
+      <!-- 2. 对构件进行 GPG 签名 -->
+<!--      <plugin>-->
+<!--        <groupId>org.apache.maven.plugins</groupId>-->
+<!--        <artifactId>maven-gpg-plugin</artifactId>-->
+<!--        <version>3.2.8</version>-->
+<!--        <executions>-->
+<!--          <execution>-->
+<!--            <id>sign-artifacts</id>-->
+<!--            <phase>verify</phase>-->
+<!--            <goals><goal>sign</goal></goals>-->
+<!--            <configuration>-->
+<!--              &lt;!&ndash; 防止在CI环境中交互式询问密码 &ndash;&gt;-->
+<!--              <gpgArguments>-->
+<!--                <arg>&#45;&#45;pinentry-mode</arg>-->
+<!--                <arg>loopback</arg>-->
+<!--              </gpgArguments>-->
+<!--            </configuration>-->
+<!--          </execution>-->
+<!--        </executions>-->
+<!--      </plugin>-->
+<!--      &lt;!&ndash; 自动发布 &ndash;&gt;-->
+<!--      <plugin>-->
+<!--        <groupId>org.sonatype.central</groupId>-->
+<!--        <artifactId>central-publishing-maven-plugin</artifactId>-->
+<!--        <version>0.10.0</version>-->
+<!--        <extensions>true</extensions>-->
+<!--        <configuration>-->
+<!--          &lt;!&ndash; 与 settings.xml 中配置的 server id 对应 &ndash;&gt;-->
+<!--          <publishingServerId>central</publishingServerId>-->
+<!--          <autoPublish>true</autoPublish>-->
+<!--          <waitUntil>published</waitUntil>-->
+<!--        </configuration>-->
+<!--      </plugin>-->
     </plugins>
   </build>
 
@@ -178,17 +190,5 @@
       <email>jasper.bigsum@gmail.com</email>
     </developer>
   </developers>
-
-<!--  <scm>-->
-<!--    <connection>scm:git:git@github.com:jasperbigsum-commits/mybatis-like-sharephere-support.git</connection>-->
-<!--    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>-->
-<!--  </scm>-->
-
-<!--  <distributionManagement>-->
-<!--    <repository>-->
-<!--      <id>central</id>-->
-<!--      <url>https://central.sonatype.com/api/maven/v1</url>-->
-<!--    </repository>-->
-<!--  </distributionManagement>-->
 
 </project>

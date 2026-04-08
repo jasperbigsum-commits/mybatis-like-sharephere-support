@@ -58,6 +58,46 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteInsertAcrossStorageModes() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        Map<String, Object> parameterObject = Map.of(
+                "id", 1L,
+                "name", "Alice",
+                "phone", "13800138000",
+                "idCard", "320101199001011234"
+        );
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "INSERT INTO user_account (id, name, phone, id_card) VALUES (?, ?, ?, ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "id", Long.class).build(),
+                        new ParameterMapping.Builder(configuration, "name", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                parameterObject
+        );
+        boundSql.setAdditionalParameter("idCard", "1001");
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.INSERT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_cipher`"));
+        assertTrue(result.sql().contains("`phone_hash`"));
+        assertTrue(result.sql().contains("`phone_like`"));
+        assertTrue(result.sql().contains("`id_card`") || result.sql().contains("id_card"));
+        result.applyTo(boundSql);
+        assertEquals(6, boundSql.getParameterMappings().size());
+    }
+
+    @Test
     void shouldRewriteSelectColumnToStorageColumnAndEqualityToAssistedColumn() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -659,6 +699,78 @@ class SqlRewriteEngineTest {
                 || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteUpdateAcrossStorageModes() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "UPDATE user_account SET phone = ?, id_card = ? WHERE phone = ? AND id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "wherePhone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "whereIdCard", String.class).build()
+                ),
+                Map.of(
+                        "phone", "13800138001",
+                        "idCard", "320101199001011235",
+                        "wherePhone", "13800138000",
+                        "whereIdCard", "320101199001011234"
+                )
+        );
+        boundSql.setAdditionalParameter("idCard", "1002");
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.UPDATE, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_cipher` = ?") || result.sql().contains("phone_cipher = ?"));
+        assertTrue(result.sql().contains("`phone_hash` = ?") || result.sql().contains("phone_hash = ?"));
+        assertTrue(result.sql().contains("`phone_like` = ?") || result.sql().contains("phone_like = ?"));
+        assertTrue(result.sql().contains("`id_card` = ?") || result.sql().contains("id_card = ?"));
+        assertTrue(result.sql().contains("WHERE `phone_hash` = ?") || result.sql().contains("WHERE phone_hash = ?"));
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        result.applyTo(boundSql);
+        assertEquals(6, boundSql.getParameterMappings().size());
+    }
+
+    @Test
+    void shouldRewriteDeleteAcrossStorageModes() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "DELETE FROM user_account WHERE phone = ? OR id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("phone", "13800138000", "idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.DELETE, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertEquals(2, result.maskedParameters().size());
     }
 
     @Test

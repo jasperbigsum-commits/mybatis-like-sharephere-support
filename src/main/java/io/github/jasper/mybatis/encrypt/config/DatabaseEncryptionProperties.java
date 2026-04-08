@@ -54,66 +54,146 @@ public class DatabaseEncryptionProperties {
      */
     private Map<String, TableRuleProperties> tables = new LinkedHashMap<>();
 
+    /**
+     * 返回插件总开关。
+     *
+     * @return 是否启用插件
+     */
     public boolean isEnabled() {
         return enabled;
     }
 
+    /**
+     * 设置插件总开关。
+     *
+     * @param enabled 是否启用插件
+     */
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
     }
 
+    /**
+     * 返回缺少规则时是否快速失败。
+     *
+     * @return 是否快速失败
+     */
     public boolean isFailOnMissingRule() {
         return failOnMissingRule;
     }
 
+    /**
+     * 设置缺少规则时是否快速失败。
+     *
+     * @param failOnMissingRule 是否快速失败
+     */
     public void setFailOnMissingRule(boolean failOnMissingRule) {
         this.failOnMissingRule = failOnMissingRule;
     }
 
+    /**
+     * 返回是否记录脱敏后的改写 SQL。
+     *
+     * @return 是否输出脱敏 SQL 日志
+     */
     public boolean isLogMaskedSql() {
         return logMaskedSql;
     }
 
+    /**
+     * 设置是否记录脱敏后的改写 SQL。
+     *
+     * @param logMaskedSql 是否输出脱敏 SQL 日志
+     */
     public void setLogMaskedSql(boolean logMaskedSql) {
         this.logMaskedSql = logMaskedSql;
     }
 
+    /**
+     * 返回默认密钥。
+     *
+     * @return 默认密钥材料
+     */
     public String getDefaultCipherKey() {
         return defaultCipherKey;
     }
 
+    /**
+     * 设置默认密钥。
+     *
+     * @param defaultCipherKey 默认密钥材料
+     */
     public void setDefaultCipherKey(String defaultCipherKey) {
         this.defaultCipherKey = defaultCipherKey;
     }
 
+    /**
+     * 返回是否启用实体注解扫描。
+     *
+     * @return 是否扫描实体注解
+     */
     public boolean isScanEntityAnnotations() {
         return scanEntityAnnotations;
     }
 
+    /**
+     * 设置是否启用实体注解扫描。
+     *
+     * @param scanEntityAnnotations 是否扫描实体注解
+     */
     public void setScanEntityAnnotations(boolean scanEntityAnnotations) {
         this.scanEntityAnnotations = scanEntityAnnotations;
     }
 
+    /**
+     * 返回实体扫描包列表。
+     *
+     * @return 需要扫描的基础包
+     */
     public List<String> getScanPackages() {
         return scanPackages;
     }
 
+    /**
+     * 设置实体扫描包列表。
+     *
+     * @param scanPackages 需要扫描的基础包
+     */
     public void setScanPackages(List<String> scanPackages) {
         this.scanPackages = scanPackages;
     }
 
+    /**
+     * 返回 SQL 方言。
+     *
+     * @return 当前 SQL 方言
+     */
     public SqlDialect getSqlDialect() {
         return sqlDialect;
     }
 
+    /**
+     * 设置 SQL 方言。
+     *
+     * @param sqlDialect SQL 方言
+     */
     public void setSqlDialect(SqlDialect sqlDialect) {
         this.sqlDialect = sqlDialect;
     }
 
+    /**
+     * 返回表级规则映射。
+     *
+     * @return 表规则配置
+     */
     public Map<String, TableRuleProperties> getTables() {
         return tables;
     }
 
+    /**
+     * 设置表级规则映射。
+     *
+     * @param tables 表规则配置
+     */
     public void setTables(Map<String, TableRuleProperties> tables) {
         this.tables = tables;
     }
@@ -133,18 +213,38 @@ public class DatabaseEncryptionProperties {
          */
         private Map<String, FieldRuleProperties> fields = new LinkedHashMap<>();
 
+        /**
+         * 返回物理表名。
+         *
+         * @return 物理表名
+         */
         public String getTable() {
             return table;
         }
 
+        /**
+         * 设置物理表名。
+         *
+         * @param table 物理表名
+         */
         public void setTable(String table) {
             this.table = table;
         }
 
+        /**
+         * 返回字段规则集合。
+         *
+         * @return 字段规则映射
+         */
         public Map<String, FieldRuleProperties> getFields() {
             return fields;
         }
 
+        /**
+         * 设置字段规则集合。
+         *
+         * @param fields 字段规则映射
+         */
         public void setFields(Map<String, FieldRuleProperties> fields) {
             this.fields = fields;
         }
@@ -215,98 +315,218 @@ public class DatabaseEncryptionProperties {
          */
         private String likeQueryAlgorithm = "normalizedLike";
 
+        /**
+         * 返回原始业务列名。
+         *
+         * @return 原始业务列名
+         */
         public String getColumn() {
             return column;
         }
 
+        /**
+         * 设置原始业务列名。
+         *
+         * @param column 原始业务列名
+         */
         public void setColumn(String column) {
             this.column = column;
         }
 
+        /**
+         * 返回字段存储模式。
+         *
+         * @return 字段存储模式
+         */
         public FieldStorageMode getStorageMode() {
             return storageMode;
         }
 
+        /**
+         * 设置字段存储模式。
+         *
+         * @param storageMode 字段存储模式
+         */
         public void setStorageMode(FieldStorageMode storageMode) {
             this.storageMode = storageMode;
         }
 
+        /**
+         * 返回独立表表名。
+         *
+         * @return 独立表表名
+         */
         public String getStorageTable() {
             return storageTable;
         }
 
+        /**
+         * 设置独立表表名。
+         *
+         * @param storageTable 独立表表名
+         */
         public void setStorageTable(String storageTable) {
             this.storageTable = storageTable;
         }
 
+        /**
+         * 返回密文存储列。
+         *
+         * @return 密文存储列名
+         */
         public String getStorageColumn() {
             return storageColumn;
         }
 
+        /**
+         * 设置密文存储列。
+         *
+         * @param storageColumn 密文存储列名
+         */
         public void setStorageColumn(String storageColumn) {
             this.storageColumn = storageColumn;
         }
 
+        /**
+         * 返回来源实体 id 属性名。
+         *
+         * @return 来源实体 id 属性名
+         */
         public String getSourceIdProperty() {
             return sourceIdProperty;
         }
 
+        /**
+         * 设置来源实体 id 属性名。
+         *
+         * @param sourceIdProperty 来源实体 id 属性名
+         */
         public void setSourceIdProperty(String sourceIdProperty) {
             this.sourceIdProperty = sourceIdProperty;
         }
 
+        /**
+         * 返回业务表来源 id 列。
+         *
+         * @return 业务表来源 id 列名
+         */
         public String getSourceIdColumn() {
             return sourceIdColumn;
         }
 
+        /**
+         * 设置业务表来源 id 列。
+         *
+         * @param sourceIdColumn 业务表来源 id 列名
+         */
         public void setSourceIdColumn(String sourceIdColumn) {
             this.sourceIdColumn = sourceIdColumn;
         }
 
+        /**
+         * 返回独立表 id 列。
+         *
+         * @return 独立表 id 列名
+         */
         public String getStorageIdColumn() {
             return storageIdColumn;
         }
 
+        /**
+         * 设置独立表 id 列。
+         *
+         * @param storageIdColumn 独立表 id 列名
+         */
         public void setStorageIdColumn(String storageIdColumn) {
             this.storageIdColumn = storageIdColumn;
         }
 
+        /**
+         * 返回加密算法 bean 名称。
+         *
+         * @return 加密算法 bean 名称
+         */
         public String getCipherAlgorithm() {
             return cipherAlgorithm;
         }
 
+        /**
+         * 设置加密算法 bean 名称。
+         *
+         * @param cipherAlgorithm 加密算法 bean 名称
+         */
         public void setCipherAlgorithm(String cipherAlgorithm) {
             this.cipherAlgorithm = cipherAlgorithm;
         }
 
+        /**
+         * 返回辅助查询列。
+         *
+         * @return 辅助查询列名
+         */
         public String getAssistedQueryColumn() {
             return assistedQueryColumn;
         }
 
+        /**
+         * 设置辅助查询列。
+         *
+         * @param assistedQueryColumn 辅助查询列名
+         */
         public void setAssistedQueryColumn(String assistedQueryColumn) {
             this.assistedQueryColumn = assistedQueryColumn;
         }
 
+        /**
+         * 返回辅助查询算法 bean 名称。
+         *
+         * @return 辅助查询算法 bean 名称
+         */
         public String getAssistedQueryAlgorithm() {
             return assistedQueryAlgorithm;
         }
 
+        /**
+         * 设置辅助查询算法 bean 名称。
+         *
+         * @param assistedQueryAlgorithm 辅助查询算法 bean 名称
+         */
         public void setAssistedQueryAlgorithm(String assistedQueryAlgorithm) {
             this.assistedQueryAlgorithm = assistedQueryAlgorithm;
         }
 
+        /**
+         * 返回 LIKE 查询列。
+         *
+         * @return LIKE 查询列名
+         */
         public String getLikeQueryColumn() {
             return likeQueryColumn;
         }
 
+        /**
+         * 设置 LIKE 查询列。
+         *
+         * @param likeQueryColumn LIKE 查询列名
+         */
         public void setLikeQueryColumn(String likeQueryColumn) {
             this.likeQueryColumn = likeQueryColumn;
         }
 
+        /**
+         * 返回 LIKE 查询算法 bean 名称。
+         *
+         * @return LIKE 查询算法 bean 名称
+         */
         public String getLikeQueryAlgorithm() {
             return likeQueryAlgorithm;
         }
 
+        /**
+         * 设置 LIKE 查询算法 bean 名称。
+         *
+         * @param likeQueryAlgorithm LIKE 查询算法 bean 名称
+         */
         public void setLikeQueryAlgorithm(String likeQueryAlgorithm) {
             this.likeQueryAlgorithm = likeQueryAlgorithm;
         }

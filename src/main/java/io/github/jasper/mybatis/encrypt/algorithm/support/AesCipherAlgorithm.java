@@ -28,6 +28,11 @@ public class AesCipherAlgorithm implements CipherAlgorithm {
     private final SecretKeySpec keySpec;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /**
+     * 使用给定密钥材料创建 AES 算法实例。
+     *
+     * @param keyMaterial 原始密钥材料
+     */
     public AesCipherAlgorithm(String keyMaterial) {
         this.keySpec = new SecretKeySpec(deriveKey(keyMaterial), "AES");
     }

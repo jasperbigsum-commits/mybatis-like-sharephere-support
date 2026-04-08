@@ -18,10 +18,20 @@ public class EncryptTableRule {
     private final Map<String, EncryptColumnRule> columnRules = new LinkedHashMap<>();
     private final Map<String, EncryptColumnRule> propertyRules = new LinkedHashMap<>();
 
+    /**
+     * 创建表级加密规则。
+     *
+     * @param tableName 物理表名
+     */
     public EncryptTableRule(String tableName) {
         this.tableName = NameUtils.normalizeIdentifier(tableName);
     }
 
+    /**
+     * 返回标准化后的物理表名。
+     *
+     * @return 物理表名
+     */
     public String getTableName() {
         return tableName;
     }
@@ -36,14 +46,31 @@ public class EncryptTableRule {
         propertyRules.put(rule.property(), rule);
     }
 
+    /**
+     * 按数据库列名查找字段规则。
+     *
+     * @param column 数据库列名
+     * @return 命中的字段规则
+     */
     public Optional<EncryptColumnRule> findByColumn(String column) {
         return Optional.ofNullable(columnRules.get(NameUtils.normalizeIdentifier(column)));
     }
 
+    /**
+     * 按实体属性名查找字段规则。
+     *
+     * @param property 实体属性名
+     * @return 命中的字段规则
+     */
     public Optional<EncryptColumnRule> findByProperty(String property) {
         return Optional.ofNullable(propertyRules.get(property));
     }
 
+    /**
+     * 返回当前表下全部字段规则。
+     *
+     * @return 字段规则集合
+     */
     public Collection<EncryptColumnRule> getColumnRules() {
         return columnRules.values();
     }

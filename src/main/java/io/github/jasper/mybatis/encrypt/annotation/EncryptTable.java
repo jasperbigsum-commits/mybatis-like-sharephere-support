@@ -19,6 +19,8 @@ public @interface EncryptTable {
 
     /**
      * 数据库表名。
+     *
+     * @return 绑定的物理表名
      */
     String value() default "";
 }

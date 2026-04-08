@@ -7,6 +7,13 @@ import java.util.Map;
  */
 public class SqlLogMasker {
 
+    /**
+     * 将 SQL 与脱敏参数拼接成便于排查的日志文本。
+     *
+     * @param sql 原始或改写后的 SQL
+     * @param maskedParameters 已脱敏的参数集合
+     * @return 适合输出到日志的 SQL 文本
+     */
     public String mask(String sql, Map<String, MaskedValue> maskedParameters) {
         if (sql == null) {
             return null;

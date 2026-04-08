@@ -29,6 +29,11 @@ public class Sm4CipherAlgorithm implements CipherAlgorithm {
     private final SecretKeySpec keySpec;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /**
+     * 使用给定密钥材料创建 SM4 算法实例。
+     *
+     * @param keyMaterial 原始密钥材料
+     */
     public Sm4CipherAlgorithm(String keyMaterial) {
         //Provider 只注册一次，避免每次创建算法实例时重复触发安全组件初始化。
         BouncyCastleProviderHolder.ensureRegistered();

@@ -27,6 +27,13 @@ public class EncryptEntityScanner implements SmartInitializingSingleton, Resourc
     private final EncryptMetadataRegistry metadataRegistry;
     private ResourceLoader resourceLoader;
 
+    /**
+     * 创建启动期实体扫描器。
+     *
+     * @param beanFactory Spring BeanFactory
+     * @param properties 插件配置属性
+     * @param metadataRegistry 加密元数据注册中心
+     */
     public EncryptEntityScanner(BeanFactory beanFactory,
                                 DatabaseEncryptionProperties properties,
                                 EncryptMetadataRegistry metadataRegistry) {

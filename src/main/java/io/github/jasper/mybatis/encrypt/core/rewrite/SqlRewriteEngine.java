@@ -45,6 +45,13 @@ public class SqlRewriteEngine {
     private final EncryptionValueTransformer valueTransformer;
     private final DerivedTableRuleBuilder derivedTableRuleBuilder;
 
+    /**
+     * 创建 SQL 改写引擎。
+     *
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param properties 插件配置属性
+     */
     public SqlRewriteEngine(EncryptMetadataRegistry metadataRegistry,
                             AlgorithmRegistry algorithmRegistry,
                             DatabaseEncryptionProperties properties) {
@@ -171,45 +178,41 @@ public class SqlRewriteEngine {
         if (tableContext.isEmpty()) {
             return;
         }
+        List<UpdateSet> rewrittenUpdateSets = new ArrayList<>();
         for (UpdateSet updateSet : update.getUpdateSets()) {
             List<Column> originalColumns = new ArrayList<>(updateSet.getColumns());
             ExpressionList<Expression> updateValues = (ExpressionList<Expression>) updateSet.getValues();
-            List<Column> rewrittenColumns = new ArrayList<>();
-            List<Expression> rewrittenExpressions = new ArrayList<>();
             for (int index = 0; index < originalColumns.size(); index++) {
                 Column column = originalColumns.get(index);
                 Expression expression = updateValues.get(index);
                 EncryptColumnRule rule = tableContext.resolve(column).orElse(null);
                 if (rule == null) {
-                    rewrittenColumns.add(column);
-                    rewrittenExpressions.add(passthroughWriteExpression(expression, context));
+                    rewrittenUpdateSets.add(new UpdateSet(column, passthroughWriteExpression(expression, context)));
                     continue;
                 }
 
                 if (rule.isStoredInSeparateTable()) {
-                    rewrittenColumns.add(column);
-                    rewrittenExpressions.add(rewriteSeparateTableReferenceExpression(expression, context));
+                    rewrittenUpdateSets.add(
+                            new UpdateSet(column, rewriteSeparateTableReferenceExpression(expression, context)));
                     continue;
                 }
-                rewrittenColumns.add(buildColumn(column, rule.storageColumn()));
                 WriteValue writeValue = rewriteEncryptedWriteExpression(expression, rule, context);
-                rewrittenExpressions.add(writeValue.expression());
+                rewrittenUpdateSets.add(new UpdateSet(buildColumn(column, rule.storageColumn()), writeValue.expression()));
                 if (rule.hasAssistedQueryColumn()) {
-                    rewrittenColumns.add(buildColumn(column, rule.assistedQueryColumn()));
-                    rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformAssisted(rule, writeValue.plainValue()),
-                            MaskingMode.HASH, context));
+                    rewrittenUpdateSets.add(new UpdateSet(
+                            buildColumn(column, rule.assistedQueryColumn()),
+                            buildShadowExpression(writeValue, valueTransformer.transformAssisted(rule, writeValue.plainValue()),
+                                    MaskingMode.HASH, context)));
                 }
                 if (rule.hasLikeQueryColumn()) {
-                    rewrittenColumns.add(buildColumn(column, rule.likeQueryColumn()));
-                    rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformLike(rule, writeValue.plainValue()),
-                            MaskingMode.MASKED, context));
+                    rewrittenUpdateSets.add(new UpdateSet(
+                            buildColumn(column, rule.likeQueryColumn()),
+                            buildShadowExpression(writeValue, valueTransformer.transformLike(rule, writeValue.plainValue()),
+                                    MaskingMode.MASKED, context)));
                 }
             }
-            updateSet.getColumns().clear();
-            updateSet.getColumns().addAll(rewrittenColumns);
-            updateValues.clear();
-            updateValues.addAll(rewrittenExpressions);
         }
+        update.setUpdateSets(rewrittenUpdateSets);
         // 只有 WHERE 子句会被改写到查询辅助列，SET 子句仍然写入主密文列。
         update.setWhere(rewriteCondition(update.getWhere(), tableContext, context));
     }

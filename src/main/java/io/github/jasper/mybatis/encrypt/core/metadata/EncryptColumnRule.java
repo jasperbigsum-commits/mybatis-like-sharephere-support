@@ -31,14 +31,29 @@ public record EncryptColumnRule(String property,
                                 String sourceIdColumn,
                                 String storageIdColumn) {
 
+    /**
+     * 判断是否配置了辅助等值查询列。
+     *
+     * @return 配置了辅助列时返回 {@code true}
+     */
     public boolean hasAssistedQueryColumn() {
         return assistedQueryColumn != null && !assistedQueryColumn.isBlank();
     }
 
+    /**
+     * 判断是否配置了 LIKE 查询列。
+     *
+     * @return 配置了 LIKE 列时返回 {@code true}
+     */
     public boolean hasLikeQueryColumn() {
         return likeQueryColumn != null && !likeQueryColumn.isBlank();
     }
 
+    /**
+     * 判断是否使用独立表存储。
+     *
+     * @return 独立表模式时返回 {@code true}
+     */
     public boolean isStoredInSeparateTable() {
         return storageMode == FieldStorageMode.SEPARATE_TABLE;
     }

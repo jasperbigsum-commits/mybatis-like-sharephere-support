@@ -16,6 +16,11 @@ import org.apache.ibatis.type.TypeHandlerRegistry;
 public class ParameterValueResolver {
 
     /**
+     * BoundSql 中保存“参数路径 -> 独立表引用 id”映射的附加参数名。
+     */
+    public static final String PREPARED_REFERENCE_PARAMETER = "__encrypt_prepared_refs";
+
+    /**
      * 解析单个参数映射对应的运行时值。
      *
      * @param configuration MyBatis 配置
@@ -34,6 +39,12 @@ public class ParameterValueResolver {
         String property = parameterMapping.getProperty();
         if (property == null) {
             return parameterObject;
+        }
+        if (boundSql.hasAdditionalParameter(PREPARED_REFERENCE_PARAMETER)) {
+            Object preparedReferences = boundSql.getAdditionalParameter(PREPARED_REFERENCE_PARAMETER);
+            if (preparedReferences instanceof java.util.Map<?, ?> references && references.containsKey(property)) {
+                return references.get(property);
+            }
         }
         String root = new PropertyTokenizer(property).getName();
         if (boundSql.hasAdditionalParameter(root)) {

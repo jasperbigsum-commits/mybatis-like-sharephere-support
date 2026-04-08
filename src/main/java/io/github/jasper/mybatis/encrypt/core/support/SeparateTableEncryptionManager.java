@@ -6,23 +6,30 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Collection;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
+import org.apache.ibatis.reflection.property.PropertyTokenizer;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
+import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
 /**
@@ -38,6 +45,14 @@ public class SeparateTableEncryptionManager {
     private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
 
+    /**
+     * 创建独立表加密管理器。
+     *
+     * @param dataSource 数据源
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param properties 插件配置属性
+     */
     public SeparateTableEncryptionManager(DataSource dataSource,
                                           EncryptMetadataRegistry metadataRegistry,
                                           AlgorithmRegistry algorithmRegistry,
@@ -48,6 +63,12 @@ public class SeparateTableEncryptionManager {
         this.properties = properties;
     }
 
+    /**
+     * 为写操作预先准备独立表引用 id。
+     *
+     * @param mappedStatement 当前 mapped statement
+     * @param boundSql 当前 BoundSql
+     */
     public void prepareWriteReferences(MappedStatement mappedStatement, BoundSql boundSql) {
         metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject());
         SqlCommandType commandType = mappedStatement.getSqlCommandType();
@@ -63,6 +84,11 @@ public class SeparateTableEncryptionManager {
         }
     }
 
+    /**
+     * 对查询结果执行独立表字段回填与解密。
+     *
+     * @param resultObject 查询结果对象或集合
+     */
     public void hydrateResults(Object resultObject) {
         if (resultObject == null) {
             return;
@@ -101,7 +127,7 @@ public class SeparateTableEncryptionManager {
                 continue;
             }
             String referenceId = determineReferenceId(boundSql, commandType, tableRule, rule, metaObject, plainValue);
-            boundSql.setAdditionalParameter(rule.property(), referenceId);
+            registerPreparedReference(boundSql, candidate, rule.property(), referenceId);
         }
     }
 
@@ -319,10 +345,97 @@ public class SeparateTableEncryptionManager {
         if (parameterObject == null) {
             return List.of();
         }
-        if (parameterObject instanceof Map<?, ?> map) {
-            return map.values().stream().filter(Objects::nonNull).collect(Collectors.toList());
+        List<Object> results = new ArrayList<>();
+        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        collectCandidates(parameterObject, results, visited);
+        return results;
+    }
+
+    private void collectCandidates(Object parameterObject, List<Object> results, Set<Object> visited) {
+        if (parameterObject == null) {
+            return;
         }
-        return List.of(parameterObject);
+        if (parameterObject instanceof Map<?, ?> map) {
+            map.values().forEach(value -> collectCandidates(value, results, visited));
+            return;
+        }
+        if (parameterObject instanceof Collection<?> collection) {
+            collection.forEach(value -> collectCandidates(value, results, visited));
+            return;
+        }
+        if (parameterObject.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(parameterObject);
+            for (int index = 0; index < length; index++) {
+                collectCandidates(java.lang.reflect.Array.get(parameterObject, index), results, visited);
+            }
+            return;
+        }
+        if (visited.add(parameterObject)) {
+            results.add(parameterObject);
+        }
+    }
+
+    private void registerPreparedReference(BoundSql boundSql, Object candidate, String property, String referenceId) {
+        Map<String, Object> preparedReferences = preparedReferences(boundSql);
+        List<String> parameterPaths = resolveParameterPaths(boundSql, candidate, property);
+        if (parameterPaths.isEmpty()) {
+            preparedReferences.put(property, referenceId);
+            return;
+        }
+        parameterPaths.forEach(path -> preparedReferences.put(path, referenceId));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> preparedReferences(BoundSql boundSql) {
+        if (boundSql.hasAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER)) {
+            Object existing = boundSql.getAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER);
+            if (existing instanceof Map<?, ?> references) {
+                return (Map<String, Object>) references;
+            }
+        }
+        Map<String, Object> preparedReferences = new LinkedHashMap<>();
+        boundSql.setAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER, preparedReferences);
+        return preparedReferences;
+    }
+
+    private List<String> resolveParameterPaths(BoundSql boundSql, Object candidate, String property) {
+        Set<String> paths = new LinkedHashSet<>();
+        Object parameterObject = boundSql.getParameterObject();
+        MetaObject parameterMetaObject = parameterObject == null ? null : SystemMetaObject.forObject(parameterObject);
+        for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+            String parameterProperty = parameterMapping.getProperty();
+            if (parameterProperty == null || !property.equals(lastPropertyName(parameterProperty))) {
+                continue;
+            }
+            if (belongsToCandidate(boundSql, parameterMetaObject, parameterObject, candidate, parameterProperty, property)) {
+                paths.add(parameterProperty);
+            }
+        }
+        return new ArrayList<>(paths);
+    }
+
+    private boolean belongsToCandidate(BoundSql boundSql,
+                                       MetaObject parameterMetaObject,
+                                       Object parameterObject,
+                                       Object candidate,
+                                       String parameterProperty,
+                                       String property) {
+        String root = new PropertyTokenizer(parameterProperty).getName();
+        if (boundSql.hasAdditionalParameter(root)) {
+            return boundSql.getAdditionalParameter(root) == candidate;
+        }
+        if (property.equals(parameterProperty)) {
+            return parameterObject == candidate;
+        }
+        return parameterMetaObject != null && parameterMetaObject.hasGetter(root)
+                && parameterMetaObject.getValue(root) == candidate;
+    }
+
+    private String lastPropertyName(String property) {
+        int dotIndex = property.lastIndexOf('.');
+        String segment = dotIndex >= 0 ? property.substring(dotIndex + 1) : property;
+        int bracketIndex = segment.indexOf('[');
+        return bracketIndex >= 0 ? segment.substring(0, bracketIndex) : segment;
     }
 
     private String toReferenceId(Object referenceId) {

@@ -25,6 +25,15 @@ public class RewriteResult {
     private final Map<String, MaskedValue> maskedParameters;
     private final String maskedSql;
 
+    /**
+     * 创建一次 SQL 改写结果。
+     *
+     * @param changed 是否发生改写
+     * @param sql 改写后的 SQL
+     * @param parameterMappings 改写后的参数映射
+     * @param maskedParameters 脱敏后的参数日志值
+     * @param maskedSql 带参数脱敏片段的日志 SQL
+     */
     public RewriteResult(boolean changed,
                          String sql,
                          List<ParameterMapping> parameterMappings,
@@ -37,22 +46,47 @@ public class RewriteResult {
         this.maskedSql = maskedSql;
     }
 
+    /**
+     * 返回未改写的共享结果实例。
+     *
+     * @return 未改写结果
+     */
     public static RewriteResult unchanged() {
         return UNCHANGED;
     }
 
+    /**
+     * 判断本次 SQL 是否被改写。
+     *
+     * @return 发生改写时返回 {@code true}
+     */
     public boolean changed() {
         return changed;
     }
 
+    /**
+     * 返回改写后的 SQL。
+     *
+     * @return 改写后的 SQL
+     */
     public String sql() {
         return sql;
     }
 
+    /**
+     * 返回脱敏参数集合。
+     *
+     * @return 参数脱敏日志值
+     */
     public Map<String, MaskedValue> maskedParameters() {
         return maskedParameters;
     }
 
+    /**
+     * 返回可写入日志的脱敏 SQL。
+     *
+     * @return 脱敏后的 SQL
+     */
     public String maskedSql() {
         return maskedSql;
     }

@@ -15,6 +15,12 @@ import io.github.jasper.mybatis.encrypt.util.NameUtils;
  */
 public class AnnotationEncryptMetadataLoader {
 
+    /**
+     * 从实体类型上读取并构建表级加密规则。
+     *
+     * @param type 实体类型
+     * @return 加密表规则；当实体未声明任何加密字段时返回 {@code null}
+     */
     public EncryptTableRule load(Class<?> type) {
         EncryptTableRule rule = new EncryptTableRule(resolveTableName(type));
         boolean found = false;

@@ -5,6 +5,11 @@ package io.github.jasper.mybatis.encrypt.exception;
  */
 public class UnsupportedEncryptedOperationException extends RuntimeException {
 
+    /**
+     * 使用错误消息创建异常。
+     *
+     * @param message 错误消息
+     */
     public UnsupportedEncryptedOperationException(String message) {
         super(message);
     }

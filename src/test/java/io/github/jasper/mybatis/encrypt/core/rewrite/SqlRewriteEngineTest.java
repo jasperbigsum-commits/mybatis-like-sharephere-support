@@ -488,6 +488,151 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteSeparateTablePredicateWrappedByExtraParentheses() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE ((u.id_card = ?))",
+                List.of(new ParameterMapping.Builder(configuration, "idCard", String.class).build()),
+                Map.of("idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteSeparateTableLikeWrappedByExtraParentheses() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE ((u.id_card LIKE ?))",
+                List.of(new ParameterMapping.Builder(configuration, "idCardLike", String.class).build()),
+                Map.of("idCardLike", "%320101%")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteSeparateTableIsNullWrappedByExtraParentheses() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE ((u.id_card IS NULL))",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("NOT EXISTS"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+    }
+
+    @Test
+    void shouldRewriteNestedParenthesizedSeparateTableEqualityOrIsNull() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE ((u.id_card = ?) OR (u.id_card IS NULL))",
+                List.of(new ParameterMapping.Builder(configuration, "idCard", String.class).build()),
+                Map.of("idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("NOT EXISTS"));
+        assertTrue(result.sql().contains("OR"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteNestedParenthesizedSeparateTableLikeOrEquality() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE ((u.id_card LIKE ?) OR (u.id_card = ?))",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "idCardLike", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("idCardLike", "%320101%", "idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("OR"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
+                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertEquals(2, result.maskedParameters().size());
+    }
+
+    @Test
     void shouldRewriteSeparateTablePredicateInsideExistsSubquery() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();

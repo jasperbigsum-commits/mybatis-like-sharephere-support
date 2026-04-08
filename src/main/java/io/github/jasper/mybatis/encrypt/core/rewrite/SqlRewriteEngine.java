@@ -15,23 +15,16 @@ import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.update.UpdateSet;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.mapping.ParameterMapping;
-import org.apache.ibatis.session.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
-import io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
-import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
-import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.config.SqlDialect;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
-import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
-import io.github.jasper.mybatis.encrypt.util.NameUtils;
 
 import java.util.*;
 
@@ -46,17 +39,19 @@ public class SqlRewriteEngine {
     private static final Logger log = LoggerFactory.getLogger(SqlRewriteEngine.class);
 
     private final EncryptMetadataRegistry metadataRegistry;
-    private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
     private final ParameterValueResolver parameterValueResolver = new ParameterValueResolver();
     private final SqlLogMasker sqlLogMasker = new SqlLogMasker();
+    private final EncryptionValueTransformer valueTransformer;
+    private final DerivedTableRuleBuilder derivedTableRuleBuilder;
 
     public SqlRewriteEngine(EncryptMetadataRegistry metadataRegistry,
                             AlgorithmRegistry algorithmRegistry,
                             DatabaseEncryptionProperties properties) {
         this.metadataRegistry = metadataRegistry;
-        this.algorithmRegistry = algorithmRegistry;
         this.properties = properties;
+        this.valueTransformer = new EncryptionValueTransformer(algorithmRegistry);
+        this.derivedTableRuleBuilder = new DerivedTableRuleBuilder(metadataRegistry);
     }
 
     /**
@@ -70,7 +65,8 @@ public class SqlRewriteEngine {
         metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject());
         try {
             Statement statement = CCJSqlParserUtil.parse(boundSql.getSql());
-            RewriteContext context = new RewriteContext(mappedStatement.getConfiguration(), boundSql);
+            SqlRewriteContext context = new SqlRewriteContext(
+                    mappedStatement.getConfiguration(), boundSql, parameterValueResolver);
             if (statement instanceof Insert insert) {
                 rewriteInsert(insert, context);
             } else if (statement instanceof Update update) {
@@ -80,16 +76,16 @@ public class SqlRewriteEngine {
             } else if (statement instanceof Select select) {
                 rewriteSelect(select, context);
             }
-            if (!context.changed) {
+            if (!context.changed()) {
                 return RewriteResult.unchanged();
             }
             String rewrittenSql = statement.toString();
-            String maskedSql = sqlLogMasker.mask(rewrittenSql, context.maskedParameters);
+            String maskedSql = sqlLogMasker.mask(rewrittenSql, context.maskedParameters());
             if (properties.isLogMaskedSql() && log.isDebugEnabled()) {
                 log.debug("Encrypted SQL rewrite applied for statement [{}]: {}",
                         mappedStatement.getId(), maskedSql);
             }
-            return new RewriteResult(true, rewrittenSql, context.parameterMappings, context.maskedParameters, maskedSql);
+            return new RewriteResult(true, rewrittenSql, context.parameterMappings(), context.maskedParameters(), maskedSql);
         } catch (UnsupportedEncryptedOperationException ex) {
             if (log.isDebugEnabled()) {
                 log.debug("Encrypted SQL rewrite rejected for statement [{}]: {}",
@@ -114,7 +110,7 @@ public class SqlRewriteEngine {
      * <p>同表模式下，逻辑列会被替换为密文列，并按规则追加辅助查询列、LIKE 查询列。
      * 独立表模式下，主表仍保留逻辑列本身，但参数值会被替换成写前准备好的外部引用 id。</p>
      */
-    private void rewriteInsert(Insert insert, RewriteContext context) {
+    private void rewriteInsert(Insert insert, SqlRewriteContext context) {
         EncryptTableRule tableRule = metadataRegistry.findByTable(insert.getTable().getName()).orElse(null);
         if (tableRule == null) {
             return;
@@ -125,12 +121,14 @@ public class SqlRewriteEngine {
         }
         ExpressionList<?> originalExpressions = values.getExpressions();
         List<Column> originalColumns = new ArrayList<>(insert.getColumns());
+        // 重写字段定义
         List<Column> rewrittenColumns = new ArrayList<>();
         List<Expression> rewrittenExpressions = new ArrayList<>();
         for (int index = 0; index < originalColumns.size(); index++) {
             Column column = originalColumns.get(index);
             Expression expression = originalExpressions.get(index);
             EncryptColumnRule rule = tableRule.findByColumn(column.getColumnName()).orElse(null);
+            // 非加密字段则跳过加密
             if (rule == null) {
                 rewrittenColumns.add(column);
                 rewrittenExpressions.add(passthroughWriteExpression(expression, context));
@@ -142,22 +140,23 @@ public class SqlRewriteEngine {
                 continue;
             }
             rewrittenColumns.add(new Column(quote(rule.storageColumn())));
+            // 准备写入值封装
             WriteValue writeValue = rewriteEncryptedWriteExpression(expression, rule, context);
             rewrittenExpressions.add(writeValue.expression());
             if (rule.hasAssistedQueryColumn()) {
                 rewrittenColumns.add(new Column(quote(rule.assistedQueryColumn())));
-                rewrittenExpressions.add(buildShadowExpression(writeValue, transformAssisted(rule, writeValue.plainValue()),
+                rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformAssisted(rule, writeValue.plainValue()),
                         MaskingMode.HASH, context));
             }
             if (rule.hasLikeQueryColumn()) {
                 rewrittenColumns.add(new Column(quote(rule.likeQueryColumn())));
-                rewrittenExpressions.add(buildShadowExpression(writeValue, transformLike(rule, writeValue.plainValue()),
+                rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformLike(rule, writeValue.plainValue()),
                         MaskingMode.MASKED, context));
             }
         }
         insert.setColumns(new ExpressionList<>(rewrittenColumns));
         values.setExpressions(new ParenthesedExpressionList<>(rewrittenExpressions));
-        context.changed = true;
+        context.markChanged();
     }
 
     /**
@@ -166,8 +165,8 @@ public class SqlRewriteEngine {
      * <p>`SET` 子句负责把业务明文写成存储态值，`WHERE` 子句则统一走查询态列改写。
      * 两段逻辑故意拆开，便于排查“写入值不对”和“查询条件不命中”这两类问题。</p>
      */
-    private void rewriteUpdate(Update update, RewriteContext context) {
-        TableContext tableContext = new TableContext();
+    private void rewriteUpdate(Update update, SqlRewriteContext context) {
+        SqlTableContext tableContext = new SqlTableContext();
         registerTable(tableContext, update.getTable());
         if (tableContext.isEmpty()) {
             return;
@@ -197,12 +196,12 @@ public class SqlRewriteEngine {
                 rewrittenExpressions.add(writeValue.expression());
                 if (rule.hasAssistedQueryColumn()) {
                     rewrittenColumns.add(buildColumn(column, rule.assistedQueryColumn()));
-                    rewrittenExpressions.add(buildShadowExpression(writeValue, transformAssisted(rule, writeValue.plainValue()),
+                    rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformAssisted(rule, writeValue.plainValue()),
                             MaskingMode.HASH, context));
                 }
                 if (rule.hasLikeQueryColumn()) {
                     rewrittenColumns.add(buildColumn(column, rule.likeQueryColumn()));
-                    rewrittenExpressions.add(buildShadowExpression(writeValue, transformLike(rule, writeValue.plainValue()),
+                    rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformLike(rule, writeValue.plainValue()),
                             MaskingMode.MASKED, context));
                 }
             }
@@ -221,8 +220,8 @@ public class SqlRewriteEngine {
      * <p>删除操作不会改写列清单，只允许在条件里使用受支持的加密字段比较语义。
      * 遇到不安全或不可靠的条件时，会在条件递归阶段直接失败。</p>
      */
-    private void rewriteDelete(Delete delete, RewriteContext context) {
-        TableContext tableContext = new TableContext();
+    private void rewriteDelete(Delete delete, SqlRewriteContext context) {
+        SqlTableContext tableContext = new SqlTableContext();
         registerTable(tableContext, delete.getTable());
         if (tableContext.isEmpty()) {
             return;
@@ -230,7 +229,7 @@ public class SqlRewriteEngine {
         delete.setWhere(rewriteCondition(delete.getWhere(), tableContext, context));
     }
 
-    private void rewriteSelect(Select select, RewriteContext context) {
+    private void rewriteSelect(Select select, SqlRewriteContext context) {
         rewriteSelect(select, context, ProjectionMode.NORMAL);
     }
 
@@ -241,7 +240,7 @@ public class SqlRewriteEngine {
      * 以及按 `ProjectionMode` 决定投影列展开方式。复杂 SQL 排查时，先确认当前查询块
      * 落在哪个投影模式，通常能更快定位问题是在投影阶段还是条件阶段。</p>
      */
-    private void rewriteSelect(Select select, RewriteContext context, ProjectionMode projectionMode) {
+    private void rewriteSelect(Select select, SqlRewriteContext context, ProjectionMode projectionMode) {
         if (select instanceof SetOperationList setOperationList) {
             for (Select child : setOperationList.getSelects()) {
                 rewriteSelect(child, context, projectionMode);
@@ -257,7 +256,7 @@ public class SqlRewriteEngine {
         if (!(select instanceof PlainSelect plainSelect)) {
             throw new UnsupportedEncryptedOperationException("Only plain select and set-operation select are supported for encrypted SQL rewrite.");
         }
-        TableContext tableContext = new TableContext();
+        SqlTableContext tableContext = new SqlTableContext();
         registerFromItem(tableContext, plainSelect.getFromItem(), context);
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
@@ -292,17 +291,12 @@ public class SqlRewriteEngine {
      *
      * <p>JSqlParser 5.x 仍然使用带括号的表达式列表来表示部分分组条件，因此需要显式递归。</p>
      */
-    private Expression rewriteCondition(Expression expression, TableContext tableContext, RewriteContext context) {
+    private Expression rewriteCondition(Expression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         if (expression == null) {
             return null;
         }
         if (expression instanceof ParenthesedExpressionList parenthesis) {
-            parenthesis.replaceAll(o -> {
-                if (o instanceof Expression exp) {
-                    rewriteCondition(exp, tableContext, context);
-                }
-                return o;
-            });
+            parenthesis.replaceAll(exp -> rewriteCondition((Expression) exp, tableContext, context));
             return parenthesis;
         }
         if (expression instanceof ExistsExpression existsExpression) {
@@ -397,7 +391,7 @@ public class SqlRewriteEngine {
      * <p>同表模式优先落到辅助查询列；独立表模式则改写成 `EXISTS` 子查询，
      * 通过主表逻辑列中保存的引用 id 去关联独立表记录。</p>
      */
-    private Expression rewriteEquality(BinaryExpression expression, TableContext tableContext, RewriteContext context) {
+    private Expression rewriteEquality(BinaryExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveComparison(expression, tableContext);
         if (resolution == null) {
             expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
@@ -414,18 +408,18 @@ public class SqlRewriteEngine {
             expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
             rewriteOperand(expression.getRightExpression(), context,
                     rule.hasAssistedQueryColumn()
-                            ? transformAssisted(rule, readOperandValue(expression.getRightExpression(), context))
-                            : transformCipher(rule, readOperandValue(expression.getRightExpression(), context)),
+                            ? valueTransformer.transformAssisted(rule, readOperandValue(expression.getRightExpression(), context))
+                            : valueTransformer.transformCipher(rule, readOperandValue(expression.getRightExpression(), context)),
                     rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
         } else {
             expression.setRightExpression(buildColumn(resolution.column(), targetColumn));
             rewriteOperand(expression.getLeftExpression(), context,
                     rule.hasAssistedQueryColumn()
-                            ? transformAssisted(rule, readOperandValue(expression.getLeftExpression(), context))
-                            : transformCipher(rule, readOperandValue(expression.getLeftExpression(), context)),
+                            ? valueTransformer.transformAssisted(rule, readOperandValue(expression.getLeftExpression(), context))
+                            : valueTransformer.transformCipher(rule, readOperandValue(expression.getLeftExpression(), context)),
                     rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
         }
-        context.changed = true;
+        context.markChanged();
         return expression;
     }
 
@@ -435,7 +429,7 @@ public class SqlRewriteEngine {
      * <p>同表模式要求配置 `likeQueryColumn`；独立表模式会改写成外层 `EXISTS`，
      * 其中关联条件仍然是“独立表主键 = 主表逻辑列中的引用 id”。</p>
      */
-    private Expression rewriteLikeCondition(LikeExpression expression, TableContext tableContext, RewriteContext context) {
+    private Expression rewriteLikeCondition(LikeExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
             expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
@@ -453,8 +447,9 @@ public class SqlRewriteEngine {
         }
         expression.setLeftExpression(buildColumn(resolution.column(), rule.likeQueryColumn()));
         rewriteOperand(expression.getRightExpression(), context,
-                transformLike(rule, readOperandValue(expression.getRightExpression(), context)), MaskingMode.MASKED);
-        context.changed = true;
+                valueTransformer.transformLike(rule, readOperandValue(expression.getRightExpression(), context)),
+                MaskingMode.MASKED);
+        context.markChanged();
         return expression;
     }
 
@@ -464,7 +459,7 @@ public class SqlRewriteEngine {
      * <p>字面量列表和子查询比较都会走这里，但独立表字段目前明确不支持 `IN`，
      * 因为它需要额外的 `EXISTS` 展开或 join 语义，参数顺序也更容易失真。</p>
      */
-    private Expression rewriteInCondition(InExpression expression, TableContext tableContext, RewriteContext context) {
+    private Expression rewriteInCondition(InExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
             if (expression.getRightExpression() instanceof Select subquery) {
@@ -483,7 +478,7 @@ public class SqlRewriteEngine {
         expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
         if (expression.getRightExpression() instanceof Select subquery) {
             rewriteSelect(subquery, context, ProjectionMode.COMPARISON);
-            context.changed = true;
+            context.markChanged();
             return expression;
         }
         if (!(expression.getRightExpression() instanceof ExpressionList<?> expressionList)) {
@@ -491,11 +486,11 @@ public class SqlRewriteEngine {
         }
         for (Expression item : expressionList) {
             rewriteOperand(item, context,
-                    rule.hasAssistedQueryColumn() ? transformAssisted(rule, readOperandValue(item, context))
-                            : transformCipher(rule, readOperandValue(item, context)),
+                    rule.hasAssistedQueryColumn() ? valueTransformer.transformAssisted(rule, readOperandValue(item, context))
+                            : valueTransformer.transformCipher(rule, readOperandValue(item, context)),
                     rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
         }
-        context.changed = true;
+        context.markChanged();
         return expression;
     }
 
@@ -505,7 +500,7 @@ public class SqlRewriteEngine {
      * <p>同表模式判断密文列本身；独立表模式判断的是主表中的引用 id 是否能在独立表中找到记录，
      * 因而会被改写成存在性子查询。</p>
      */
-    private Expression rewriteIsNullCondition(IsNullExpression expression, TableContext tableContext, RewriteContext context) {
+    private Expression rewriteIsNullCondition(IsNullExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
             expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
@@ -513,15 +508,15 @@ public class SqlRewriteEngine {
         }
         EncryptColumnRule rule = resolution.rule();
         if (rule.isStoredInSeparateTable()) {
-            context.changed = true;
+            context.markChanged();
             return buildExistsPresenceSubQuery(resolution.column(), rule, expression.isNot());
         }
         expression.setLeftExpression(buildColumn(resolution.column(), rule.storageColumn()));
-        context.changed = true;
+        context.markChanged();
         return expression;
     }
 
-    private void rewriteOperand(Expression expression, RewriteContext context, String transformedValue, MaskingMode maskingMode) {
+    private void rewriteOperand(Expression expression, SqlRewriteContext context, String transformedValue, MaskingMode maskingMode) {
         if (expression instanceof JdbcParameter) {
             context.replaceLastConsumed(transformedValue, maskingMode);
             return;
@@ -544,7 +539,7 @@ public class SqlRewriteEngine {
      */
     private Expression rewriteSeparateTableCondition(ColumnResolution resolution,
                                                      Expression operand,
-                                                     RewriteContext context,
+                                                     SqlRewriteContext context,
                                                      String targetColumn,
                                                      boolean assisted) {
         EncryptColumnRule rule = resolution.rule();
@@ -553,13 +548,13 @@ public class SqlRewriteEngine {
                     "Separate-table encrypted field requires query column: " + rule.property());
         }
         String transformed = assisted
-                ? transformAssisted(rule, readOperandValue(operand, context))
-                : transformLike(rule, readOperandValue(operand, context));
+                ? valueTransformer.transformAssisted(rule, readOperandValue(operand, context))
+                : valueTransformer.transformLike(rule, readOperandValue(operand, context));
         replaceOperandBinding(operand, context, transformed, assisted ? MaskingMode.HASH : MaskingMode.MASKED);
         return buildExistsSubQuery(resolution.column(), rule, targetColumn, buildQueryValueExpression(operand, transformed), assisted);
     }
 
-    private void replaceOperandBinding(Expression operand, RewriteContext context, String transformed, MaskingMode maskingMode) {
+    private void replaceOperandBinding(Expression operand, SqlRewriteContext context, String transformed, MaskingMode maskingMode) {
         if (operand instanceof JdbcParameter) {
             context.replaceLastConsumed(transformed, maskingMode);
             return;
@@ -575,12 +570,13 @@ public class SqlRewriteEngine {
      *
      * <p>它只负责生成主密文列对应的值，不直接处理辅助列和 LIKE 列。
      * 后两者由调用方基于返回的 `WriteValue` 再决定是否追加影子参数。</p>
+     * 被加密转换字段
      */
     private WriteValue rewriteEncryptedWriteExpression(Expression expression,
                                                        EncryptColumnRule rule,
-                                                       RewriteContext context) {
+                                                       SqlRewriteContext context) {
         Object plainValue = readOperandValue(expression, context);
-        String cipherValue = transformCipher(rule, plainValue);
+        String cipherValue = valueTransformer.transformCipher(rule, plainValue);
         if (expression instanceof JdbcParameter) {
             context.replaceLastConsumed(cipherValue, MaskingMode.MASKED);
             return new WriteValue(expression, plainValue, true);
@@ -590,7 +586,6 @@ public class SqlRewriteEngine {
             return new WriteValue(stringValue, plainValue, false);
         }
         if (expression instanceof LongValue) {
-            // 当表达式是LongValue ?
             return new WriteValue(new StringValue(cipherValue), plainValue, false);
         }
         if (expression instanceof NullValue) {
@@ -599,7 +594,7 @@ public class SqlRewriteEngine {
         throw new UnsupportedEncryptedOperationException("Encrypted write only supports prepared parameters or string literals.");
     }
 
-    private Expression passthroughWriteExpression(Expression expression, RewriteContext context) {
+    private Expression passthroughWriteExpression(Expression expression, SqlRewriteContext context) {
         consumeExpression(expression, context);
         return expression;
     }
@@ -610,10 +605,10 @@ public class SqlRewriteEngine {
      * <p>独立表模式下，主表逻辑列写入的不再是业务明文，而是写前阶段已经准备好的独立表引用 id。
      * 这里会把原参数槽位替换成该引用值，并同步重建参数映射类型，避免运行时仍按原业务字段类型绑定。</p>
      */
-    private Expression rewriteSeparateTableReferenceExpression(Expression expression, RewriteContext context) {
+    private Expression rewriteSeparateTableReferenceExpression(Expression expression, SqlRewriteContext context) {
         if (expression instanceof JdbcParameter) {
             int parameterIndex = context.consumeOriginal();
-            Object referenceId = context.originalValue(parameterIndex, parameterValueResolver);
+            Object referenceId = context.originalValue(parameterIndex);
             context.replaceParameter(parameterIndex, referenceId, MaskingMode.MASKED);
             return expression;
         }
@@ -621,7 +616,7 @@ public class SqlRewriteEngine {
         return expression;
     }
 
-    private Expression buildShadowExpression(WriteValue writeValue, String value, MaskingMode maskingMode, RewriteContext context) {
+    private Expression buildShadowExpression(WriteValue writeValue, String value, MaskingMode maskingMode, SqlRewriteContext context) {
         if (value == null) {
             return new NullValue();
         }
@@ -631,10 +626,10 @@ public class SqlRewriteEngine {
         return new StringValue(value);
     }
 
-    private Object readOperandValue(Expression expression, RewriteContext context) {
+    private Object readOperandValue(Expression expression, SqlRewriteContext context) {
         if (expression instanceof JdbcParameter) {
             int parameterIndex = context.consumeOriginal();
-            return context.originalValue(parameterIndex, parameterValueResolver);
+            return context.originalValue(parameterIndex);
         }
         if (expression instanceof StringValue stringValue) {
             return stringValue.getValue();
@@ -645,7 +640,7 @@ public class SqlRewriteEngine {
         return null;
     }
 
-    private void consumeExpression(Expression expression, RewriteContext context) {
+    private void consumeExpression(Expression expression, SqlRewriteContext context) {
         if (expression == null) {
             return;
         }
@@ -654,11 +649,9 @@ public class SqlRewriteEngine {
             return;
         }
         if (expression instanceof ParenthesedExpressionList parenthesis) {
-            parenthesis.forEach(o -> {
-                if (o instanceof Expression exp) {
-                    consumeExpression(exp, context);
-                }
-            });
+            for (Object exp : parenthesis) {
+                consumeExpression((Expression) exp, context);
+            }
             return;
         }
         if (expression instanceof BinaryExpression binaryExpression) {
@@ -673,7 +666,7 @@ public class SqlRewriteEngine {
         }
     }
 
-    private void consumeItemsList(Object itemsList, RewriteContext context) {
+    private void consumeItemsList(Object itemsList, SqlRewriteContext context) {
         if (itemsList instanceof ExpressionList<?> expressionList) {
             for (Expression item : expressionList) {
                 consumeExpression(item, context);
@@ -704,9 +697,9 @@ public class SqlRewriteEngine {
      * 供外层查询继续按逻辑字段名改写条件。独立表字段不会在这里展开，因为它依赖结果回填阶段解密。</p>
      */
     private void rewriteSelectItems(PlainSelect plainSelect,
-                                    TableContext tableContext,
+                                    SqlTableContext tableContext,
                                     ProjectionMode projectionMode,
-                                    RewriteContext context) {
+                                    SqlRewriteContext context) {
         if (plainSelect.getSelectItems() == null) {
             return;
         }
@@ -717,13 +710,13 @@ public class SqlRewriteEngine {
                 rewritten.add(item);
                 appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
                         allTableColumns.getTable(), projectionMode);
-                context.changed = true;
+                context.markChanged();
                 continue;
             }
             if (expression instanceof AllColumns) {
                 rewritten.add(item);
                 appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(null), null, projectionMode);
-                context.changed = true;
+                context.markChanged();
                 continue;
             }
             ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
@@ -733,14 +726,14 @@ public class SqlRewriteEngine {
             }
             if (resolution.rule().isStoredInSeparateTable()) {
                 rewritten.add(item);
-                context.changed = true;
+                context.markChanged();
                 continue;
             }
             rewritten.add(buildSelectStorageItem(item, resolution));
-            context.changed = true;
+            context.markChanged();
             if (projectionMode == ProjectionMode.DERIVED) {
                 appendDerivedHelperSelectItems(rewritten, item, resolution);
-                context.changed = true;
+                context.markChanged();
             }
         }
         if (!rewritten.isEmpty()) {
@@ -754,7 +747,7 @@ public class SqlRewriteEngine {
      * <p>比较型子查询不能保留业务逻辑列语义，只能输出真正参与比较的物理列，
      * 否则外层 `IN` 左右两侧含义会不一致。</p>
      */
-    private void rewriteComparisonSelectItems(PlainSelect plainSelect, TableContext tableContext) {
+    private void rewriteComparisonSelectItems(PlainSelect plainSelect, SqlTableContext tableContext) {
         if (plainSelect.getSelectItems() == null) {
             return;
         }
@@ -847,7 +840,7 @@ public class SqlRewriteEngine {
         return "__enc_like_" + logicalAlias;
     }
 
-    private void validateOrderBy(List<OrderByElement> orderByElements, TableContext tableContext) {
+    private void validateOrderBy(List<OrderByElement> orderByElements, SqlTableContext tableContext) {
         if (orderByElements == null) {
             return;
         }
@@ -916,13 +909,13 @@ public class SqlRewriteEngine {
         return existsExpression;
     }
 
-    private void validateNonRangeEncryptedColumn(Expression expression, TableContext tableContext, String message) {
+    private void validateNonRangeEncryptedColumn(Expression expression, SqlTableContext tableContext, String message) {
         if (resolveEncryptedColumn(expression, tableContext) != null) {
             throw new UnsupportedEncryptedOperationException(message);
         }
     }
 
-    private ColumnResolution resolveComparison(BinaryExpression expression, TableContext tableContext) {
+    private ColumnResolution resolveComparison(BinaryExpression expression, SqlTableContext tableContext) {
         ColumnResolution left = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (left != null) {
             return new ColumnResolution(left.column(), left.rule(), true);
@@ -931,7 +924,7 @@ public class SqlRewriteEngine {
         return right == null ? null : new ColumnResolution(right.column(), right.rule(), false);
     }
 
-    private ColumnResolution resolveEncryptedColumn(Expression expression, TableContext tableContext) {
+    private ColumnResolution resolveEncryptedColumn(Expression expression, SqlTableContext tableContext) {
         if (!(expression instanceof Column column)) {
             return null;
         }
@@ -939,7 +932,7 @@ public class SqlRewriteEngine {
         return rule == null ? null : new ColumnResolution(column, rule, true);
     }
 
-    private void registerFromItem(TableContext tableContext, FromItem fromItem, RewriteContext context) {
+    private void registerFromItem(SqlTableContext tableContext, FromItem fromItem, SqlRewriteContext context) {
         if (fromItem instanceof Table table) {
             registerTable(tableContext, table);
             return;
@@ -948,7 +941,7 @@ public class SqlRewriteEngine {
             rewriteSelect(parenthesedSelect.getSelect(), context, ProjectionMode.DERIVED);
             if (parenthesedSelect.getAlias() != null && parenthesedSelect.getAlias().getName() != null
                     && !parenthesedSelect.getAlias().getName().isBlank()) {
-                EncryptTableRule derivedRule = buildDerivedTableRule(parenthesedSelect.getAlias().getName(),
+                EncryptTableRule derivedRule = derivedTableRuleBuilder.build(parenthesedSelect.getAlias().getName(),
                         parenthesedSelect.getSelect());
                 if (derivedRule != null) {
                     tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
@@ -957,7 +950,7 @@ public class SqlRewriteEngine {
         }
     }
 
-    private void validateDistinct(Distinct distinct, List<SelectItem<?>> selectItems, TableContext tableContext) {
+    private void validateDistinct(Distinct distinct, List<SelectItem<?>> selectItems, SqlTableContext tableContext) {
         if (distinct == null || selectItems == null) {
             return;
         }
@@ -971,7 +964,7 @@ public class SqlRewriteEngine {
     private void validateAggregateExpressions(List<SelectItem<?>> selectItems,
                                               Expression having,
                                               Expression qualify,
-                                              TableContext tableContext) {
+                                              SqlTableContext tableContext) {
         if (selectItems != null) {
             for (SelectItem<?> item : selectItems) {
                 if (containsUnsupportedAggregate(item.getExpression(), tableContext)) {
@@ -980,13 +973,14 @@ public class SqlRewriteEngine {
                 }
             }
         }
-        if (containsUnsupportedAggregate(having, tableContext) || containsUnsupportedAggregate(qualify, tableContext)) {
+        if (containsUnsupportedAggregate(having, tableContext) ||
+                containsUnsupportedAggregate(qualify, tableContext)) {
             throw new UnsupportedEncryptedOperationException(
                     "Aggregate function is not supported on encrypted fields.");
         }
     }
 
-    private void validateAnalyticExpressions(List<SelectItem<?>> selectItems, TableContext tableContext) {
+    private void validateAnalyticExpressions(List<SelectItem<?>> selectItems, SqlTableContext tableContext) {
         if (selectItems == null) {
             return;
         }
@@ -1000,7 +994,7 @@ public class SqlRewriteEngine {
         }
     }
 
-    private void validateWindowDefinitions(List<WindowDefinition> windowDefinitions, TableContext tableContext) {
+    private void validateWindowDefinitions(List<WindowDefinition> windowDefinitions, SqlTableContext tableContext) {
         if (windowDefinitions == null) {
             return;
         }
@@ -1012,18 +1006,18 @@ public class SqlRewriteEngine {
         }
     }
 
-    private void validateGroupBy(GroupByElement groupByElement, TableContext tableContext) {
-        if (groupByElement == null || groupByElement.getGroupByExpressions() == null) {
+    private void validateGroupBy(GroupByElement groupByElement, SqlTableContext tableContext) {
+        if (groupByElement == null || groupByElement.getGroupByExpressionList() == null) {
             return;
         }
-        for (Object item : groupByElement.getGroupByExpressions()) {
+        for (Object item : groupByElement.getGroupByExpressionList()) {
             if (item instanceof Expression expression && containsEncryptedReference(expression, tableContext)) {
                 throw new UnsupportedEncryptedOperationException("GROUP BY is not supported on encrypted fields.");
             }
         }
     }
 
-    private boolean containsEncryptedReference(Expression expression, TableContext tableContext) {
+    private boolean containsEncryptedReference(Expression expression, SqlTableContext tableContext) {
         if (expression == null) {
             return false;
         }
@@ -1096,7 +1090,7 @@ public class SqlRewriteEngine {
         return false;
     }
 
-    private boolean containsEncryptedReference(WindowDefinition windowDefinition, TableContext tableContext) {
+    private boolean containsEncryptedReference(WindowDefinition windowDefinition, SqlTableContext tableContext) {
         if (windowDefinition == null) {
             return false;
         }
@@ -1117,7 +1111,7 @@ public class SqlRewriteEngine {
         return false;
     }
 
-    private boolean containsUnsupportedAggregate(Expression expression, TableContext tableContext) {
+    private boolean containsUnsupportedAggregate(Expression expression, SqlTableContext tableContext) {
         if (expression == null) {
             return false;
         }
@@ -1201,102 +1195,7 @@ public class SqlRewriteEngine {
         };
     }
 
-    /**
-     * 为派生表生成一份可供外层继续解析的伪表规则。
-     *
-     * <p>外层查询块只能看到派生表投影列名，看不到内部真实物理列，因此这里要把子查询输出重新映射成
-     * 新的 `EncryptTableRule`，这样外层 `t.phone = ?` 之类的条件才有机会继续被改写。</p>
-     */
-    private EncryptTableRule buildDerivedTableRule(String alias, Select select) {
-        if (select instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
-            return buildDerivedTableRule(alias, parenthesedSelect.getSelect());
-        }
-        if (select instanceof SetOperationList setOperationList) {
-            return setOperationList.getSelects().isEmpty() ? null : buildDerivedTableRule(alias, setOperationList.getSelect(0));
-        }
-        if (!(select instanceof PlainSelect plainSelect)) {
-            return null;
-        }
-        TableContext childContext = new TableContext();
-        registerLookupFromItem(childContext, plainSelect.getFromItem());
-        if (plainSelect.getJoins() != null) {
-            for (Join join : plainSelect.getJoins()) {
-                registerLookupFromItem(childContext, join.getRightItem());
-            }
-        }
-        EncryptTableRule derivedRule = new EncryptTableRule(alias);
-        if (plainSelect.getSelectItems() == null) {
-            return null;
-        }
-        for (SelectItem<?> item : plainSelect.getSelectItems()) {
-            Expression expression = item.getExpression();
-            if (expression instanceof AllTableColumns allTableColumns) {
-                for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(allTableColumns.getTable())) {
-                    if (!rule.isStoredInSeparateTable()) {
-                        derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
-                    }
-                }
-                continue;
-            }
-            if (expression instanceof AllColumns) {
-                for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(null)) {
-                    if (!rule.isStoredInSeparateTable()) {
-                        derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
-                    }
-                }
-                continue;
-            }
-            if (!(expression instanceof Column column)) {
-                continue;
-            }
-            EncryptColumnRule sourceRule = childContext.resolveProjected(column).orElse(null);
-            if (sourceRule == null || sourceRule.isStoredInSeparateTable()) {
-                continue;
-            }
-            String aliasName = item.getAlias() != null && item.getAlias().getName() != null && !item.getAlias().getName().isBlank()
-                    ? item.getAlias().getName()
-                    : column.getColumnName();
-            if (aliasName.startsWith("__enc_assisted_") || aliasName.startsWith("__enc_like_")) {
-                continue;
-            }
-            derivedRule.addColumnRule(projectDerivedRule(aliasName, sourceRule));
-        }
-        return derivedRule.getColumnRules().isEmpty() ? null : derivedRule;
-    }
-
-    private void registerLookupFromItem(TableContext tableContext, FromItem fromItem) {
-        if (fromItem instanceof Table table) {
-            registerTable(tableContext, table);
-            return;
-        }
-        if (fromItem instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getAlias() != null
-                && parenthesedSelect.getAlias().getName() != null && parenthesedSelect.getSelect() != null) {
-            EncryptTableRule derivedRule = buildDerivedTableRule(parenthesedSelect.getAlias().getName(), parenthesedSelect.getSelect());
-            if (derivedRule != null) {
-                tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
-            }
-        }
-    }
-
-    private EncryptColumnRule projectDerivedRule(String projectedColumn, EncryptColumnRule sourceRule) {
-        return new EncryptColumnRule(
-                projectedColumn,
-                projectedColumn,
-                sourceRule.cipherAlgorithm(),
-                sourceRule.hasAssistedQueryColumn() ? hiddenAssistedAlias(projectedColumn) : null,
-                sourceRule.assistedQueryAlgorithm(),
-                sourceRule.hasLikeQueryColumn() ? hiddenLikeAlias(projectedColumn) : null,
-                sourceRule.likeQueryAlgorithm(),
-                FieldStorageMode.SAME_TABLE,
-                null,
-                projectedColumn,
-                sourceRule.sourceIdProperty(),
-                sourceRule.sourceIdColumn(),
-                sourceRule.storageIdColumn()
-        );
-    }
-
-    private void registerTable(TableContext tableContext, Table table) {
+    private void registerTable(SqlTableContext tableContext, Table table) {
         EncryptTableRule rule = metadataRegistry.findByTable(table.getName()).orElse(null);
         if (rule == null) {
             return;
@@ -1313,252 +1212,10 @@ public class SqlRewriteEngine {
         return column;
     }
 
-    private String transformCipher(EncryptColumnRule rule, Object plainValue) {
-        return applyTransform(rule, plainValue, algorithmRegistry.cipher(rule.cipherAlgorithm()));
-    }
-
-    private String transformAssisted(EncryptColumnRule rule, Object plainValue) {
-        return applyTransform(rule, plainValue, algorithmRegistry.assisted(rule.assistedQueryAlgorithm()));
-    }
-
-    private String transformLike(EncryptColumnRule rule, Object plainValue) {
-        return applyTransform(rule, plainValue, algorithmRegistry.like(rule.likeQueryAlgorithm()));
-    }
-
-    private String applyTransform(EncryptColumnRule rule, Object plainValue, Object algorithm) {
-        if (plainValue == null) {
-            return null;
-        }
-        String value = String.valueOf(plainValue);
-        if (algorithm instanceof CipherAlgorithm cipherAlgorithm) {
-            return cipherAlgorithm.encrypt(value);
-        }
-        if (algorithm instanceof AssistedQueryAlgorithm assistedQueryAlgorithm) {
-            return assistedQueryAlgorithm.transform(value);
-        }
-        if (algorithm instanceof LikeQueryAlgorithm likeQueryAlgorithm) {
-            return likeQueryAlgorithm.transform(value);
-        }
-        throw new EncryptionConfigurationException("Unsupported algorithm for field: " + rule.property());
-    }
-
-    /**
-     * 一次 SQL 改写过程中的可变上下文。
-     *
-     * <p>它同时维护当前已消费到第几个原始参数、改写后的参数映射列表以及新增附加参数。
-     * 排查参数个数不一致、顺序错位或 `BoundSql.additionalParameter` 被覆盖时，应优先检查这里。</p>
-     */
-    private static final class RewriteContext {
-
-        private final Configuration configuration;
-        private final BoundSql boundSql;
-        private final List<ParameterMapping> parameterMappings;
-        private final Map<String, MaskedValue> maskedParameters = new LinkedHashMap<>();
-        private int currentParameterIndex;
-        private int generatedIndex;
-        private boolean changed;
-
-        private RewriteContext(Configuration configuration, BoundSql boundSql) {
-            this.configuration = configuration;
-            this.boundSql = boundSql;
-            this.parameterMappings = new ArrayList<>(boundSql.getParameterMappings());
-        }
-
-        private int consumeOriginal() {
-            return currentParameterIndex++;
-        }
-
-        private Object originalValue(int index, ParameterValueResolver resolver) {
-            if (index < 0 || index >= parameterMappings.size()) {
-                return null;
-            }
-            return resolver.resolve(configuration, boundSql, boundSql.getParameterObject(), parameterMappings.get(index));
-        }
-
-        private void replaceLastConsumed(Object value, MaskingMode maskingMode) {
-            replaceParameter(currentParameterIndex - 1, value, maskingMode);
-        }
-
-        /**
-         * 在当前位置插入一个新的合成参数。
-         *
-         * <p>这主要服务于辅助列和 LIKE 列，因为它们会在原 SQL 的参数序列中新增占位符。
-         * 如果不是按当前位置插入，而是简单追加到末尾，JDBC 绑定顺序就会和 SQL 占位符顺序错开。</p>
-         */
-        private JdbcParameter insertSynthetic(Object value, MaskingMode maskingMode) {
-            String property = nextSyntheticName();
-            // 辅助列参数必须插入当前位置，才能保证 SQL 占位符顺序始终对齐。
-            parameterMappings.add(currentParameterIndex, new ParameterMapping.Builder(configuration, property,
-                    value == null ? String.class : value.getClass()).build());
-            boundSql.setAdditionalParameter(property, value);
-            maskedParameters.put(property, mask(maskingMode, value));
-            currentParameterIndex++;
-            changed = true;
-            return new JdbcParameter();
-        }
-
-        /**
-         * 用新的合成属性替换原有参数槽位。
-         *
-         * <p>这里不能复用原属性名，否则 MyBatis 在运行时仍可能回到业务参数对象中取同名值，
-         * 导致已经改写完成的附加参数被原始明文覆盖。</p>
-         */
-        private void replaceParameter(int parameterIndex, Object value, MaskingMode maskingMode) {
-            if (parameterIndex < 0 || parameterIndex >= parameterMappings.size()) {
-                return;
-            }
-            ParameterMapping original = parameterMappings.get(parameterIndex);
-            String property = nextSyntheticName();
-            // 不能复用原始属性名，否则 MyBatis 可能会被业务参数对象中的同名值覆盖。
-            ParameterMapping rewritten = new ParameterMapping.Builder(configuration, property,
-                    value == null ? String.class : value.getClass())
-                    .jdbcType(original.getJdbcType())
-                    .build();
-            parameterMappings.set(parameterIndex, rewritten);
-            boundSql.setAdditionalParameter(property, value);
-            maskedParameters.put(property, mask(maskingMode, value));
-            changed = true;
-        }
-
-        private void removeParameter(int parameterIndex) {
-            if (parameterIndex < 0 || parameterIndex >= parameterMappings.size()) {
-                return;
-            }
-            parameterMappings.remove(parameterIndex);
-            if (parameterIndex < currentParameterIndex) {
-                currentParameterIndex--;
-            }
-            changed = true;
-        }
-
-        private String nextSyntheticName() {
-            generatedIndex++;
-            return "__encrypt_generated_" + generatedIndex;
-        }
-
-        private MaskedValue mask(MaskingMode maskingMode, Object value) {
-            if (value == null) {
-                return new MaskedValue(maskingMode.name(), "<null>");
-            }
-            if (maskingMode == MaskingMode.HASH) {
-                return new MaskedValue(maskingMode.name(), String.valueOf(value));
-            }
-            return new MaskedValue(maskingMode.name(), "***");
-        }
-    }
-
-    /**
-     * 当前查询块可见表规则的解析上下文。
-     *
-     * <p>它把真实表名、别名和派生表别名统一收敛到一份查找表里，负责回答“当前列到底属于哪张表”。
-     * 复杂 JOIN、子查询、派生表场景下如果出现字段歧义或规则丢失，通常都和这里的注册结果有关。</p>
-     */
-    private static final class TableContext {
-
-        private final Map<String, EncryptTableRule> ruleByAlias = new LinkedHashMap<>();
-
-        private void register(String tableName, String alias, EncryptTableRule rule) {
-            ruleByAlias.put(NameUtils.normalizeIdentifier(tableName), rule);
-            if (alias != null && !alias.isBlank()) {
-                ruleByAlias.put(NameUtils.normalizeIdentifier(alias), rule);
-            }
-        }
-
-        private void registerDerived(String alias, EncryptTableRule rule) {
-            if (alias != null && !alias.isBlank()) {
-                ruleByAlias.put(NameUtils.normalizeIdentifier(alias), rule);
-            }
-        }
-
-        private Optional<EncryptColumnRule> resolve(Column column) {
-            if (column.getTable() != null && column.getTable().getName() != null && !column.getTable().getName().isBlank()) {
-                EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
-                if (tableRule != null) {
-                    return tableRule.findByColumn(column.getColumnName());
-                }
-            }
-            EncryptColumnRule candidate = null;
-            for (EncryptTableRule tableRule : uniqueRules()) {
-                EncryptColumnRule rule = tableRule.findByColumn(column.getColumnName()).orElse(null);
-                if (rule == null) {
-                    continue;
-                }
-                if (candidate != null) {
-                    throw new UnsupportedEncryptedOperationException(
-                            "Ambiguous encrypted column reference: " + column.getFullyQualifiedName());
-                }
-                candidate = rule;
-            }
-            return Optional.ofNullable(candidate);
-        }
-
-        private List<EncryptColumnRule> rulesForSelectExpansion(Table table) {
-            if (table != null && table.getName() != null && !table.getName().isBlank()) {
-                EncryptTableRule rule = ruleByAlias.get(NameUtils.normalizeIdentifier(table.getName()));
-                return rule == null ? List.of() : new ArrayList<>(rule.getColumnRules());
-            }
-            Collection<EncryptTableRule> uniqueRules = uniqueRules();
-            if (uniqueRules.size() != 1) {
-                return List.of();
-            }
-            return new ArrayList<>(uniqueRules.iterator().next().getColumnRules());
-        }
-
-        private Optional<EncryptColumnRule> resolveProjected(Column column) {
-            if (column.getTable() != null && column.getTable().getName() != null && !column.getTable().getName().isBlank()) {
-                EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
-                if (tableRule != null) {
-                    return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName()));
-                }
-            }
-            EncryptColumnRule candidate = null;
-            for (EncryptTableRule tableRule : uniqueRules()) {
-                EncryptColumnRule rule = matchProjectedRule(tableRule, column.getColumnName());
-                if (rule == null) {
-                    continue;
-                }
-                if (candidate != null) {
-                    throw new UnsupportedEncryptedOperationException(
-                            "Ambiguous encrypted projection reference: " + column.getFullyQualifiedName());
-                }
-                candidate = rule;
-            }
-            return Optional.ofNullable(candidate);
-        }
-
-        private EncryptColumnRule matchProjectedRule(EncryptTableRule tableRule, String columnName) {
-            String normalized = NameUtils.normalizeIdentifier(columnName);
-            for (EncryptColumnRule rule : tableRule.getColumnRules()) {
-                if (NameUtils.normalizeIdentifier(rule.column()).equals(normalized)
-                        || NameUtils.normalizeIdentifier(rule.storageColumn()).equals(normalized)
-                        || (rule.hasAssistedQueryColumn()
-                        && NameUtils.normalizeIdentifier(rule.assistedQueryColumn()).equals(normalized))
-                        || (rule.hasLikeQueryColumn()
-                        && NameUtils.normalizeIdentifier(rule.likeQueryColumn()).equals(normalized))) {
-                    return rule;
-                }
-            }
-            return null;
-        }
-
-        private Collection<EncryptTableRule> uniqueRules() {
-            return new LinkedHashSet<>(ruleByAlias.values());
-        }
-
-        private boolean isEmpty() {
-            return ruleByAlias.isEmpty();
-        }
-    }
-
     private record WriteValue(Expression expression, Object plainValue, boolean parameterized) {
     }
 
     private record ColumnResolution(Column column, EncryptColumnRule rule, boolean leftColumn) {
-    }
-
-    private enum MaskingMode {
-        MASKED,
-        HASH
     }
 
     private enum ProjectionMode {

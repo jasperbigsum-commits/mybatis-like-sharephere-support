@@ -2,7 +2,10 @@ package io.github.jasper.mybatis.encrypt.plugin;
 
 import java.sql.Connection;
 import java.sql.Statement;
+
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.executor.resultset.ResultSetHandler;
 import org.apache.ibatis.executor.statement.StatementHandler;
@@ -83,14 +86,49 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (mappedStatement == null) {
             return;
         }
+        String originalSql = boundSql.getSql();
+        List<ParameterMapping> originalParameterMappings = List.copyOf(boundSql.getParameterMappings());
         RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
         if (!rewriteResult.changed()) {
             return;
         }
         rewriteResult.applyTo(boundSql);
         if (properties.isLogMaskedSql() && log.isDebugEnabled()) {
-            log.debug("Rewrote encrypted SQL: {}", rewriteResult.maskedSql());
+            log.debug("""
+                    Encrypted SQL rewrite detail:
+                    statementId: {}
+                    commandType: {}
+                    originalSql: {}
+                    rewrittenMaskedSql: {}
+                    originalParameterMappings: {}
+                    rewrittenParameterMappings: {}
+                    maskedParameters: {}
+                    """,
+                    mappedStatement.getId(),
+                    mappedStatement.getSqlCommandType(),
+                    singleLine(originalSql),
+                    singleLine(rewriteResult.maskedSql()),
+                    describeParameterMappings(originalParameterMappings),
+                    describeParameterMappings(boundSql.getParameterMappings()),
+                    rewriteResult.maskedParameters());
         }
+    }
+
+    private String describeParameterMappings(List<ParameterMapping> parameterMappings) {
+        return parameterMappings.stream()
+                .map(mapping -> {
+                    Class<?> javaType = mapping.getJavaType();
+                    String typeName = javaType == null ? "unknown" : javaType.getSimpleName();
+                    return mapping.getProperty() + ":" + typeName;
+                })
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String singleLine(String sql) {
+        if (sql == null) {
+            return "<null>";
+        }
+        return sql.replaceAll("\\s+", " ").trim();
     }
 
     private void prepareSeparateTableReferences(StatementHandler statementHandler) {

@@ -150,7 +150,8 @@ public class SeparateTableEncryptionManager {
         if (referenceId == null) {
             return insertExternalRow(rule, plainValue);
         }
-        updateExternalRow(rule, referenceId, plainValue);
+        // todo 新数据更新是否需要更新
+        // updateExternalRow(rule, referenceId, plainValue);
         return referenceId;
     }
 

@@ -4,7 +4,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Collection;
@@ -44,6 +43,7 @@ public class SeparateTableEncryptionManager {
     private final EncryptMetadataRegistry metadataRegistry;
     private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
+    private final SnowflakeIdGenerator idGenerator;
 
     /**
      * 创建独立表加密管理器。
@@ -61,6 +61,7 @@ public class SeparateTableEncryptionManager {
         this.metadataRegistry = metadataRegistry;
         this.algorithmRegistry = algorithmRegistry;
         this.properties = properties;
+        this.idGenerator = new SnowflakeIdGenerator();
     }
 
     /**
@@ -317,24 +318,27 @@ public class SeparateTableEncryptionManager {
     /**
      * 生成一条新的独立表记录并返回引用 id。
      *
-     * <p>返回值会被写回主表逻辑列，因此这里拿到的主键必须能稳定转换成字符串引用值。</p>
+     * <p>独立表主键由框架内部使用雪花算法预生成，再与密文列一起写入外表。
+     * 这样无论外表主键是否自增，主表都能稳定拿到可回填的引用 id。</p>
      */
     private String insertExternalRow(EncryptColumnRule rule, Object plainValue) {
         ExternalRowValues values = buildExternalRowValues(rule, plainValue);
-        String placeholders = values.values().stream().map(current -> "?").collect(Collectors.joining(", "));
+        long generatedId = idGenerator.nextId();
+        List<String> insertColumns = new ArrayList<>();
+        insertColumns.add(rule.storageIdColumn());
+        insertColumns.addAll(values.columns());
+        List<Object> insertValues = new ArrayList<>();
+        insertValues.add(generatedId);
+        insertValues.addAll(values.values());
+        String placeholders = insertValues.stream().map(current -> "?").collect(Collectors.joining(", "));
         String sql = "insert into " + quote(rule.storageTable()) + " ("
-                + values.columns().stream().map(this::quote).collect(Collectors.joining(", "))
+                + insertColumns.stream().map(this::quote).collect(Collectors.joining(", "))
                 + ") values (" + placeholders + ")";
         try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            bind(statement, values.values());
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            bind(statement, insertValues);
             statement.executeUpdate();
-            try (ResultSet generatedKeys = statement.getGeneratedKeys()) {
-                if (generatedKeys.next()) {
-                    return toReferenceId(generatedKeys.getObject(1));
-                }
-            }
-            throw new EncryptionConfigurationException("Failed to obtain separate-table generated id.");
+            return toReferenceId(generatedId);
         } catch (SQLException ex) {
             throw new EncryptionConfigurationException("Failed to insert separate-table encrypted value.", ex);
         }

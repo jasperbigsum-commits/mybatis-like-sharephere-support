@@ -1,28 +1,5 @@
 package io.github.jasper.mybatis.encrypt.core.support;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Collection;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
-import javax.sql.DataSource;
-import org.apache.ibatis.mapping.BoundSql;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.mapping.ParameterMapping;
-import org.apache.ibatis.mapping.SqlCommandType;
-import org.apache.ibatis.reflection.MetaObject;
-import org.apache.ibatis.reflection.SystemMetaObject;
-import org.apache.ibatis.reflection.property.PropertyTokenizer;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
@@ -30,6 +7,21 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.mapping.ParameterMapping;
+import org.apache.ibatis.mapping.SqlCommandType;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.reflection.SystemMetaObject;
+import org.apache.ibatis.reflection.property.PropertyTokenizer;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 独立加密表管理器。

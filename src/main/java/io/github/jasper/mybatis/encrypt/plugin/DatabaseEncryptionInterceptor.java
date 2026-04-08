@@ -107,16 +107,33 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (!(args[0] instanceof MappedStatement mappedStatement)) {
             return invocation.proceed();
         }
+        boolean queryScopeOpened = false;
+        if ("query".equals(invocation.getMethod().getName())) {
+            resultDecryptor.beginQueryScope();
+            if (separateTableEncryptionManager != null) {
+                separateTableEncryptionManager.beginQueryScope();
+            }
+            queryScopeOpened = true;
+        }
         Object parameterObject = args.length > 1 ? args[1] : null;
-        BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
-        MappedStatement rewrittenStatement = rewriteMappedStatement(mappedStatement, boundSql);
-        if (rewrittenStatement != mappedStatement) {
-            args[0] = rewrittenStatement;
-            if (args.length == 6) {
-                args[5] = boundSql;
+        try {
+            BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
+            MappedStatement rewrittenStatement = rewriteMappedStatement(mappedStatement, boundSql);
+            if (rewrittenStatement != mappedStatement) {
+                args[0] = rewrittenStatement;
+                if (args.length == 6) {
+                    args[5] = boundSql;
+                }
+            }
+            return invocation.proceed();
+        } finally {
+            if (queryScopeOpened) {
+                resultDecryptor.endQueryScope();
+                if (separateTableEncryptionManager != null) {
+                    separateTableEncryptionManager.endQueryScope();
+                }
             }
         }
-        return invocation.proceed();
     }
 
     /**

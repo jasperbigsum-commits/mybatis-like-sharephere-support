@@ -36,6 +36,7 @@ public class SeparateTableEncryptionManager {
     private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
     private final SnowflakeIdGenerator idGenerator;
+    private final ThreadLocal<HydrationScope> hydrationScope = new ThreadLocal<>();
 
     /**
      * 创建独立表加密管理器。
@@ -86,11 +87,35 @@ public class SeparateTableEncryptionManager {
         if (resultObject == null) {
             return;
         }
-        if (resultObject instanceof Collection<?> collection) {
-            hydrateCollection(collection);
+        hydrateCollection(collectHydrationCandidates(resultObject));
+    }
+
+    /**
+     * 打开一次查询结果回填作用域。
+     *
+     * <p>嵌套查询结果可能在同一个顶层查询期间被多次经过回填流程，
+     * 这里共享已处理对象集合，避免把已经回填成明文的字段再次当成引用 id 处理。</p>
+     */
+    public void beginQueryScope() {
+        HydrationScope scope = hydrationScope.get();
+        if (scope == null) {
+            scope = new HydrationScope();
+            hydrationScope.set(scope);
+        }
+        scope.incrementDepth();
+    }
+
+    /**
+     * 关闭一次查询结果回填作用域。
+     */
+    public void endQueryScope() {
+        HydrationScope scope = hydrationScope.get();
+        if (scope == null) {
             return;
         }
-        hydrateCollection(List.of(resultObject));
+        if (scope.decrementDepth() == 0) {
+            hydrationScope.remove();
+        }
     }
 
     /**
@@ -260,6 +285,55 @@ public class SeparateTableEncryptionManager {
                 }
                 hydrateRule(candidates, rule);
             }
+        }
+    }
+
+    /**
+     * 递归收集需要执行独立表回填的结果实体。
+     *
+     * <p>关联查询场景下，真正带有引用 id 的加密实体可能位于顶层 DTO 的嵌套属性中，
+     * 因此这里需要沿结果对象图继续下钻，而不是只扫描最外层返回对象。</p>
+     */
+    private List<Object> collectHydrationCandidates(Object resultObject) {
+        List<Object> results = new ArrayList<>();
+        HydrationScope scope = hydrationScope.get();
+        Set<Object> visited = scope != null ? scope.visited()
+                : Collections.newSetFromMap(new IdentityHashMap<>());
+        collectHydrationCandidates(resultObject, results, visited);
+        return results;
+    }
+
+    private void collectHydrationCandidates(Object candidate, List<Object> results, Set<Object> visited) {
+        if (candidate == null || isSimpleValueType(candidate.getClass())) {
+            return;
+        }
+        if (candidate instanceof Map<?, ?> map) {
+            map.values().forEach(value -> collectHydrationCandidates(value, results, visited));
+            return;
+        }
+        if (candidate instanceof Collection<?> collection) {
+            collection.forEach(value -> collectHydrationCandidates(value, results, visited));
+            return;
+        }
+        if (candidate.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(candidate);
+            for (int index = 0; index < length; index++) {
+                collectHydrationCandidates(java.lang.reflect.Array.get(candidate, index), results, visited);
+            }
+            return;
+        }
+        if (!visited.add(candidate)) {
+            return;
+        }
+        if (metadataRegistry.findByEntity(candidate.getClass()).isPresent()) {
+            results.add(candidate);
+        }
+        MetaObject metaObject = SystemMetaObject.forObject(candidate);
+        for (String getterName : metaObject.getGetterNames()) {
+            if ("class".equals(getterName)) {
+                continue;
+            }
+            collectHydrationCandidates(metaObject.getValue(getterName), results, visited);
         }
     }
 
@@ -480,6 +554,37 @@ public class SeparateTableEncryptionManager {
             }
         }
         return referenceId;
+    }
+
+    private boolean isSimpleValueType(Class<?> type) {
+        return type.isPrimitive()
+                || type.isEnum()
+                || CharSequence.class.isAssignableFrom(type)
+                || Number.class.isAssignableFrom(type)
+                || Boolean.class == type
+                || Character.class == type
+                || java.util.Date.class.isAssignableFrom(type)
+                || java.time.temporal.Temporal.class.isAssignableFrom(type)
+                || Class.class == type;
+    }
+
+    private static final class HydrationScope {
+
+        private final Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        private int depth;
+
+        private Set<Object> visited() {
+            return visited;
+        }
+
+        private void incrementDepth() {
+            depth++;
+        }
+
+        private int decrementDepth() {
+            depth--;
+            return depth;
+        }
     }
 
     private String quote(String identifier) {

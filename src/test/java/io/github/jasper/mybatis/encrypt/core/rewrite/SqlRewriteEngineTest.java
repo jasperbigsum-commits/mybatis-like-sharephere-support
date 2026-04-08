@@ -177,6 +177,42 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteEncryptedProjectionInComplexDerivedJoinQuery() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT a.is_edit, a.gridman, c.id, c.name, c.phone FROM (" +
+                        "SELECT o.user_id, coalesce(max(CASE WHEN o.user_id = ? THEN o.created_at END), min(o.created_at)) AS wx_createtime, " +
+                        "max(o.user_id = ?) AS is_edit, GROUP_CONCAT(o.remark) AS remark, GROUP_CONCAT(o.owner_name) AS gridman, " +
+                        "GROUP_CONCAT(o.user_id) AS userid FROM order_account o WHERE o.deleted = 0 AND o.user_id IS NOT NULL " +
+                        "GROUP BY o.user_id) a JOIN user_account c ON a.user_id = c.id " +
+                        "WHERE (a.userid REGEXP ?) ORDER BY a.is_edit DESC, a.wx_createtime DESC, a.user_id",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "userId1", Long.class).build(),
+                        new ParameterMapping.Builder(configuration, "userId2", Long.class).build(),
+                        new ParameterMapping.Builder(configuration, "regexp", String.class).build()
+                ),
+                Map.of("userId1", 1L, "userId2", 1L, "regexp", "1")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("c.`phone_cipher` AS phone") || result.sql().contains("c.`phone_cipher` phone"));
+        assertTrue(result.sql().contains("a.userid REGEXP ?"));
+        assertTrue(result.sql().contains("ORDER BY a.is_edit DESC, a.wx_createtime DESC, a.user_id"));
+        assertFalse(result.sql().contains("GROUP_CONCAT(c.`phone_cipher`)"));
+        assertEquals(0, result.maskedParameters().size());
+    }
+
+    @Test
     void shouldRewriteExistsSubquery() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();

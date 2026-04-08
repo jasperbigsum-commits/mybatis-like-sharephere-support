@@ -12,7 +12,8 @@ import io.github.jasper.mybatis.encrypt.util.NameUtils;
 /**
  * 加密元数据中心注册表。
  *
- * <p>负责合并配置驱动规则与注解驱动规则，并按物理表名和实体类型两条维度缓存结果。</p>
+ * <p>负责合并配置驱动规则与注解驱动规则，并按物理表名和实体类型两条维度缓存结果。
+ * 对于多表 DTO，会优先使用字段级 {@code table} 把规则拆分注册到各自来源表。</p>
  */
 public class EncryptMetadataRegistry {
 
@@ -118,12 +119,9 @@ public class EncryptMetadataRegistry {
             return null;
         }
         annotationRule.getColumnRules().forEach(this::validateRule);
-        EncryptTableRule existing = tableRules.get(annotationRule.getTableName());
-        if (existing != null) {
-            existing.mergeMissing(annotationRule);
-            return existing;
+        for (EncryptColumnRule columnRule : annotationRule.getColumnRules()) {
+            registerAnnotationColumnRule(annotationRule, columnRule);
         }
-        tableRules.put(annotationRule.getTableName(), annotationRule);
         return annotationRule;
     }
 
@@ -141,6 +139,7 @@ public class EncryptMetadataRegistry {
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
+                null,
                 column,
                 properties.getCipherAlgorithm(),
                 properties.getAssistedQueryColumn(),
@@ -154,6 +153,16 @@ public class EncryptMetadataRegistry {
         );
         validateRule(rule);
         return rule;
+    }
+
+    private void registerAnnotationColumnRule(EncryptTableRule entityRule, EncryptColumnRule columnRule) {
+        // 字段级 table 优先级高于类级 @EncryptTable，适合一个 DTO 混合多张表字段的场景。
+        String effectiveTable = firstNonBlank(columnRule.table(), entityRule.getTableName());
+        EncryptTableRule tableRule = tableRules.computeIfAbsent(
+                NameUtils.normalizeIdentifier(effectiveTable),
+                ignored -> new EncryptTableRule(effectiveTable)
+        );
+        tableRule.mergeMissing(columnRule);
     }
 
     private void validateRule(EncryptColumnRule rule) {

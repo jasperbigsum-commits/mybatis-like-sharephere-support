@@ -79,6 +79,16 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("id", rule.storageIdColumn());
     }
 
+    @Test
+    void shouldKeepFieldLevelSourceTableForDtoField() {
+        EncryptTableRule tableRule = loader.load(MultiTableDto.class);
+        EncryptColumnRule phoneRule = tableRule.findByProperty("phone").orElseThrow();
+        EncryptColumnRule archivePhoneRule = tableRule.findByProperty("archivePhone").orElseThrow();
+
+        assertEquals("user_account", phoneRule.table());
+        assertEquals("user_archive", archivePhoneRule.table());
+    }
+
     static class MixedAnnotationEntity {
 
         @EncryptField
@@ -154,5 +164,22 @@ class AnnotationEncryptMetadataLoaderTest {
                 assistedQueryColumn = "phone_hash"
         )
         private String phone;
+    }
+
+    static class MultiTableDto {
+
+        @EncryptField(
+                table = "user_account",
+                column = "phone",
+                storageColumn = "phone_cipher"
+        )
+        private String phone;
+
+        @EncryptField(
+                table = "user_archive",
+                column = "archive_phone",
+                storageColumn = "archive_phone_cipher"
+        )
+        private String archivePhone;
     }
 }

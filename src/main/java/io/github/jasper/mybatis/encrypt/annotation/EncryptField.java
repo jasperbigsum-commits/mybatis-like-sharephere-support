@@ -10,13 +10,24 @@ import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 /**
  * 为实体属性声明加密元数据。
  *
- * <p>{@code column} 始终表示应用 SQL 引用的原始业务列，{@code storageColumn} 表示真实密文存储列；
+ * <p>{@code table} 可选地指定当前字段来源的物理表，适用于一个 DTO 同时承接多张表的查询结果；
+ * {@code column} 始终表示应用 SQL 引用的原始业务列，{@code storageColumn} 表示真实密文存储列；
  * 未配置时，{@code storageColumn} 默认与 {@code column} 保持一致。</p>
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
 public @interface EncryptField {
+
+    /**
+     * 当前字段来源的物理表名。
+     *
+     * <p>当一个 DTO 组合了多张表的字段时，可直接在字段上指定来源表，
+     * 避免类级别 {@code @EncryptTable} 只能描述单一表来源。</p>
+     *
+     * @return 字段来源表名
+     */
+    String table() default "";
 
     /**
      * 原始业务列名。

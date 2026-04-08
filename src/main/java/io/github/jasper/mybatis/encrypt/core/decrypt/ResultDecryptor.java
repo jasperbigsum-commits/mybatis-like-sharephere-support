@@ -2,6 +2,8 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
+import java.util.IdentityHashMap;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
@@ -20,6 +22,7 @@ public class ResultDecryptor {
     private final EncryptMetadataRegistry metadataRegistry;
     private final AlgorithmRegistry algorithmRegistry;
     private final SeparateTableEncryptionManager separateTableEncryptionManager;
+    private final ThreadLocal<TraversalScope> queryScope = new ThreadLocal<>();
 
     /**
      * 创建结果解密器。
@@ -49,16 +52,81 @@ public class ResultDecryptor {
         if (separateTableEncryptionManager != null) {
             separateTableEncryptionManager.hydrateResults(resultObject);
         }
-        if (resultObject instanceof Collection<?> collection) {
-            collection.forEach(this::decryptSingle);
-            return resultObject;
-        }
-        decryptSingle(resultObject);
+        TraversalScope scope = queryScope.get();
+        Set<Object> visited = scope != null ? scope.visited()
+                : java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        decryptGraph(resultObject, visited);
         return resultObject;
     }
 
     /**
-     * 解密单个实体实例上的加密属性。
+     * 打开一次查询结果处理作用域。
+     *
+     * <p>同一个顶层查询里的嵌套结果加载可能多次触发结果解密，
+     * 这里通过线程内作用域共享已处理对象集合，避免重复解密同一实例。</p>
+     */
+    public void beginQueryScope() {
+        TraversalScope scope = queryScope.get();
+        if (scope == null) {
+            scope = new TraversalScope();
+            queryScope.set(scope);
+        }
+        scope.incrementDepth();
+    }
+
+    /**
+     * 关闭一次查询结果处理作用域。
+     */
+    public void endQueryScope() {
+        TraversalScope scope = queryScope.get();
+        if (scope == null) {
+            return;
+        }
+        if (scope.decrementDepth() == 0) {
+            queryScope.remove();
+        }
+    }
+
+    /**
+     * 递归遍历返回结果对象图，确保集合结果和关联嵌套实体都会进入解密流程。
+     *
+     * <p>多表关联查询时，MyBatis 可能把加密实体挂在顶层 DTO 的子属性上。
+     * 如果这里只处理顶层对象，嵌套实体里的密文字段就不会被还原。</p>
+     */
+    private void decryptGraph(Object candidate, Set<Object> visited) {
+        if (candidate == null || isSimpleValueType(candidate.getClass())) {
+            return;
+        }
+        if (candidate instanceof Map<?, ?> map) {
+            map.values().forEach(value -> decryptGraph(value, visited));
+            return;
+        }
+        if (candidate instanceof Collection<?> collection) {
+            collection.forEach(value -> decryptGraph(value, visited));
+            return;
+        }
+        if (candidate.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(candidate);
+            for (int index = 0; index < length; index++) {
+                decryptGraph(java.lang.reflect.Array.get(candidate, index), visited);
+            }
+            return;
+        }
+        if (!visited.add(candidate)) {
+            return;
+        }
+        decryptSingle(candidate);
+        MetaObject metaObject = SystemMetaObject.forObject(candidate);
+        for (String getterName : metaObject.getGetterNames()) {
+            if ("class".equals(getterName)) {
+                continue;
+            }
+            decryptGraph(metaObject.getValue(getterName), visited);
+        }
+    }
+
+    /**
+     * 解密单个实体实例上的同表密文字段。
      *
      * @param candidate MyBatis 返回的实体实例
      */
@@ -83,6 +151,37 @@ public class ResultDecryptor {
                 continue;
             }
             metaObject.setValue(rule.property(), algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt(cipherText));
+        }
+    }
+
+    private boolean isSimpleValueType(Class<?> type) {
+        return type.isPrimitive()
+                || type.isEnum()
+                || CharSequence.class.isAssignableFrom(type)
+                || Number.class.isAssignableFrom(type)
+                || Boolean.class == type
+                || Character.class == type
+                || java.util.Date.class.isAssignableFrom(type)
+                || java.time.temporal.Temporal.class.isAssignableFrom(type)
+                || Class.class == type;
+    }
+
+    private static final class TraversalScope {
+
+        private final Set<Object> visited = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        private int depth;
+
+        private Set<Object> visited() {
+            return visited;
+        }
+
+        private void incrementDepth() {
+            depth++;
+        }
+
+        private int decrementDepth() {
+            depth--;
+            return depth;
         }
     }
 }

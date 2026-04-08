@@ -63,7 +63,43 @@ class EncryptMetadataRegistryTest {
         assertTrue(registry.findByEntity(PlainEntity.class).isEmpty());
     }
 
+    @Test
+    void shouldRegisterFieldLevelRulesToDifferentSourceTables() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        EncryptTableRule entityRule = registry.findByEntity(MultiTableDto.class).orElseThrow();
+
+        assertEquals("phone", entityRule.findByProperty("phone").orElseThrow().column());
+        assertEquals("archive_phone", entityRule.findByProperty("archivePhone").orElseThrow().column());
+        assertTrue(registry.findByTable("user_account")
+                .orElseThrow()
+                .findByProperty("phone")
+                .isPresent());
+        assertTrue(registry.findByTable("user_archive")
+                .orElseThrow()
+                .findByProperty("archivePhone")
+                .isPresent());
+    }
+
     static class PlainEntity {
         private Long id;
+    }
+
+    static class MultiTableDto {
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                table = "user_account",
+                column = "phone",
+                storageColumn = "phone_cipher"
+        )
+        private String phone;
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                table = "user_archive",
+                column = "archive_phone",
+                storageColumn = "archive_phone_cipher"
+        )
+        private String archivePhone;
     }
 }

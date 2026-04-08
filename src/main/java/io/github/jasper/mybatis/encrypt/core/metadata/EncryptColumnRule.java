@@ -4,6 +4,7 @@ package io.github.jasper.mybatis.encrypt.core.metadata;
  * 字段级加密规则。
  *
  * @param property 实体属性名
+ * @param table 字段来源的物理表；为空时默认继承所属实体规则的表名
  * @param column 应用 SQL 使用的原始业务列名
  * @param cipherAlgorithm 加密算法 bean 名称
  * @param assistedQueryColumn 辅助等值查询列
@@ -16,6 +17,7 @@ package io.github.jasper.mybatis.encrypt.core.metadata;
  * @param storageIdColumn 外部表标识列
  */
 public record EncryptColumnRule(String property,
+                                String table,
                                 String column,
                                 String cipherAlgorithm,
                                 String assistedQueryColumn,

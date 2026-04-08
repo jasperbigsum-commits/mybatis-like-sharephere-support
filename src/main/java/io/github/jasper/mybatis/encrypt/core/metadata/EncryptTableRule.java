@@ -86,4 +86,16 @@ public class EncryptTableRule {
         incoming.getColumnRules().forEach(rule -> propertyRules.putIfAbsent(rule.property(), rule));
         return this;
     }
+
+    /**
+     * 合并单个字段规则，已有规则优先保留。
+     *
+     * @param incoming 新字段规则
+     * @return 当前对象
+     */
+    public EncryptTableRule mergeMissing(EncryptColumnRule incoming) {
+        columnRules.putIfAbsent(NameUtils.normalizeIdentifier(incoming.column()), incoming);
+        propertyRules.putIfAbsent(incoming.property(), incoming);
+        return this;
+    }
 }

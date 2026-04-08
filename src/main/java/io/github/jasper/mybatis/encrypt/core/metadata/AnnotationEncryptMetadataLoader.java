@@ -11,6 +11,10 @@ import io.github.jasper.mybatis.encrypt.util.NameUtils;
  *
  * <p>{@link EncryptField#column()} 的列名解析顺序为：显式配置的 {@code @EncryptField.column}、
  * MyBatis-Plus 的 {@code @TableField(value)}、JPA 的 {@code @Column(name)}，最后退回到属性名 snake_case。</p>
+ *
+ * <p>如果一个 DTO 同时承接多张表的字段，可以不给类声明 {@link EncryptTable}，
+ * 而是直接在各个 {@link EncryptField} 上通过 {@link EncryptField#table()} 指定来源表。
+ * 这样既保留按属性解密的能力，又不会把整个 DTO 误绑定到某一张表。</p>
  */
 public class AnnotationEncryptMetadataLoader {
 
@@ -33,6 +37,7 @@ public class AnnotationEncryptMetadataLoader {
             String column = blankToDefault(encryptField.column(), resolveColumnName(field));
             rule.addColumnRule(new EncryptColumnRule(
                     property,
+                    blankToNull(encryptField.table()),
                     column,
                     encryptField.cipherAlgorithm(),
                     blankToNull(encryptField.assistedQueryColumn()),

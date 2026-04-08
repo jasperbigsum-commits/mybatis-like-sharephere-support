@@ -6,14 +6,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Many;
 import org.apache.ibatis.executor.BatchResult;
 import org.apache.ibatis.executor.statement.StatementHandler;
 import org.apache.ibatis.mapping.BoundSql;
@@ -232,6 +236,185 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldReadComplexDerivedJoinQueryAcrossStorageModes() throws Exception {
+        UserRecord matched = user(31L, "Kate", "13000130001", "320101199001010131");
+        UserRecord ignored = user(32L, "Leo", "13000130002", "320101199001010132");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(matched));
+            assertEquals(1, mapper.insertUser(ignored));
+        }
+
+        insertOrderAccountRow(101L, 31L, 1001L, "first", "grid-a", 0);
+        insertOrderAccountRow(102L, 31L, 1009L, "second", "grid-b", 0);
+        insertOrderAccountRow(103L, 32L, 1005L, "third", "grid-c", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserRecord loaded = mapper.selectLatestByComplexProjection(31L, "31");
+            assertNotNull(loaded);
+            assertEquals(31L, loaded.getId());
+            assertEquals("Kate", loaded.getName());
+            assertEquals("13000130001", loaded.getPhone());
+            assertEquals("320101199001010131", loaded.getIdCard());
+        }
+    }
+
+    @Test
+    void shouldReadAssociatedEntityListAcrossStorageModes() throws Exception {
+        UserRecord ownerOne = user(41L, "Mia", "13100131001", "320101199001010141");
+        UserRecord reviewerOne = user(42L, "Noah", "13100131002", "320101199001010142");
+        UserRecord ownerTwo = user(43L, "Olivia", "13100131003", "320101199001010143");
+        UserRecord reviewerTwo = user(44L, "Piper", "13100131004", "320101199001010144");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(ownerOne));
+            assertEquals(1, mapper.insertUser(reviewerOne));
+            assertEquals(1, mapper.insertUser(ownerTwo));
+            assertEquals(1, mapper.insertUser(reviewerTwo));
+        }
+
+        insertOrderAccountRow(201L, 41L, 42L, 2001L, "assoc-a", "grid-a", 0);
+        insertOrderAccountRow(202L, 43L, 44L, 2002L, "assoc-b", "grid-b", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<OrderAssociationView> views = mapper.selectOrderAssociations();
+            assertEquals(2, views.size());
+
+            OrderAssociationView first = views.get(0);
+            assertEquals(201L, first.getOrderId());
+            assertEquals("assoc-a", first.getRemark());
+            assertNotNull(first.getOwner());
+            assertEquals("Mia", first.getOwner().getName());
+            assertEquals("13100131001", first.getOwner().getPhone());
+            assertEquals("320101199001010141", first.getOwner().getIdCard());
+            assertNotNull(first.getReviewer());
+            assertEquals("Noah", first.getReviewer().getName());
+            assertEquals("13100131002", first.getReviewer().getPhone());
+            assertEquals("320101199001010142", first.getReviewer().getIdCard());
+
+            OrderAssociationView second = views.get(1);
+            assertEquals(202L, second.getOrderId());
+            assertEquals("assoc-b", second.getRemark());
+            assertNotNull(second.getOwner());
+            assertEquals("Olivia", second.getOwner().getName());
+            assertEquals("13100131003", second.getOwner().getPhone());
+            assertEquals("320101199001010143", second.getOwner().getIdCard());
+            assertNotNull(second.getReviewer());
+            assertEquals("Piper", second.getReviewer().getName());
+            assertEquals("13100131004", second.getReviewer().getPhone());
+            assertEquals("320101199001010144", second.getReviewer().getIdCard());
+        }
+    }
+
+    @Test
+    void shouldReadAnnotatedDtoAcrossStorageModes() throws Exception {
+        UserRecord user = user(51L, "Quinn", "13200132051", "320101199001010151");
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserProjectionDto dto = mapper.selectUserProjectionDto(51L);
+            assertNotNull(dto);
+            assertEquals(51L, dto.getId());
+            assertEquals("Quinn", dto.getDisplayName());
+            assertEquals("13200132051", dto.getPhone());
+            assertEquals("320101199001010151", dto.getIdCard());
+        }
+    }
+
+    @Test
+    void shouldReadNestedDtoAssociationListAcrossStorageModes() throws Exception {
+        UserRecord owner = user(61L, "Rita", "13300133061", "320101199001010161");
+        UserRecord reviewer = user(62L, "Sam", "13300133062", "320101199001010162");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(owner));
+            assertEquals(1, mapper.insertUser(reviewer));
+        }
+
+        insertOrderAccountRow(301L, 61L, 62L, 3001L, "nested-assoc", "grid-z", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<OrderNestedDto> views = mapper.selectNestedOrderAssociations();
+            assertEquals(1, views.size());
+
+            OrderNestedDto view = views.get(0);
+            assertEquals(301L, view.getOrderId());
+            assertNotNull(view.getParticipants());
+            assertNotNull(view.getParticipants().getOwner());
+            assertEquals("Rita", view.getParticipants().getOwner().getDisplayName());
+            assertEquals("13300133061", view.getParticipants().getOwner().getPhone());
+            assertEquals("320101199001010161", view.getParticipants().getOwner().getIdCard());
+            assertNotNull(view.getParticipants().getReviewer());
+            assertEquals("Sam", view.getParticipants().getReviewer().getDisplayName());
+            assertEquals("13300133062", view.getParticipants().getReviewer().getPhone());
+            assertEquals("320101199001010162", view.getParticipants().getReviewer().getIdCard());
+        }
+    }
+
+    @Test
+    void shouldReadParentListContainingChildDtoListAcrossStorageModes() throws Exception {
+        UserRecord firstA = user(71L, "Tina", "13400134071", "320101199001010171");
+        UserRecord firstB = user(72L, "Uma", "13400134072", "320101199001010172");
+        UserRecord secondA = user(73L, "Vera", "13400134073", "320101199001010173");
+        UserRecord secondB = user(74L, "Wade", "13400134074", "320101199001010174");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(firstA));
+            assertEquals(1, mapper.insertUser(firstB));
+            assertEquals(1, mapper.insertUser(secondA));
+            assertEquals(1, mapper.insertUser(secondB));
+        }
+
+        insertOrderAccountRow(401L, 71L, 4001L, "child-list-a", "grid-l1", 0);
+        insertOrderAccountRow(402L, 73L, 4002L, "child-list-b", "grid-l2", 0);
+        insertOrderParticipantRow(501L, 401L, 71L, 1);
+        insertOrderParticipantRow(502L, 401L, 72L, 2);
+        insertOrderParticipantRow(503L, 402L, 73L, 1);
+        insertOrderParticipantRow(504L, 402L, 74L, 2);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<OrderGroupDto> groups = mapper.selectOrderGroupsWithParticipants();
+            assertEquals(2, groups.size());
+
+            OrderGroupDto first = groups.get(0);
+            assertEquals(401L, first.getOrderId());
+            assertEquals("child-list-a", first.getRemark());
+            assertNotNull(first.getParticipants());
+            assertEquals(2, first.getParticipants().size());
+            assertEquals("Tina", first.getParticipants().get(0).getDisplayName());
+            assertEquals("13400134071", first.getParticipants().get(0).getPhone());
+            assertEquals("320101199001010171", first.getParticipants().get(0).getIdCard());
+            assertEquals("Uma", first.getParticipants().get(1).getDisplayName());
+            assertEquals("13400134072", first.getParticipants().get(1).getPhone());
+            assertEquals("320101199001010172", first.getParticipants().get(1).getIdCard());
+
+            OrderGroupDto second = groups.get(1);
+            assertEquals(402L, second.getOrderId());
+            assertEquals("child-list-b", second.getRemark());
+            assertNotNull(second.getParticipants());
+            assertEquals(2, second.getParticipants().size());
+            assertEquals("Vera", second.getParticipants().get(0).getDisplayName());
+            assertEquals("13400134073", second.getParticipants().get(0).getPhone());
+            assertEquals("320101199001010173", second.getParticipants().get(0).getIdCard());
+            assertEquals("Wade", second.getParticipants().get(1).getDisplayName());
+            assertEquals("13400134074", second.getParticipants().get(1).getPhone());
+            assertEquals("320101199001010174", second.getParticipants().get(1).getIdCard());
+        }
+    }
+
+    @Test
     void shouldBatchInsertAcrossStorageModesUsingBatchExecutor() throws Exception {
         List<UserRecord> users = List.of(
                 user(11L, "Grace", "13300133001", "320101199001010011"),
@@ -348,6 +531,8 @@ class MybatisEncryptionIntegrationTest {
 
     private void initializeSchema() throws Exception {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("drop table if exists order_participant");
+            statement.execute("drop table if exists order_account");
             statement.execute("drop table if exists user_account");
             statement.execute("drop table if exists user_id_card_encrypt");
             RunScript.execute(connection, new StringReader(loadSchemaSql()));
@@ -376,6 +561,50 @@ class MybatisEncryptionIntegrationTest {
         user.setPhone(phone);
         user.setIdCard(idCard);
         return user;
+    }
+
+    private void insertOrderAccountRow(long id, long userId, long createdSeq, String remark, String ownerName, int deleted)
+            throws Exception {
+        insertOrderAccountRow(id, userId, null, createdSeq, remark, ownerName, deleted);
+    }
+
+    private void insertOrderAccountRow(long id,
+                                       long userId,
+                                       Long relatedUserId,
+                                       long createdSeq,
+                                       String remark,
+                                       String ownerName,
+                                       int deleted)
+            throws Exception {
+        String sql = "insert into order_account (id, user_id, related_user_id, created_seq, remark, owner_name, deleted) "
+                + "values (?, ?, ?, ?, ?, ?, ?)";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            statement.setLong(2, userId);
+            if (relatedUserId == null) {
+                statement.setNull(3, java.sql.Types.BIGINT);
+            } else {
+                statement.setLong(3, relatedUserId);
+            }
+            statement.setLong(4, createdSeq);
+            statement.setString(5, remark);
+            statement.setString(6, ownerName);
+            statement.setInt(7, deleted);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertOrderParticipantRow(long id, long orderId, long userId, int seqNo) throws Exception {
+        String sql = "insert into order_participant (id, order_id, user_id, seq_no) values (?, ?, ?, ?)";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            statement.setLong(2, orderId);
+            statement.setLong(3, userId);
+            statement.setInt(4, seqNo);
+            statement.executeUpdate();
+        }
     }
 
     private void assertReadableUser(UserMapper mapper, UserRecord expected) {
@@ -471,6 +700,120 @@ class MybatisEncryptionIntegrationTest {
                 """)
         UserRecord selectById(@Param("id") Long id);
 
+        @Select("""
+                select c.id, c.name, c.phone, c.id_card
+                from (
+                    select o.user_id,
+                           coalesce(max(case when o.user_id = #{userId} then o.created_seq end), min(o.created_seq)) as sort_key,
+                           group_concat(cast(o.user_id as varchar)) as user_ids
+                    from order_account o
+                    where o.deleted = 0 and o.user_id is not null
+                    group by o.user_id
+                ) a
+                join user_account c on a.user_id = c.id
+                where a.user_ids regexp #{regexp}
+                order by a.sort_key desc, a.user_id desc
+                limit 1
+                """)
+        UserRecord selectLatestByComplexProjection(@Param("userId") Long userId, @Param("regexp") String regexp);
+
+        @Select("""
+                select o.id as order_id,
+                       o.remark as order_remark,
+                       owner.id as owner_id,
+                       owner.name as owner_name,
+                       owner.phone as owner_phone,
+                       owner.id_card as owner_id_card,
+                       reviewer.id as reviewer_id,
+                       reviewer.name as reviewer_name,
+                       reviewer.phone as reviewer_phone,
+                       reviewer.id_card as reviewer_id_card
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                join user_account reviewer on o.related_user_id = reviewer.id
+                where o.deleted = 0
+                order by o.id
+                """)
+        @Results(id = "orderAssociationViewMap", value = {
+                @Result(property = "orderId", column = "order_id"),
+                @Result(property = "remark", column = "order_remark"),
+                @Result(property = "owner.id", column = "owner_id"),
+                @Result(property = "owner.name", column = "owner_name"),
+                @Result(property = "owner.phone", column = "owner_phone"),
+                @Result(property = "owner.idCard", column = "owner_id_card"),
+                @Result(property = "reviewer.id", column = "reviewer_id"),
+                @Result(property = "reviewer.name", column = "reviewer_name"),
+                @Result(property = "reviewer.phone", column = "reviewer_phone"),
+                @Result(property = "reviewer.idCard", column = "reviewer_id_card")
+        })
+        List<OrderAssociationView> selectOrderAssociations();
+
+        @Select("""
+                select id,
+                       name as display_name,
+                       phone,
+                       id_card
+                from user_account
+                where id = #{id}
+                """)
+        UserProjectionDto selectUserProjectionDto(@Param("id") Long id);
+
+        @Select("""
+                select o.id as order_id,
+                       owner.id as owner_id,
+                       owner.name as owner_display_name,
+                       owner.phone as owner_phone,
+                       owner.id_card as owner_id_card,
+                       reviewer.id as reviewer_id,
+                       reviewer.name as reviewer_display_name,
+                       reviewer.phone as reviewer_phone,
+                       reviewer.id_card as reviewer_id_card
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                join user_account reviewer on o.related_user_id = reviewer.id
+                where o.deleted = 0
+                order by o.id
+                """)
+        @Results(id = "orderNestedDtoMap", value = {
+                @Result(property = "orderId", column = "order_id"),
+                @Result(property = "participants.owner.id", column = "owner_id"),
+                @Result(property = "participants.owner.displayName", column = "owner_display_name"),
+                @Result(property = "participants.owner.phone", column = "owner_phone"),
+                @Result(property = "participants.owner.idCard", column = "owner_id_card"),
+                @Result(property = "participants.reviewer.id", column = "reviewer_id"),
+                @Result(property = "participants.reviewer.displayName", column = "reviewer_display_name"),
+                @Result(property = "participants.reviewer.phone", column = "reviewer_phone"),
+                @Result(property = "participants.reviewer.idCard", column = "reviewer_id_card")
+        })
+        List<OrderNestedDto> selectNestedOrderAssociations();
+
+        @Select("""
+                select o.id as order_id,
+                       o.remark as order_remark
+                from order_account o
+                where o.deleted = 0
+                order by o.id
+                """)
+        @Results(id = "orderGroupDtoMap", value = {
+                @Result(property = "orderId", column = "order_id"),
+                @Result(property = "remark", column = "order_remark"),
+                @Result(property = "participants", column = "order_id",
+                        many = @Many(select = "selectParticipantsByOrderId"))
+        })
+        List<OrderGroupDto> selectOrderGroupsWithParticipants();
+
+        @Select("""
+                select u.id,
+                       u.name as display_name,
+                       u.phone_cipher as phone,
+                       u.id_card
+                from order_participant op
+                join user_account u on op.user_id = u.id
+                where op.order_id = #{orderId}
+                order by op.seq_no
+                """)
+        List<UserProjectionDto> selectParticipantsByOrderId(@Param("orderId") Long orderId);
+
         @Update("""
                 update user_account
                 set id_card = #{idCard}
@@ -541,6 +884,239 @@ class MybatisEncryptionIntegrationTest {
 
         public void setIdCard(String idCard) {
             this.idCard = idCard;
+        }
+    }
+
+    static class OrderAssociationView {
+
+        private Long orderId;
+        private String remark;
+        private UserAssociationDto owner;
+        private UserAssociationDto reviewer;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getRemark() {
+            return remark;
+        }
+
+        public void setRemark(String remark) {
+            this.remark = remark;
+        }
+
+        public UserAssociationDto getOwner() {
+            return owner;
+        }
+
+        public void setOwner(UserAssociationDto owner) {
+            this.owner = owner;
+        }
+
+        public UserAssociationDto getReviewer() {
+            return reviewer;
+        }
+
+        public void setReviewer(UserAssociationDto reviewer) {
+            this.reviewer = reviewer;
+        }
+    }
+
+    static class UserAssociationDto {
+
+        private Long id;
+        private String name;
+
+        @EncryptField(
+                table = "user_account",
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone_like"
+        )
+        private String phone;
+
+        @EncryptField(
+                table = "user_account",
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like"
+        )
+        private String idCard;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getIdCard() {
+            return idCard;
+        }
+
+        public void setIdCard(String idCard) {
+            this.idCard = idCard;
+        }
+    }
+
+    static class UserProjectionDto {
+
+        private Long id;
+        private String displayName;
+
+        @EncryptField(
+                table = "user_account",
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone_like"
+        )
+        private String phone;
+
+        @EncryptField(
+                table = "user_account",
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like"
+        )
+        private String idCard;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getIdCard() {
+            return idCard;
+        }
+
+        public void setIdCard(String idCard) {
+            this.idCard = idCard;
+        }
+    }
+
+    static class OrderNestedDto {
+
+        private Long orderId;
+        private ParticipantBundleDto participants;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public ParticipantBundleDto getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(ParticipantBundleDto participants) {
+            this.participants = participants;
+        }
+    }
+
+    static class ParticipantBundleDto {
+
+        private UserProjectionDto owner;
+        private UserProjectionDto reviewer;
+
+        public UserProjectionDto getOwner() {
+            return owner;
+        }
+
+        public void setOwner(UserProjectionDto owner) {
+            this.owner = owner;
+        }
+
+        public UserProjectionDto getReviewer() {
+            return reviewer;
+        }
+
+        public void setReviewer(UserProjectionDto reviewer) {
+            this.reviewer = reviewer;
+        }
+    }
+
+    static class OrderGroupDto {
+
+        private Long orderId;
+        private String remark;
+        private List<UserProjectionDto> participants;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getRemark() {
+            return remark;
+        }
+
+        public void setRemark(String remark) {
+            this.remark = remark;
+        }
+
+        public List<UserProjectionDto> getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(List<UserProjectionDto> participants) {
+            this.participants = participants;
         }
     }
 

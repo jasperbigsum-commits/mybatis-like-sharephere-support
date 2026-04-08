@@ -498,6 +498,106 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldReadMultiUnionNestedSubqueryQueryAcrossStorageModes() throws Exception {
+        UserRecord first = user(91L, "Milo", "13600136091", "320101199001010191");
+        UserRecord second = user(92L, "Nina", "13600136092", "320101199001010192");
+        UserRecord third = user(93L, "Owen", "13600136093", "320101199001010193");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(first));
+            assertEquals(1, mapper.insertUser(second));
+            assertEquals(1, mapper.insertUser(third));
+        }
+
+        insertOrderAccountRow(901L, 91L, 9001L, "union-a", "grid-u1", 0);
+        insertOrderAccountRow(902L, 91L, 92L, 9002L, "union-b", "grid-u2", 0);
+        insertOrderAccountRow(903L, 93L, 9003L, "union-c", "grid-u3", 0);
+        insertOrderParticipantRow(991L, 901L, 91L, 1);
+        insertOrderParticipantRow(992L, 902L, 92L, 2);
+        insertOrderParticipantRow(993L, 903L, 93L, 1);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<UserProjectionDto> users = mapper.selectByMultiUnionNestedSubqueryAcrossStorageModes(
+                    "13600136091",
+                    "320101199001010192",
+                    "%6093",
+                    "%0193"
+            );
+            assertEquals(3, users.size());
+
+            UserProjectionDto loadedFirst = users.get(0);
+            assertEquals(91L, loadedFirst.getId());
+            assertEquals("Milo", loadedFirst.getDisplayName());
+            assertEquals("13600136091", loadedFirst.getPhone());
+            assertEquals("320101199001010191", loadedFirst.getIdCard());
+
+            UserProjectionDto loadedSecond = users.get(1);
+            assertEquals(92L, loadedSecond.getId());
+            assertEquals("Nina", loadedSecond.getDisplayName());
+            assertEquals("13600136092", loadedSecond.getPhone());
+            assertEquals("320101199001010192", loadedSecond.getIdCard());
+
+            UserProjectionDto loadedThird = users.get(2);
+            assertEquals(93L, loadedThird.getId());
+            assertEquals("Owen", loadedThird.getDisplayName());
+            assertEquals("13600136093", loadedThird.getPhone());
+            assertEquals("320101199001010193", loadedThird.getIdCard());
+        }
+    }
+
+    @Test
+    void shouldReadWrappedUnionNestedSubqueryQueryAcrossStorageModesWithoutTypeCastError() throws Exception {
+        UserRecord first = user(101L, "Paul", "13600136101", "320101199001010201");
+        UserRecord second = user(102L, "Queen", "13600136102", "320101199001010202");
+        UserRecord third = user(103L, "River", "13600136103", "320101199001010203");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(first));
+            assertEquals(1, mapper.insertUser(second));
+            assertEquals(1, mapper.insertUser(third));
+        }
+
+        insertOrderAccountRow(1101L, 101L, 102L, 5001L, "wrapped-u1", "grid-w1", 0);
+        insertOrderAccountRow(1102L, 103L, 102L, 5002L, "wrapped-u2", "grid-w2", 0);
+        insertOrderAccountRow(1103L, 103L, 101L, 5003L, "wrapped-u3", "grid-w3", 0);
+        insertOrderParticipantRow(1201L, 1101L, 101L, 1);
+        insertOrderParticipantRow(1202L, 1102L, 102L, 2);
+        insertOrderParticipantRow(1203L, 1103L, 103L, 3);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<UserProjectionDto> users = mapper.selectByWrappedMultiUnionNestedSubqueryAcrossStorageModes(
+                    "13600136101",
+                    "320101199001010202",
+                    "%6103",
+                    "%0203"
+            );
+            assertEquals(3, users.size());
+
+            UserProjectionDto loadedFirst = users.get(0);
+            assertEquals(101L, loadedFirst.getId());
+            assertEquals("Paul", loadedFirst.getDisplayName());
+            assertEquals("13600136101", loadedFirst.getPhone());
+            assertEquals("320101199001010201", loadedFirst.getIdCard());
+
+            UserProjectionDto loadedSecond = users.get(1);
+            assertEquals(102L, loadedSecond.getId());
+            assertEquals("Queen", loadedSecond.getDisplayName());
+            assertEquals("13600136102", loadedSecond.getPhone());
+            assertEquals("320101199001010202", loadedSecond.getIdCard());
+
+            UserProjectionDto loadedThird = users.get(2);
+            assertEquals(103L, loadedThird.getId());
+            assertEquals("River", loadedThird.getDisplayName());
+            assertEquals("13600136103", loadedThird.getPhone());
+            assertEquals("320101199001010203", loadedThird.getIdCard());
+        }
+    }
+
+    @Test
     void shouldBatchInsertAcrossStorageModesUsingBatchExecutor() throws Exception {
         List<UserRecord> users = List.of(
                 user(11L, "Grace", "13300133001", "320101199001010011"),
@@ -917,6 +1017,147 @@ class MybatisEncryptionIntegrationTest {
                         many = @Many(select = "selectParticipantsByOrderId"))
         })
         List<ComplexMixedModeOrderDto> selectComplexMixedModeOrders();
+
+        @Select("""
+                select t.id,
+                       t.display_name,
+                       t.phone,
+                       t.id_card
+                from (
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card
+                    from user_account u
+                    where u.phone = #{phoneEq}
+                      and exists (
+                          select 1
+                          from order_account o
+                          where o.user_id = u.id
+                            and o.id in (
+                                select p.order_id
+                                from order_participant p
+                                where p.seq_no = 1
+                            )
+                      )
+                    union
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card
+                    from user_account u
+                    where u.id_card = #{idCardEq}
+                      and u.id in (
+                          select o.related_user_id
+                          from order_account o
+                          where o.related_user_id is not null
+                            and o.id in (
+                                select p.order_id
+                                from order_participant p
+                                where p.seq_no = 2
+                            )
+                      )
+                    union
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card
+                    from user_account u
+                    where u.phone like #{phoneLike}
+                      and u.id_card like #{idCardLike}
+                      and exists (
+                          select 1
+                          from order_account o
+                          where o.user_id = u.id
+                            and exists (
+                                select 1
+                                from order_participant p
+                                where p.order_id = o.id
+                                  and p.user_id = u.id
+                            )
+                      )
+                ) t
+                order by t.id
+                """)
+        List<UserProjectionDto> selectByMultiUnionNestedSubqueryAcrossStorageModes(
+                @Param("phoneEq") String phoneEq,
+                @Param("idCardEq") String idCardEq,
+                @Param("phoneLike") String phoneLike,
+                @Param("idCardLike") String idCardLike
+        );
+
+        @Select("""
+                select h.id,
+                       h.display_name,
+                       h.phone,
+                       h.id_card
+                from (
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card,
+                           o.created_seq as sort_no
+                    from user_account u
+                    join order_account o on o.user_id = u.id
+                    where u.phone = #{phoneEq}
+                      and u.id in (
+                          select p.user_id
+                          from order_participant p
+                          where p.seq_no = 1
+                            and p.order_id in (
+                                select oa.id
+                                from order_account oa
+                                where oa.deleted = 0
+                            )
+                      )
+                    union
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card,
+                           o.created_seq as sort_no
+                    from user_account u
+                    join order_account o on o.related_user_id = u.id
+                    where u.id_card = #{idCardEq}
+                      and o.id in (
+                          select p.order_id
+                          from order_participant p
+                          where p.seq_no = 2
+                      )
+                      and u.id in (
+                          select o2.related_user_id
+                          from order_account o2
+                          where o2.id in (
+                              select p2.order_id
+                              from order_participant p2
+                              where p2.seq_no = 2
+                          )
+                      )
+                    union
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card,
+                           o.created_seq as sort_no
+                    from user_account u
+                    join order_account o on o.user_id = u.id
+                    where u.phone like #{phoneLike}
+                      and u.id_card like #{idCardLike}
+                      and exists (
+                          select 1
+                          from order_participant p
+                          where p.order_id = o.id
+                            and p.user_id = u.id
+                      )
+                ) h
+                order by h.sort_no asc
+                """)
+        List<UserProjectionDto> selectByWrappedMultiUnionNestedSubqueryAcrossStorageModes(
+                @Param("phoneEq") String phoneEq,
+                @Param("idCardEq") String idCardEq,
+                @Param("phoneLike") String phoneLike,
+                @Param("idCardLike") String idCardLike
+        );
 
         @Select("""
                 select u.id,

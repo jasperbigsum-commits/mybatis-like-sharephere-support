@@ -267,6 +267,135 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteMultiUnionWithNestedSubqueriesAcrossStorageModes() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.phone = ? AND EXISTS (" +
+                        "SELECT 1 FROM order_account o WHERE o.user_id = u.id AND o.id IN (" +
+                        "SELECT p.order_id FROM order_participant p WHERE p.seq_no = 1)) " +
+                        "UNION " +
+                        "SELECT u.id FROM user_account u WHERE u.id_card = ? AND u.id IN (" +
+                        "SELECT o.related_user_id FROM order_account o WHERE o.related_user_id IS NOT NULL AND o.id IN (" +
+                        "SELECT p.order_id FROM order_participant p WHERE p.seq_no = 2)) " +
+                        "UNION " +
+                        "SELECT u.id FROM user_account u WHERE u.phone LIKE ? AND u.id_card LIKE ? AND EXISTS (" +
+                        "SELECT 1 FROM order_account o WHERE o.user_id = u.id AND EXISTS (" +
+                        "SELECT 1 FROM order_participant p WHERE p.order_id = o.id AND p.user_id = u.id))",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "phoneLike", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCardLike", String.class).build()
+                ),
+                Map.of(
+                        "phone", "13800138000",
+                        "idCard", "320101199001011234",
+                        "phoneLike", "%1380%",
+                        "idCardLike", "%320101%"
+                )
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("UNION"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
+        assertTrue(result.sql().contains("u.`phone_like` LIKE ?") || result.sql().contains("u.phone_like LIKE ?"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`") || result.sql().contains("user_id_card_encrypt"));
+        assertEquals(4, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteWrappedPermissionUnionWithNestedSubqueriesWithoutTypeCastError() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        DatabaseEncryptionProperties.TableRuleProperties permissionTableRule =
+                new DatabaseEncryptionProperties.TableRuleProperties();
+        permissionTableRule.setTable("sys_permission");
+
+        DatabaseEncryptionProperties.FieldRuleProperties urlFieldRule =
+                new DatabaseEncryptionProperties.FieldRuleProperties();
+        urlFieldRule.setColumn("url");
+        urlFieldRule.setStorageColumn("url_cipher");
+        urlFieldRule.setAssistedQueryColumn("url_hash");
+        urlFieldRule.setLikeQueryColumn("url_like");
+        permissionTableRule.getFields().put("url", urlFieldRule);
+        properties.getTables().put("sysPermission", permissionTableRule);
+
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT h.id, h.parent_id, h.name, h.url, h.component, h.is_route, h.component_name, h.redirect, " +
+                        "h.menu_type, h.perms, h.perms_type, h.sort_no, h.always_show, h.icon, h.is_leaf, h.keep_alive, " +
+                        "h.hidden, h.hide_tab, h.rule_flag, h.status, h.internal_or_external " +
+                        "FROM (" +
+                        "SELECT p.id, p.parent_id, p.name, p.url, p.component, p.is_route, p.component_name, p.redirect, " +
+                        "p.menu_type, p.perms, p.perms_type, p.sort_no, p.always_show, p.icon, p.is_leaf, p.keep_alive, " +
+                        "p.hidden, p.hide_tab, p.rule_flag, p.status, p.internal_or_external " +
+                        "FROM sys_permission p " +
+                        "WHERE p.del_flag = 0 AND (p.id IN (" +
+                        "SELECT DISTINCT a.permission_id FROM sys_role_permission a " +
+                        "JOIN sys_role b ON a.role_id = b.id " +
+                        "JOIN sys_user_role c ON c.role_id = b.id AND c.user_id = ?) " +
+                        "OR (p.url LIKE '%:code' AND p.url LIKE '/online%' AND p.hidden = 1) " +
+                        "OR (p.url LIKE '%:id' AND p.url LIKE '/online%' AND p.hidden = 1) " +
+                        "OR p.url = '/online') " +
+                        "UNION " +
+                        "SELECT p.id, p.parent_id, p.name, p.url, p.component, p.is_route, p.component_name, p.redirect, " +
+                        "p.menu_type, p.perms, p.perms_type, p.sort_no, p.always_show, p.icon, p.is_leaf, p.keep_alive, " +
+                        "p.hidden, p.hide_tab, p.rule_flag, p.status, p.internal_or_external " +
+                        "FROM sys_permission p " +
+                        "WHERE p.id IN (" +
+                        "SELECT DISTINCT a.permission_id FROM sys_depart_role_permission a " +
+                        "INNER JOIN sys_depart_role b ON a.role_id = b.id " +
+                        "INNER JOIN sys_depart_role_user c ON c.drole_id = b.id AND c.user_id = ?) " +
+                        "AND p.del_flag = 0 " +
+                        "UNION " +
+                        "SELECT p.id, p.parent_id, p.name, p.url, p.component, p.is_route, p.component_name, p.redirect, " +
+                        "p.menu_type, p.perms, p.perms_type, p.sort_no, p.always_show, p.icon, p.is_leaf, p.keep_alive, " +
+                        "p.hidden, p.hide_tab, p.rule_flag, p.status, p.internal_or_external " +
+                        "FROM sys_permission p " +
+                        "WHERE p.id IN (" +
+                        "SELECT DISTINCT a.permission_id FROM sys_tenant_pack_perms a " +
+                        "INNER JOIN sys_tenant_pack b ON a.pack_id = b.id AND b.status = '1' " +
+                        "INNER JOIN sys_tenant st ON st.id = b.tenant_id AND st.del_flag = 0 " +
+                        "INNER JOIN sys_tenant_pack_user c ON c.pack_id = b.id AND c.status = '1' AND c.user_id = ?) " +
+                        "AND p.del_flag = 0" +
+                        ") h ORDER BY h.sort_no ASC",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "userId1", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "userId2", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "userId3", String.class).build()
+                ),
+                Map.of("userId1", "u-1", "userId2", "u-1", "userId3", "u-1")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("UNION"));
+        assertTrue(result.sql().contains("`url_cipher` AS url") || result.sql().contains("`url_cipher` url"));
+        assertTrue(result.sql().contains("`url_like` LIKE") || result.sql().contains("url_like LIKE"));
+        assertTrue(result.sql().contains("`url_hash` =") || result.sql().contains("url_hash ="));
+        assertTrue(result.sql().contains("ORDER BY h.sort_no ASC"));
+    }
+
+    @Test
     void shouldRewriteEncryptedInSubquery() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();

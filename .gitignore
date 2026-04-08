@@ -45,3 +45,4 @@ build/
 ### Mac OS ###
 .DS_Store
 /.m2repo/
+/.idea/

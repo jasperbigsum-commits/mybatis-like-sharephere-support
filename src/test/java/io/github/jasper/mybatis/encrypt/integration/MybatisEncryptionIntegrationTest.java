@@ -142,7 +142,7 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
-    void shouldUpdateReferencedSeparateTableRowOnUpdate() throws Exception {
+    void shouldSwitchToNewSeparateTableReferenceOnUpdateWithoutMutatingExistingRow() throws Exception {
         UserRecord user = user(3L, "Carol", "13700137000", "320101199001011234");
 
         String originalReferenceId;
@@ -165,8 +165,40 @@ class MybatisEncryptionIntegrationTest {
             assertEquals("320101199001019999", loaded.getIdCard());
         }
 
-        assertEquals(originalReferenceId, loadReferenceId(3L));
-        assertSeparateTableStorage(originalReferenceId, "320101199001019999");
+        String updatedReferenceId = loadReferenceId(3L);
+        assertNotEquals(originalReferenceId, updatedReferenceId);
+        assertSeparateTableStorage(originalReferenceId, "320101199001011234");
+        assertSeparateTableStorage(updatedReferenceId, "320101199001019999");
+    }
+
+    @Test
+    void shouldReuseExistingSeparateTableReferenceWhenAssignedHashMatches() throws Exception {
+        UserRecord first = user(7L, "Gary", "13100131001", "320101199001015555");
+        UserRecord second = user(8L, "Helen", "13100131002", "320101199001016666");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(first));
+            assertEquals(1, mapper.insertUser(second));
+        }
+
+        String firstReferenceId = loadReferenceId(7L);
+        String secondReferenceId = loadReferenceId(8L);
+        assertNotEquals(firstReferenceId, secondReferenceId);
+
+        UserRecord update = user(7L, null, null, "320101199001016666");
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.updateIdCard(update));
+            UserRecord loaded = mapper.selectById(7L);
+            assertNotNull(loaded);
+            assertEquals("320101199001016666", loaded.getIdCard());
+        }
+
+        assertEquals(secondReferenceId, loadReferenceId(7L));
+        assertSeparateTableStorage(firstReferenceId, "320101199001015555");
+        assertSeparateTableStorage(secondReferenceId, "320101199001016666");
+        assertEquals(2, queryForInt("select count(1) from user_id_card_encrypt"));
     }
 
     @Test
@@ -192,9 +224,11 @@ class MybatisEncryptionIntegrationTest {
             assertNull(mapper.selectByIdCard("320101199001017777"));
         }
 
-        assertEquals(originalReferenceId, loadReferenceId(6L));
+        String updatedReferenceId = loadReferenceId(6L);
+        assertNotEquals(originalReferenceId, updatedReferenceId);
         assertSameTableStorage(6L, "13400134999");
-        assertSeparateTableStorage(originalReferenceId, "320101199001016666");
+        assertSeparateTableStorage(originalReferenceId, "320101199001017777");
+        assertSeparateTableStorage(updatedReferenceId, "320101199001016666");
     }
 
     @Test
@@ -270,12 +304,16 @@ class MybatisEncryptionIntegrationTest {
             assertNull(mapper.selectByIdCard("320101199001010032"));
         }
 
-        assertEquals(reference21, loadReferenceId(21L));
-        assertEquals(reference22, loadReferenceId(22L));
+        String updatedReference21 = loadReferenceId(21L);
+        String updatedReference22 = loadReferenceId(22L);
+        assertNotEquals(reference21, updatedReference21);
+        assertNotEquals(reference22, updatedReference22);
         assertSameTableStorage(21L, "13200132991");
         assertSameTableStorage(22L, "13200132992");
-        assertSeparateTableStorage(reference21, "320101199001019931");
-        assertSeparateTableStorage(reference22, "320101199001019932");
+        assertSeparateTableStorage(reference21, "320101199001010031");
+        assertSeparateTableStorage(reference22, "320101199001010032");
+        assertSeparateTableStorage(updatedReference21, "320101199001019931");
+        assertSeparateTableStorage(updatedReference22, "320101199001019932");
     }
 
     private SqlSessionFactory buildSqlSessionFactory() {

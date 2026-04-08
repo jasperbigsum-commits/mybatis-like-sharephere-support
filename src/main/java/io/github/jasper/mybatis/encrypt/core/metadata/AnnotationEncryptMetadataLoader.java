@@ -2,7 +2,6 @@ package io.github.jasper.mybatis.encrypt.core.metadata;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
-import java.util.Arrays;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
@@ -32,8 +31,6 @@ public class AnnotationEncryptMetadataLoader {
             found = true;
             String property = field.getName();
             String column = blankToDefault(encryptField.column(), resolveColumnName(field));
-            String sourceIdColumn = blankToDefault(encryptField.sourceIdColumn(), inferSourceIdColumn(type, encryptField));
-            String sourceIdProperty = blankToDefault(encryptField.sourceIdProperty(), inferSourceIdProperty(type, sourceIdColumn));
             rule.addColumnRule(new EncryptColumnRule(
                     property,
                     column,
@@ -45,9 +42,7 @@ public class AnnotationEncryptMetadataLoader {
                     encryptField.storageMode(),
                     blankToNull(encryptField.storageTable()),
                     blankToDefault(encryptField.storageColumn(), column),
-                    sourceIdProperty,
-                    sourceIdColumn,
-                    blankToDefault(encryptField.storageIdColumn(), sourceIdColumn)
+                    blankToDefault(encryptField.storageIdColumn(), "id")
             ));
         }
         return found ? rule : null;
@@ -74,52 +69,6 @@ public class AnnotationEncryptMetadataLoader {
                 extractAnnotationStringValue(field, "javax.persistence.Column", "name")
         );
         return resolved != null ? resolved : NameUtils.camelToSnake(field.getName());
-    }
-
-    private String inferSourceIdColumn(Class<?> type, EncryptField encryptField) {
-        String explicitSourceIdProperty = blankToNull(encryptField.sourceIdProperty());
-        if (explicitSourceIdProperty != null) {
-            return NameUtils.camelToSnake(explicitSourceIdProperty);
-        }
-        Field idField = resolveIdField(type);
-        return idField != null ? resolveColumnName(idField) : "id";
-    }
-
-    private String inferSourceIdProperty(Class<?> type, String sourceIdColumn) {
-        if (sourceIdColumn == null || sourceIdColumn.isBlank()) {
-            return "id";
-        }
-        String normalizedSourceIdColumn = NameUtils.normalizeIdentifier(sourceIdColumn);
-        return Arrays.stream(type.getDeclaredFields())
-                .filter(field -> normalizedSourceIdColumn.equals(NameUtils.normalizeIdentifier(resolveColumnName(field))))
-                .map(Field::getName)
-                .findFirst()
-                .orElse("id");
-    }
-
-    private Field resolveIdField(Class<?> type) {
-        Field namedIdField = Arrays.stream(type.getDeclaredFields())
-                .filter(field -> "id".equals(field.getName()))
-                .findFirst()
-                .orElse(null);
-        if (namedIdField != null) {
-            return namedIdField;
-        }
-        return Arrays.stream(type.getDeclaredFields())
-                .filter(this::isIdField)
-                .findFirst()
-                .orElse(null);
-    }
-
-    private boolean isIdField(Field field) {
-        return hasAnnotation(field, "com.baomidou.mybatisplus.annotation.TableId")
-                || hasAnnotation(field, "jakarta.persistence.Id")
-                || hasAnnotation(field, "javax.persistence.Id");
-    }
-
-    private boolean hasAnnotation(Field field, String className) {
-        return Arrays.stream(field.getAnnotations())
-                .anyMatch(annotation -> annotation.annotationType().getName().equals(className));
     }
 
     private String extractAnnotationStringValue(Object source, String className, String attributeName) {

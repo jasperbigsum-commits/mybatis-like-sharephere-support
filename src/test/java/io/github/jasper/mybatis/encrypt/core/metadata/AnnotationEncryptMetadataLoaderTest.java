@@ -4,9 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.TableId;
 import jakarta.persistence.Column;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
@@ -46,36 +44,39 @@ class AnnotationEncryptMetadataLoaderTest {
     }
 
     @Test
-    void shouldInferSourceIdPropertyFromMybatisPlusIdColumn() {
+    void shouldDefaultSeparateTableStorageIdColumnToIdWhenNotConfigured() {
         EncryptTableRule tableRule = loader.load(MybatisPlusSeparateUserEntity.class);
         EncryptColumnRule rule = tableRule.findByProperty("phone").orElseThrow();
 
         assertTrue(rule.isStoredInSeparateTable());
-        assertEquals("user_id", rule.sourceIdColumn());
-        assertEquals("bizId", rule.sourceIdProperty());
+        assertEquals("id", rule.storageIdColumn());
+    }
+
+    @Test
+    void shouldKeepExplicitSeparateTableStorageIdColumn() {
+        EncryptTableRule tableRule = loader.load(SeparateUserEntity.class);
+        EncryptColumnRule rule = tableRule.findByProperty("phone").orElseThrow();
+
+        assertTrue(rule.isStoredInSeparateTable());
         assertEquals("user_id", rule.storageIdColumn());
     }
 
     @Test
-    void shouldInferSourceIdPropertyFromJpaIdColumn() {
+    void shouldDefaultSeparateTableStorageIdColumnToIdForJpaEntity() {
         EncryptTableRule tableRule = loader.load(JpaSeparateUserEntity.class);
         EncryptColumnRule rule = tableRule.findByProperty("phone").orElseThrow();
 
         assertTrue(rule.isStoredInSeparateTable());
-        assertEquals("tenant_user_id", rule.sourceIdColumn());
-        assertEquals("tenantUserId", rule.sourceIdProperty());
-        assertEquals("tenant_user_id", rule.storageIdColumn());
+        assertEquals("id", rule.storageIdColumn());
     }
 
     @Test
-    void shouldInferSourceIdPropertyFromSnakeCaseColumnWhenNoIdAnnotationExists() {
+    void shouldDefaultSeparateTableStorageIdColumnToIdWithoutIdMetadata() {
         EncryptTableRule tableRule = loader.load(SnakeCaseSeparateUserEntity.class);
         EncryptColumnRule rule = tableRule.findByProperty("phone").orElseThrow();
 
         assertTrue(rule.isStoredInSeparateTable());
-        assertEquals("order_id", rule.sourceIdColumn());
-        assertEquals("orderId", rule.sourceIdProperty());
-        assertEquals("order_id", rule.storageIdColumn());
+        assertEquals("id", rule.storageIdColumn());
     }
 
     static class MixedAnnotationEntity {
@@ -109,7 +110,6 @@ class AnnotationEncryptMetadataLoaderTest {
                 storageMode = FieldStorageMode.SEPARATE_TABLE,
                 storageTable = "user_phone_encrypt",
                 storageColumn = "phone_cipher",
-                sourceIdColumn = "id",
                 storageIdColumn = "user_id",
                 assistedQueryColumn = "phone_hash"
         )
@@ -118,7 +118,6 @@ class AnnotationEncryptMetadataLoaderTest {
 
     static class MybatisPlusSeparateUserEntity {
 
-        @TableId("user_id")
         private Long bizId;
 
         @EncryptField(
@@ -132,7 +131,6 @@ class AnnotationEncryptMetadataLoaderTest {
 
     static class JpaSeparateUserEntity {
 
-        @Id
         @Column(name = "tenant_user_id")
         private Long tenantUserId;
 
@@ -153,7 +151,6 @@ class AnnotationEncryptMetadataLoaderTest {
                 column = "phone",
                 storageMode = FieldStorageMode.SEPARATE_TABLE,
                 storageTable = "user_phone_encrypt",
-                sourceIdColumn = "order_id",
                 assistedQueryColumn = "phone_hash"
         )
         private String phone;

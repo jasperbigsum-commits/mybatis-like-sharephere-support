@@ -276,16 +276,6 @@ public class DatabaseEncryptionProperties {
         private String storageColumn;
 
         /**
-         * 用作业务行标识的实体属性；省略时由框架内部推断。
-         */
-        private String sourceIdProperty = "";
-
-        /**
-         * 业务表中的来源标识列。
-         */
-        private String sourceIdColumn;
-
-        /**
          * 外部存储表中的标识列。
          */
         private String storageIdColumn;
@@ -385,42 +375,6 @@ public class DatabaseEncryptionProperties {
          */
         public void setStorageColumn(String storageColumn) {
             this.storageColumn = storageColumn;
-        }
-
-        /**
-         * 返回来源实体 id 属性名。
-         *
-         * @return 来源实体 id 属性名
-         */
-        public String getSourceIdProperty() {
-            return sourceIdProperty;
-        }
-
-        /**
-         * 设置来源实体 id 属性名。
-         *
-         * @param sourceIdProperty 来源实体 id 属性名
-         */
-        public void setSourceIdProperty(String sourceIdProperty) {
-            this.sourceIdProperty = sourceIdProperty;
-        }
-
-        /**
-         * 返回业务表来源 id 列。
-         *
-         * @return 业务表来源 id 列名
-         */
-        public String getSourceIdColumn() {
-            return sourceIdColumn;
-        }
-
-        /**
-         * 设置业务表来源 id 列。
-         *
-         * @param sourceIdColumn 业务表来源 id 列名
-         */
-        public void setSourceIdColumn(String sourceIdColumn) {
-            this.sourceIdColumn = sourceIdColumn;
         }
 
         /**

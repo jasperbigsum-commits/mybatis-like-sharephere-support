@@ -139,14 +139,6 @@ public class EncryptMetadataRegistry {
 
     private EncryptColumnRule toColumnRule(String property, FieldRuleProperties properties) {
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
-        String sourceIdColumn = firstNonBlank(properties.getSourceIdColumn(), "id");
-        String sourceIdProperty = firstNonBlank(
-                properties.getSourceIdProperty(),
-                inferSourceIdProperty(sourceIdColumn)
-        );
-        if (properties.getSourceIdColumn() == null || properties.getSourceIdColumn().isBlank()) {
-            sourceIdColumn = NameUtils.camelToSnake(sourceIdProperty);
-        }
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
                 column,
@@ -158,9 +150,7 @@ public class EncryptMetadataRegistry {
                 properties.getStorageMode(),
                 properties.getStorageTable(),
                 properties.getStorageColumn() != null ? properties.getStorageColumn() : column,
-                sourceIdProperty,
-                sourceIdColumn,
-                properties.getStorageIdColumn() != null ? properties.getStorageIdColumn() : sourceIdColumn
+                firstNonBlank(properties.getStorageIdColumn(), "id")
         );
         validateRule(rule);
         return rule;
@@ -178,29 +168,6 @@ public class EncryptMetadataRegistry {
             throw new IllegalArgumentException(
                     "Separate-table encrypted field must define assistedQueryColumn: " + rule.property());
         }
-    }
-
-    private String inferSourceIdProperty(String sourceIdColumn) {
-        if (sourceIdColumn == null || sourceIdColumn.isBlank()) {
-            return "id";
-        }
-        String normalized = NameUtils.normalizeIdentifier(sourceIdColumn);
-        return "id".equals(normalized) ? "id" : toCamelCase(normalized);
-    }
-
-    private String toCamelCase(String value) {
-        StringBuilder builder = new StringBuilder(value.length());
-        boolean upperNext = false;
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (current == '_') {
-                upperNext = builder.length() > 0;
-                continue;
-            }
-            builder.append(upperNext ? Character.toUpperCase(current) : current);
-            upperNext = false;
-        }
-        return builder.length() == 0 ? "id" : builder.toString();
     }
 
     private String firstNonBlank(String... candidates) {

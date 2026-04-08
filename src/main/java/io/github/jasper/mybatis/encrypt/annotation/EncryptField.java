@@ -49,22 +49,7 @@ public @interface EncryptField {
     String storageColumn() default "";
 
     /**
-     * 独立表存储时作为业务行标识的实体属性。
-     * 省略时，加载器会根据 {@link #sourceIdColumn()} 推断。
-     *
-     * @return 来源实体 id 属性名
-     */
-    String sourceIdProperty() default "";
-
-    /**
-     * 业务表标识列；省略时由加载器在内部解析实体 id 列。
-     *
-     * @return 业务表来源 id 列名
-     */
-    String sourceIdColumn() default "";
-
-    /**
-     * 独立表标识列；默认使用 {@code sourceIdColumn}。
+     * 独立表标识列；默认使用 {@code id}。
      *
      * @return 独立表 id 列名
      */

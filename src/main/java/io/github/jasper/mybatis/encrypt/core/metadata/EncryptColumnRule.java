@@ -13,8 +13,6 @@ package io.github.jasper.mybatis.encrypt.core.metadata;
  * @param storageMode 密文存储模式
  * @param storageTable 启用独立表模式时使用的外部密文表
  * @param storageColumn 实际密文存储列，默认与 {@code column} 一致
- * @param sourceIdProperty 独立表关联使用的实体标识属性，省略时根据 sourceIdColumn 推断
- * @param sourceIdColumn 业务表标识列
  * @param storageIdColumn 外部表标识列
  */
 public record EncryptColumnRule(String property,
@@ -23,13 +21,11 @@ public record EncryptColumnRule(String property,
                                 String assistedQueryColumn,
                                 String assistedQueryAlgorithm,
                                 String likeQueryColumn,
-                                String likeQueryAlgorithm,
-                                FieldStorageMode storageMode,
-                                String storageTable,
-                                String storageColumn,
-                                String sourceIdProperty,
-                                String sourceIdColumn,
-                                String storageIdColumn) {
+                                 String likeQueryAlgorithm,
+                                 FieldStorageMode storageMode,
+                                 String storageTable,
+                                 String storageColumn,
+                                 String storageIdColumn) {
 
     /**
      * 判断是否配置了辅助等值查询列。

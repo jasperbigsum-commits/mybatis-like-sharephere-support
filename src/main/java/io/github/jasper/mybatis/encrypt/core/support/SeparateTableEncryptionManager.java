@@ -135,7 +135,8 @@ public class SeparateTableEncryptionManager {
      * 决定本次主表写入应使用的独立表引用 id。
      *
      * <p>它会先尝试复用当前 BoundSql 已准备好的引用值；如果是 UPDATE 且当前没有引用，
-     * 就回主表查询已有引用；仍然没有时新建独立表记录，否则直接更新已有独立表记录。</p>
+     * 就回主表查询已有引用；若已有引用对应的独立表记录与当前明文一致则直接复用，
+     * 否则再按 assignField 对应的 hash 值查找可复用记录，仍然没有时新建独立表记录。</p>
      */
     private String determineReferenceId(BoundSql boundSql,
                                         SqlCommandType commandType,
@@ -144,15 +145,20 @@ public class SeparateTableEncryptionManager {
                                         MetaObject metaObject,
                                         Object plainValue) {
         String referenceId = currentReferenceId(boundSql, rule.property());
-        if (referenceId == null && commandType == SqlCommandType.UPDATE) {
-            referenceId = loadExistingReferenceId(tableRule, rule, metaObject);
+        if (referenceId != null) {
+            return referenceId;
         }
-        if (referenceId == null) {
-            return insertExternalRow(rule, plainValue);
+        if (commandType == SqlCommandType.UPDATE) {
+            String currentStoredReferenceId = loadExistingReferenceId(tableRule, rule, metaObject);
+            // 双重引用判断
+            if (currentStoredReferenceId != null
+                    && matchesAssignedHash(rule, currentStoredReferenceId, plainValue)) {
+                return currentStoredReferenceId;
+            }
         }
-        // todo 新数据更新是否需要更新
-        // updateExternalRow(rule, referenceId, plainValue);
-        return referenceId;
+        String matchedReferenceId = findReferenceIdByAssignedHash(rule, plainValue);
+        return matchedReferenceId != null ? matchedReferenceId :
+                insertExternalRow(rule, plainValue);
     }
 
     /**
@@ -196,6 +202,51 @@ public class SeparateTableEncryptionManager {
             }
         } catch (SQLException ex) {
             throw new EncryptionConfigurationException("Failed to load existing separate-table reference id.", ex);
+        }
+    }
+
+    /**
+     * 判断指定引用是否已经指向与当前明文相同的独立表记录。
+     *
+     * <p>独立表当前采用增量追加模式，不做原地更新；因此只有在旧引用对应记录与当前 hash
+     * 一致时才复用旧引用，否则应切换到已有同值记录或新建记录。</p>
+     */
+    private boolean matchesAssignedHash(EncryptColumnRule rule, String referenceId, Object plainValue) {
+        String sql = "select 1 from " + quote(rule.storageTable())
+                + " where " + quote(rule.storageIdColumn()) + " = ?"
+                + " and " + quote(rule.assistedQueryColumn()) + " = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, referenceId);
+            statement.setString(2, algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue)));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        } catch (SQLException ex) {
+            throw new EncryptionConfigurationException("Failed to verify existing separate-table reference id.", ex);
+        }
+    }
+
+    /**
+     * 按 assignField 对应的 hash 值查找可复用的独立表记录。
+     *
+     * <p>独立表不执行更新和删除时，相同明文应尽量复用同一条外表记录，避免重复插入。</p>
+     */
+    private String findReferenceIdByAssignedHash(EncryptColumnRule rule, Object plainValue) {
+        String sql = "select " + quote(rule.storageIdColumn())
+                + " from " + quote(rule.storageTable())
+                + " where " + quote(rule.assistedQueryColumn()) + " = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue)));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return toReferenceId(resultSet.getObject(1));
+                }
+                return null;
+            }
+        } catch (SQLException ex) {
+            throw new EncryptionConfigurationException("Failed to find separate-table reference by assigned hash.", ex);
         }
     }
 
@@ -290,38 +341,12 @@ public class SeparateTableEncryptionManager {
     }
 
     /**
-     * 更新已存在的独立表记录。
+     * 构造独立表写入使用的列和值。
      *
-     * <p>更新路径与插入路径复用同一套列和值构造逻辑，避免 cipher、assisted 和 like 字段在两条路径中出现顺序或算法不一致。</p>
-     */
-    private void updateExternalRow(EncryptColumnRule rule, String referenceId, Object plainValue) {
-        ExternalRowValues values = buildExternalRowValues(rule, plainValue);
-        List<String> assignments = values.columns().stream()
-                .map(column -> quote(column) + " = ?")
-                .collect(Collectors.toCollection(ArrayList::new));
-        List<Object> parameters = new ArrayList<>(values.values());
-        parameters.add(referenceId);
-        String sql = "update " + quote(rule.storageTable()) + " set " + String.join(", ", assignments)
-                + " where " + quote(rule.storageIdColumn()) + " = ?";
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            bind(statement, parameters);
-            int updated = statement.executeUpdate();
-            if (updated == 0) {
-                throw new EncryptionConfigurationException("Failed to update referenced separate-table encrypted value.");
-            }
-        } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to update separate-table encrypted value.", ex);
-        }
-    }
-
-    /**
-     * 构造独立表写入和更新共用的列和值。
-     *
-     * <p>插入和更新必须使用完全一致的列集合与生成顺序，才能保证独立表中的密文列、辅助查询列和 like 查询列始终保持一致。</p>
+     * <p>独立表当前采用增量追加模式，相同明文依赖 hash 复用，未命中时再插入一条新记录。</p>
      */
     private ExternalRowValues buildExternalRowValues(EncryptColumnRule rule, Object plainValue) {
-        // 独立表写入与更新必须生成完全一致的密文字段集合，避免两条路径分别维护时出现列顺序或算法不一致。
+        // 独立表只做增量插入，因此这里统一生成插入所需的密文列、辅助列和 like 列。
         List<String> columns = new ArrayList<>();
         List<Object> values = new ArrayList<>();
         String plainText = String.valueOf(plainValue);

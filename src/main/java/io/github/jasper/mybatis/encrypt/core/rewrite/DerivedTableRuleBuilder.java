@@ -120,8 +120,6 @@ final class DerivedTableRuleBuilder {
                 FieldStorageMode.SAME_TABLE,
                 null,
                 projectedColumn,
-                sourceRule.sourceIdProperty(),
-                sourceRule.sourceIdColumn(),
                 sourceRule.storageIdColumn()
         );
     }

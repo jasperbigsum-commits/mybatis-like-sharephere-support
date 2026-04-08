@@ -1,12 +1,5 @@
 package io.github.jasper.mybatis.encrypt.integration;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.io.InputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -54,6 +47,8 @@ import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 class MybatisEncryptionIntegrationTest {
 
@@ -116,7 +111,7 @@ class MybatisEncryptionIntegrationTest {
 
         String referenceId = loadReferenceId(2L);
         assertNotNull(referenceId);
-        assertTrue(!referenceId.isBlank());
+        assertFalse(referenceId.isBlank());
         assertSeparateTableStorage(referenceId, "320101199001011234");
     }
 
@@ -131,7 +126,7 @@ class MybatisEncryptionIntegrationTest {
 
         Object referenceValue = parameterCaptureInterceptor.lastIdCardAdditionalParameter;
         assertNotNull(referenceValue);
-        assertTrue(referenceValue instanceof String);
+        assertInstanceOf(String.class, referenceValue);
     }
 
     @Test

@@ -298,6 +298,10 @@ public class SqlRewriteEngine {
         if (expression == null) {
             return null;
         }
+        if (expression instanceof Parenthesis parenthesis) {
+            parenthesis.setExpression(rewriteCondition(parenthesis.getExpression(), tableContext, context));
+            return parenthesis;
+        }
         if (expression instanceof ParenthesedExpressionList parenthesis) {
             parenthesis.replaceAll(exp -> rewriteCondition((Expression) exp, tableContext, context));
             return parenthesis;
@@ -649,6 +653,10 @@ public class SqlRewriteEngine {
         }
         if (expression instanceof JdbcParameter) {
             context.consumeOriginal();
+            return;
+        }
+        if (expression instanceof Parenthesis parenthesis) {
+            consumeExpression(parenthesis.getExpression(), context);
             return;
         }
         if (expression instanceof ParenthesedExpressionList parenthesis) {
@@ -1027,6 +1035,9 @@ public class SqlRewriteEngine {
         if (resolveEncryptedColumn(expression, tableContext) != null) {
             return true;
         }
+        if (expression instanceof Parenthesis parenthesis) {
+            return containsEncryptedReference(parenthesis.getExpression(), tableContext);
+        }
         if (expression instanceof ParenthesedExpressionList parenthesis) {
             for (Object item : parenthesis) {
                 if (item instanceof Expression child && containsEncryptedReference(child, tableContext)) {
@@ -1144,6 +1155,9 @@ public class SqlRewriteEngine {
         if (expression instanceof BinaryExpression binaryExpression) {
             return containsUnsupportedAggregate(binaryExpression.getLeftExpression(), tableContext)
                     || containsUnsupportedAggregate(binaryExpression.getRightExpression(), tableContext);
+        }
+        if (expression instanceof Parenthesis parenthesis) {
+            return containsUnsupportedAggregate(parenthesis.getExpression(), tableContext);
         }
         if (expression instanceof ParenthesedExpressionList parenthesis) {
             for (Object item : parenthesis) {

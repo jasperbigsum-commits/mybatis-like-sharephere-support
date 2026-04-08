@@ -18,7 +18,7 @@
     <mybatis.spring.version>3.0.4</mybatis.spring.version>
     <mybatis.spring.boot.version>3.0.4</mybatis.spring.boot.version>
     <mybatis.version>3.5.19</mybatis.version>
-    <jsqlparser.version>5.3</jsqlparser.version>
+    <jsqlparser.version>4.9</jsqlparser.version>
     <bouncycastle.version>1.80</bouncycastle.version>
   </properties>
 

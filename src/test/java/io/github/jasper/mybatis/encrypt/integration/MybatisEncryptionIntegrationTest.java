@@ -415,6 +415,89 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldDecryptComplexDtoWithMixedFieldModesAcrossStorageModes() throws Exception {
+        UserRecord ownerOne = user(81L, "Xena", "13500135081", "320101199001010181");
+        UserRecord reviewerOne = user(82L, "Yuri", "13500135082", "320101199001010182");
+        UserRecord ownerTwo = user(83L, "Zoe", "13500135083", "320101199001010183");
+        UserRecord reviewerTwo = user(84L, "Ares", "13500135084", "320101199001010184");
+        UserRecord extraOne = user(85L, "Bela", "13500135085", "320101199001010185");
+        UserRecord extraTwo = user(86L, "Cain", "13500135086", "320101199001010186");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(ownerOne));
+            assertEquals(1, mapper.insertUser(reviewerOne));
+            assertEquals(1, mapper.insertUser(ownerTwo));
+            assertEquals(1, mapper.insertUser(reviewerTwo));
+            assertEquals(1, mapper.insertUser(extraOne));
+            assertEquals(1, mapper.insertUser(extraTwo));
+        }
+
+        insertOrderAccountRow(601L, 81L, 82L, 6001L, "mix-graph-a", "grid-m1", 0);
+        insertOrderAccountRow(602L, 83L, 84L, 6002L, "mix-graph-b", "grid-m2", 0);
+        insertOrderParticipantRow(701L, 601L, 81L, 1);
+        insertOrderParticipantRow(702L, 601L, 82L, 2);
+        insertOrderParticipantRow(703L, 601L, 85L, 3);
+        insertOrderParticipantRow(704L, 602L, 83L, 1);
+        insertOrderParticipantRow(705L, 602L, 84L, 2);
+        insertOrderParticipantRow(706L, 602L, 86L, 3);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<ComplexMixedModeOrderDto> orders = mapper.selectComplexMixedModeOrders();
+            assertEquals(2, orders.size());
+
+            ComplexMixedModeOrderDto first = orders.get(0);
+            assertEquals(601L, first.getOrderId());
+            assertEquals("mix-graph-a", first.getRemark());
+            assertNotNull(first.getParticipants());
+            assertNotNull(first.getParticipants().getOwner());
+            assertEquals("Xena", first.getParticipants().getOwner().getDisplayName());
+            assertEquals("13500135081", first.getParticipants().getOwner().getPhone());
+            assertEquals("320101199001010181", first.getParticipants().getOwner().getIdCard());
+            assertNotNull(first.getParticipants().getReviewer());
+            assertEquals("Yuri", first.getParticipants().getReviewer().getDisplayName());
+            assertEquals("13500135082", first.getParticipants().getReviewer().getPhone());
+            assertEquals("320101199001010182", first.getParticipants().getReviewer().getIdCard());
+            assertNotNull(first.getParticipantList());
+            assertEquals(3, first.getParticipantList().size());
+            assertEquals("Xena", first.getParticipantList().get(0).getDisplayName());
+            assertEquals("13500135081", first.getParticipantList().get(0).getPhone());
+            assertEquals("320101199001010181", first.getParticipantList().get(0).getIdCard());
+            assertEquals("Yuri", first.getParticipantList().get(1).getDisplayName());
+            assertEquals("13500135082", first.getParticipantList().get(1).getPhone());
+            assertEquals("320101199001010182", first.getParticipantList().get(1).getIdCard());
+            assertEquals("Bela", first.getParticipantList().get(2).getDisplayName());
+            assertEquals("13500135085", first.getParticipantList().get(2).getPhone());
+            assertEquals("320101199001010185", first.getParticipantList().get(2).getIdCard());
+
+            ComplexMixedModeOrderDto second = orders.get(1);
+            assertEquals(602L, second.getOrderId());
+            assertEquals("mix-graph-b", second.getRemark());
+            assertNotNull(second.getParticipants());
+            assertNotNull(second.getParticipants().getOwner());
+            assertEquals("Zoe", second.getParticipants().getOwner().getDisplayName());
+            assertEquals("13500135083", second.getParticipants().getOwner().getPhone());
+            assertEquals("320101199001010183", second.getParticipants().getOwner().getIdCard());
+            assertNotNull(second.getParticipants().getReviewer());
+            assertEquals("Ares", second.getParticipants().getReviewer().getDisplayName());
+            assertEquals("13500135084", second.getParticipants().getReviewer().getPhone());
+            assertEquals("320101199001010184", second.getParticipants().getReviewer().getIdCard());
+            assertNotNull(second.getParticipantList());
+            assertEquals(3, second.getParticipantList().size());
+            assertEquals("Zoe", second.getParticipantList().get(0).getDisplayName());
+            assertEquals("13500135083", second.getParticipantList().get(0).getPhone());
+            assertEquals("320101199001010183", second.getParticipantList().get(0).getIdCard());
+            assertEquals("Ares", second.getParticipantList().get(1).getDisplayName());
+            assertEquals("13500135084", second.getParticipantList().get(1).getPhone());
+            assertEquals("320101199001010184", second.getParticipantList().get(1).getIdCard());
+            assertEquals("Cain", second.getParticipantList().get(2).getDisplayName());
+            assertEquals("13500135086", second.getParticipantList().get(2).getPhone());
+            assertEquals("320101199001010186", second.getParticipantList().get(2).getIdCard());
+        }
+    }
+
+    @Test
     void shouldBatchInsertAcrossStorageModesUsingBatchExecutor() throws Exception {
         List<UserRecord> users = List.of(
                 user(11L, "Grace", "13300133001", "320101199001010011"),
@@ -803,6 +886,39 @@ class MybatisEncryptionIntegrationTest {
         List<OrderGroupDto> selectOrderGroupsWithParticipants();
 
         @Select("""
+                select o.id as order_id,
+                       o.remark as order_remark,
+                       owner.id as owner_id,
+                       owner.name as owner_display_name,
+                       owner.phone as owner_phone,
+                       owner.id_card as owner_id_card,
+                       reviewer.id as reviewer_id,
+                       reviewer.name as reviewer_display_name,
+                       reviewer.phone as reviewer_phone,
+                       reviewer.id_card as reviewer_id_card
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                join user_account reviewer on o.related_user_id = reviewer.id
+                where o.deleted = 0
+                order by o.id
+                """)
+        @Results(id = "complexMixedModeOrderDtoMap", value = {
+                @Result(property = "orderId", column = "order_id"),
+                @Result(property = "remark", column = "order_remark"),
+                @Result(property = "participants.owner.id", column = "owner_id"),
+                @Result(property = "participants.owner.displayName", column = "owner_display_name"),
+                @Result(property = "participants.owner.phone", column = "owner_phone"),
+                @Result(property = "participants.owner.idCard", column = "owner_id_card"),
+                @Result(property = "participants.reviewer.id", column = "reviewer_id"),
+                @Result(property = "participants.reviewer.displayName", column = "reviewer_display_name"),
+                @Result(property = "participants.reviewer.phone", column = "reviewer_phone"),
+                @Result(property = "participants.reviewer.idCard", column = "reviewer_id_card"),
+                @Result(property = "participantList", column = "order_id",
+                        many = @Many(select = "selectParticipantsByOrderId"))
+        })
+        List<ComplexMixedModeOrderDto> selectComplexMixedModeOrders();
+
+        @Select("""
                 select u.id,
                        u.name as display_name,
                        u.phone_cipher as phone,
@@ -1117,6 +1233,46 @@ class MybatisEncryptionIntegrationTest {
 
         public void setParticipants(List<UserProjectionDto> participants) {
             this.participants = participants;
+        }
+    }
+
+    static class ComplexMixedModeOrderDto {
+
+        private Long orderId;
+        private String remark;
+        private ParticipantBundleDto participants;
+        private List<UserProjectionDto> participantList;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getRemark() {
+            return remark;
+        }
+
+        public void setRemark(String remark) {
+            this.remark = remark;
+        }
+
+        public ParticipantBundleDto getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(ParticipantBundleDto participants) {
+            this.participants = participants;
+        }
+
+        public List<UserProjectionDto> getParticipantList() {
+            return participantList;
+        }
+
+        public void setParticipantList(List<UserProjectionDto> participantList) {
+            this.participantList = participantList;
         }
     }
 

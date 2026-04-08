@@ -1,36 +1,5 @@
 package io.github.jasper.mybatis.encrypt.plugin;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import java.lang.reflect.Method;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import org.apache.ibatis.cache.CacheKey;
-import org.apache.ibatis.cursor.Cursor;
-import org.apache.ibatis.executor.BatchResult;
-import org.apache.ibatis.executor.Executor;
-import org.apache.ibatis.mapping.BoundSql;
-import org.apache.ibatis.mapping.Environment;
-import org.apache.ibatis.mapping.MappedStatement;
-import org.apache.ibatis.mapping.ParameterMap;
-import org.apache.ibatis.mapping.ParameterMapping;
-import org.apache.ibatis.mapping.ResultMap;
-import org.apache.ibatis.mapping.SqlCommandType;
-import org.apache.ibatis.mapping.SqlSource;
-import org.apache.ibatis.plugin.Invocation;
-import org.apache.ibatis.reflection.MetaObject;
-import org.apache.ibatis.session.Configuration;
-import org.apache.ibatis.session.ResultHandler;
-import org.apache.ibatis.session.RowBounds;
-import org.apache.ibatis.transaction.Transaction;
-import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
-import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
@@ -44,6 +13,26 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
+import org.apache.ibatis.cache.CacheKey;
+import org.apache.ibatis.cursor.Cursor;
+import org.apache.ibatis.executor.BatchResult;
+import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.mapping.*;
+import org.apache.ibatis.plugin.Invocation;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
+import org.apache.ibatis.transaction.Transaction;
+import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
+import org.junit.jupiter.api.Test;
+
+import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 class DatabaseEncryptionInterceptorTest {
 
@@ -148,6 +137,40 @@ class DatabaseEncryptionInterceptorTest {
         assertNotSame(mappedStatement, executor.lastMappedStatement);
     }
 
+    @Test
+    void shouldPrepareSeparateTableReferencesForFieldLevelAnnotatedDtoBeforeExecutorUpdateRewrite() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingSeparateTableEncryptionManager manager = new RecordingSeparateTableEncryptionManager();
+        TestExecutor executor = new TestExecutor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(manager);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.updateIdCardFieldLevel",
+                SqlCommandType.UPDATE,
+                FieldLevelEncryptedUser.class,
+                "update user_account set id_card = ? where id = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "id", Long.class).build()
+                )
+        );
+        FieldLevelEncryptedUser user = new FieldLevelEncryptedUser();
+        user.setId(2L);
+        user.setIdCard("320101199001015678");
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("update", MappedStatement.class, Object.class),
+                new Object[]{mappedStatement, user}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertEquals(1, manager.prepareCalls);
+        assertEquals("1001", executor.lastBoundSql.getAdditionalParameter("idCard"));
+        assertNotSame(mappedStatement, executor.lastMappedStatement);
+    }
+
     private DatabaseEncryptionInterceptor interceptor(SeparateTableEncryptionManager manager) {
         DatabaseEncryptionProperties properties = sampleProperties();
         EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(
@@ -222,6 +245,39 @@ class DatabaseEncryptionInterceptorTest {
         private Long id;
 
         @EncryptField(
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like"
+        )
+        private String idCard;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getIdCard() {
+            return idCard;
+        }
+
+        public void setIdCard(String idCard) {
+            this.idCard = idCard;
+        }
+    }
+
+    static class FieldLevelEncryptedUser {
+
+        private Long id;
+
+        @EncryptField(
+                table = "user_account",
                 column = "id_card",
                 storageMode = FieldStorageMode.SEPARATE_TABLE,
                 storageTable = "user_id_card_encrypt",

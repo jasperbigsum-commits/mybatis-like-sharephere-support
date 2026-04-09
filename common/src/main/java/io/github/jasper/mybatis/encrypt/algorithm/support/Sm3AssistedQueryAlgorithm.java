@@ -1,10 +1,12 @@
 package io.github.jasper.mybatis.encrypt.algorithm.support;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import org.bouncycastle.util.encoders.Hex;
 
 /**
  * 基于 SM3 的国密辅助等值查询算法实现。
@@ -24,6 +26,24 @@ public class Sm3AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
         }
     });
 
+    private final byte[] saltBytes;
+
+
+    /**
+     * 不含有salt的sm3的方式
+     */
+    public Sm3AssistedQueryAlgorithm() {
+        this.saltBytes = new byte[0];
+    }
+
+    /**
+     * 含有salt的sm3的方式
+     * @param salt 16进制固定盐
+     */
+    public Sm3AssistedQueryAlgorithm(String salt) {
+        this.saltBytes = Hex.decode(salt);
+    }
+
     @Override
     public String transform(String plainText) {
         if (plainText == null) {
@@ -32,7 +52,13 @@ public class Sm3AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
         MessageDigest digest = SM3_HOLDER.get();
         // ThreadLocal 量会复用同一个摘要实例，因此每次使用前都必须显式 reset。
         digest.reset();
-        byte[] hash = digest.digest(plainText.getBytes(StandardCharsets.UTF_8));
+        byte[] plainTextBytes = plainText.getBytes(StandardCharsets.UTF_8);
+        // salt + plainText
+        byte[] mergeTextBytes = ByteBuffer.allocate(saltBytes.length + plainTextBytes.length)
+                .put(saltBytes)
+                .put(plainTextBytes)
+                .array();
+        byte[] hash = digest.digest(mergeTextBytes);
         StringBuilder builder = new StringBuilder(hash.length * 2);
         for (byte current : hash) {
             builder.append(String.format("%02x", current));

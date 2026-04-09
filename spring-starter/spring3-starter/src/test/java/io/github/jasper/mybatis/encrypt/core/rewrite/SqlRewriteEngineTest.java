@@ -868,6 +868,113 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldPreserveSelectPlaceholderParameterOrderWhenRewritingSeparateTableWherePredicate() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT ? AS marker, u.name, u.phone FROM user_account u WHERE u.id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "marker", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("marker", "VISIBLE", "idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("? AS marker") || result.sql().contains("? marker"));
+        assertTrue(result.sql().contains("u.name"));
+        assertTrue(result.sql().contains("u.`phone_cipher` AS phone") || result.sql().contains("u.`phone_cipher` phone"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertEquals("marker", boundSql.getParameterMappings().get(0).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldPreserveMultipleSelectPlaceholdersBeforeEncryptedWhereParameter() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT ? AS marker1, ? AS marker2, u.name, u.phone FROM user_account u WHERE u.id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "marker1", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "marker2", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("marker1", "VISIBLE-1", "marker2", "VISIBLE-2", "idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("? AS marker1") || result.sql().contains("? marker1"));
+        assertTrue(result.sql().contains("? AS marker2") || result.sql().contains("? marker2"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        result.applyTo(boundSql);
+        assertEquals(3, boundSql.getParameterMappings().size());
+        assertEquals("marker1", boundSql.getParameterMappings().get(0).getProperty());
+        assertEquals("marker2", boundSql.getParameterMappings().get(1).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(2).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldPreserveMultipleSelectPlaceholdersBeforeSameTableEncryptedWhereParameter() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT ? AS marker1, ? AS marker2, u.name, u.phone FROM user_account u WHERE u.phone = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "marker1", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "marker2", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build()
+                ),
+                Map.of("marker1", "VISIBLE-1", "marker2", "VISIBLE-2", "phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("? AS marker1") || result.sql().contains("? marker1"));
+        assertTrue(result.sql().contains("? AS marker2") || result.sql().contains("? marker2"));
+        assertTrue(result.sql().contains("u.`phone_cipher` AS phone") || result.sql().contains("u.`phone_cipher` phone"));
+        assertTrue(result.sql().contains("`phone_hash` = ?") || result.sql().contains("phone_hash = ?"));
+        result.applyTo(boundSql);
+        assertEquals(3, boundSql.getParameterMappings().size());
+        assertEquals("marker1", boundSql.getParameterMappings().get(0).getProperty());
+        assertEquals("marker2", boundSql.getParameterMappings().get(1).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(2).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
     void shouldRewriteUpdateAcrossStorageModes() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();

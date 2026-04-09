@@ -10,12 +10,14 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import org.apache.ibatis.annotations.Insert;
@@ -29,11 +31,14 @@ import org.apache.ibatis.executor.BatchResult;
 import org.apache.ibatis.executor.statement.StatementHandler;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
 import org.apache.ibatis.plugin.Invocation;
 import org.apache.ibatis.plugin.Plugin;
 import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.reflection.SystemMetaObject;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
@@ -234,6 +239,115 @@ class MybatisEncryptionIntegrationTest {
         assertSameTableStorage(6L, "13400134999");
         assertSeparateTableStorage(originalReferenceId, "320101199001017777");
         assertSeparateTableStorage(updatedReferenceId, "320101199001016666");
+    }
+
+    @Test
+    void shouldKeepSelectPlaceholderParameterBeforeEncryptedWhereParameter() throws Exception {
+        UserRecord user = user(9L, "Iris", "13600136009", "320101199001010209");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        String referenceId = loadReferenceId(9L);
+        String expectedHash = loadSeparateTableHash(referenceId);
+        parameterCaptureInterceptor.reset();
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserProjectionDto loaded = mapper.selectWithPlainPlaceholderAndEncryptedWhere(
+                    "visible-label",
+                    "320101199001010209"
+            );
+            assertNotNull(loaded);
+            assertEquals(9L, loaded.getId());
+            assertEquals("visible-label", loaded.getDisplayName());
+            assertEquals("13600136009", loaded.getPhone());
+            assertEquals("320101199001010209", loaded.getIdCard());
+        }
+
+        String normalizedSql = singleLine(parameterCaptureInterceptor.lastPreparedSql).toLowerCase(Locale.ROOT);
+        assertTrue(normalizedSql.contains("select ? as display_name"));
+        assertTrue(normalizedSql.contains("user_id_card_encrypt"));
+        assertTrue(normalizedSql.contains("id_card_hash"));
+        assertEquals(2, parameterCaptureInterceptor.lastResolvedParameters.size());
+        assertEquals("visible-label", parameterCaptureInterceptor.lastResolvedParameters.get(0));
+        assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(1));
+    }
+
+    @Test
+    void shouldKeepMultipleSelectPlaceholdersBeforeEncryptedWhereParameter() throws Exception {
+        UserRecord user = user(10L, "Jill", "13600136010", "320101199001010210");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        String referenceId = loadReferenceId(10L);
+        String expectedHash = loadSeparateTableHash(referenceId);
+        parameterCaptureInterceptor.reset();
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserProjectionDto loaded = mapper.selectWithMultiplePlainPlaceholdersAndEncryptedWhere(
+                    "visible-label-a",
+                    "visible-label-b",
+                    "320101199001010210"
+            );
+            assertNotNull(loaded);
+            assertEquals(10L, loaded.getId());
+            assertEquals("visible-label-a", loaded.getDisplayName());
+            assertEquals("13600136010", loaded.getPhone());
+            assertEquals("320101199001010210", loaded.getIdCard());
+        }
+
+        String normalizedSql = singleLine(parameterCaptureInterceptor.lastPreparedSql).toLowerCase(Locale.ROOT);
+        assertTrue(normalizedSql.contains("select ? as display_name"));
+        assertTrue(normalizedSql.contains("? as marker"));
+        assertTrue(normalizedSql.contains("user_id_card_encrypt"));
+        assertTrue(normalizedSql.contains("id_card_hash"));
+        assertEquals(3, parameterCaptureInterceptor.lastResolvedParameters.size());
+        assertEquals("visible-label-a", parameterCaptureInterceptor.lastResolvedParameters.get(0));
+        assertEquals("visible-label-b", parameterCaptureInterceptor.lastResolvedParameters.get(1));
+        assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(2));
+    }
+
+    @Test
+    void shouldKeepMultipleSelectPlaceholdersBeforeSameTableEncryptedWhereParameter() throws Exception {
+        UserRecord user = user(11L, "Kara", "13600136011", "320101199001010211");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        String expectedHash = loadPhoneHash(11L);
+        parameterCaptureInterceptor.reset();
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserProjectionDto loaded = mapper.selectWithMultiplePlainPlaceholdersAndSameTableEncryptedWhere(
+                    "visible-label-a",
+                    "visible-label-b",
+                    "13600136011"
+            );
+            assertNotNull(loaded);
+            assertEquals(11L, loaded.getId());
+            assertEquals("visible-label-a", loaded.getDisplayName());
+            assertEquals("13600136011", loaded.getPhone());
+            assertEquals("320101199001010211", loaded.getIdCard());
+        }
+
+        String normalizedSql = singleLine(parameterCaptureInterceptor.lastPreparedSql).toLowerCase(Locale.ROOT);
+        assertTrue(normalizedSql.contains("select ? as display_name"));
+        assertTrue(normalizedSql.contains("? as marker"));
+        assertTrue(normalizedSql.contains("phone_hash"));
+        assertEquals(3, parameterCaptureInterceptor.lastResolvedParameters.size());
+        assertEquals("visible-label-a", parameterCaptureInterceptor.lastResolvedParameters.get(0));
+        assertEquals("visible-label-b", parameterCaptureInterceptor.lastResolvedParameters.get(1));
+        assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(2));
     }
 
     @Test
@@ -846,6 +960,26 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    private String loadSeparateTableHash(String referenceId) throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select id_card_hash from user_id_card_encrypt where id = " + referenceId)) {
+            resultSet.next();
+            return resultSet.getString(1);
+        }
+    }
+
+    private String loadPhoneHash(long id) throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone_hash from user_account where id = " + id)) {
+            resultSet.next();
+            return resultSet.getString(1);
+        }
+    }
+
     private int queryForInt(String sql) throws Exception {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
@@ -853,6 +987,10 @@ class MybatisEncryptionIntegrationTest {
             resultSet.next();
             return resultSet.getInt(1);
         }
+    }
+
+    private String singleLine(String sql) {
+        return sql == null ? "" : sql.replaceAll("\\s+", " ").trim();
     }
 
     interface UserMapper {
@@ -876,6 +1014,43 @@ class MybatisEncryptionIntegrationTest {
                 where id_card = #{idCard}
                 """)
         UserRecord selectByIdCard(@Param("idCard") String idCard);
+
+        @Select("""
+                select #{displayName} as display_name,
+                       u.id,
+                       u.phone,
+                       u.id_card
+                from user_account u
+                where u.id_card = #{idCard}
+                """)
+        UserProjectionDto selectWithPlainPlaceholderAndEncryptedWhere(@Param("displayName") String displayName,
+                                                                      @Param("idCard") String idCard);
+
+        @Select("""
+                select #{displayName} as display_name,
+                       #{marker} as marker,
+                       u.id,
+                       u.phone,
+                       u.id_card
+                from user_account u
+                where u.id_card = #{idCard}
+                """)
+        UserProjectionDto selectWithMultiplePlainPlaceholdersAndEncryptedWhere(@Param("displayName") String displayName,
+                                                                               @Param("marker") String marker,
+                                                                               @Param("idCard") String idCard);
+
+        @Select("""
+                select #{displayName} as display_name,
+                       #{marker} as marker,
+                       u.id,
+                       u.phone,
+                       u.id_card
+                from user_account u
+                where u.phone = #{phone}
+                """)
+        UserProjectionDto selectWithMultiplePlainPlaceholdersAndSameTableEncryptedWhere(@Param("displayName") String displayName,
+                                                                                        @Param("marker") String marker,
+                                                                                        @Param("phone") String phone);
 
         @Select("""
                 select id, name, phone, id_card
@@ -1542,13 +1717,18 @@ class MybatisEncryptionIntegrationTest {
     })
     static class ParameterCaptureInterceptor implements Interceptor {
 
+        private final ParameterValueResolver parameterValueResolver = new ParameterValueResolver();
         private Object lastIdCardAdditionalParameter;
+        private String lastPreparedSql;
+        private List<Object> lastResolvedParameters = List.of();
 
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
             Object result = invocation.proceed();
             if (invocation.getTarget() instanceof StatementHandler statementHandler) {
                 BoundSql boundSql = statementHandler.getBoundSql();
+                lastPreparedSql = boundSql.getSql();
+                lastResolvedParameters = resolveParameterValues(statementHandler, boundSql);
                 if (boundSql.hasAdditionalParameter("idCard")) {
                     lastIdCardAdditionalParameter = boundSql.getAdditionalParameter("idCard");
                 }
@@ -1569,6 +1749,26 @@ class MybatisEncryptionIntegrationTest {
 
         @Override
         public void setProperties(java.util.Properties properties) {
+        }
+
+        private List<Object> resolveParameterValues(StatementHandler statementHandler, BoundSql boundSql) {
+            MetaObject metaObject = SystemMetaObject.forObject(statementHandler);
+            Configuration configuration = (Configuration) metaObject.getValue("delegate.configuration");
+            Object parameterObject = boundSql.getParameterObject();
+            if (configuration == null) {
+                return List.of();
+            }
+            java.util.ArrayList<Object> values = new java.util.ArrayList<>(boundSql.getParameterMappings().size());
+            for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+                values.add(parameterValueResolver.resolve(configuration, boundSql, parameterObject, parameterMapping));
+            }
+            return java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
+        }
+
+        private void reset() {
+            lastIdCardAdditionalParameter = null;
+            lastPreparedSql = null;
+            lastResolvedParameters = List.of();
         }
     }
 }

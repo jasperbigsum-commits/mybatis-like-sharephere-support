@@ -268,6 +268,8 @@ public class SqlRewriteEngine {
                 registerFromItem(tableContext, join.getRightItem(), context);
             }
         }
+        // SQL 参数绑定顺序遵循语句中的占位符出现顺序；SELECT 列表中的参数需要先消费。
+        consumeSelectItemParameters(plainSelect.getSelectItems(), context);
         plainSelect.setWhere(rewriteCondition(plainSelect.getWhere(), tableContext, context));
         plainSelect.setHaving(rewriteCondition(plainSelect.getHaving(), tableContext, context));
         plainSelect.setQualify(rewriteCondition(plainSelect.getQualify(), tableContext, context));
@@ -684,6 +686,15 @@ public class SqlRewriteEngine {
             for (Expression item : expressionList) {
                 consumeExpression(item, context);
             }
+        }
+    }
+
+    private void consumeSelectItemParameters(List<SelectItem<?>> selectItems, SqlRewriteContext context) {
+        if (selectItems == null) {
+            return;
+        }
+        for (SelectItem<?> item : selectItems) {
+            consumeExpression(item.getExpression(), context);
         }
     }
 

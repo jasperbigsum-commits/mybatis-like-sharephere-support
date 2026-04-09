@@ -159,6 +159,22 @@
 - 所有核心类必须有职责说明，至少覆盖拦截器、规则注册中心、SQL 改写器、结果解密器、自动配置类
 - 复杂逻辑必须注释设计意图、适用边界和失败策略，避免维护时只能从实现反推语义
 
+## 当前模块结构
+
+当前仓库已经调整为多模块结构，职责划分如下：
+
+- `common`：核心模块，承载算法 SPI、注解模型、配置模型、元数据注册、SQL 改写、结果解密与 MyBatis 拦截器能力
+- `bom`：BOM 模块，统一管理对外发布的 starter 版本
+- `spring-starter/spring3-starter`：Spring Boot 3.x 主接入模块，当前文档和测试都以该模块为主
+- `spring-starter/spring2-starter`：Spring Boot 2.x 兼容接入模块
+- `spring-starter`：starter 聚合父模块，用于组织 Spring 相关子模块
+
+对外使用时的推荐顺序：
+
+- Spring Boot 3 项目优先依赖 `mybatis-like-sharephere-support-spring3-starter`
+- Spring Boot 2 项目依赖 `mybatis-like-sharephere-support-spring2-starter`
+- 多个 starter 需要统一版本时，通过 `mybatis-like-sharephere-support-bom` 做版本约束
+
 ## 后续演进方向
 
 - 增加 Maven Wrapper 与标准开发说明

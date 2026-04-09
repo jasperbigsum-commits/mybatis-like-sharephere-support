@@ -2,19 +2,19 @@
 
 ## 工具链
 
-仓库已补充 Maven Wrapper，优先使用下面命令：
+当前仓库未内置 Maven Wrapper，请使用本机 Maven（`mvn`）执行构建。
 
-```powershell
-.\mvnw.cmd test
-```
-
-Linux / macOS：
+常用命令（Windows / Linux / macOS 通用）：
 
 ```bash
-./mvnw test
+mvn "-Dmaven.repo.local=.m2repo" test
 ```
 
-首次执行时，wrapper 会下载 Maven 发行版。
+只验证 Spring Boot 3 主模块（推荐）：
+
+```bash
+mvn "-Dmaven.repo.local=.m2repo" -pl spring-starter/spring3-starter -am test
+```
 
 ## 测试分层
 
@@ -28,7 +28,7 @@ Linux / macOS：
 
 每次提交前至少确认：
 
-1. `.\mvnw.cmd test` 可以通过
+1. `mvn "-Dmaven.repo.local=.m2repo" -pl spring-starter/spring3-starter -am test` 可以通过
 2. 默认国密算法测试通过
 3. SQL 改写测试通过
 4. 日志脱敏测试通过
@@ -52,5 +52,5 @@ Linux / macOS：
 ## 当前限制
 
 - 当前仓库仍需补真实数据库驱动下的集成测试
-- `mvnw` 首次执行依赖网络下载 Maven 发行版
+- 初次构建可能需要下载依赖，需确保网络与 Maven 配置可用
 - 生产级验收仍建议在目标数据库上补充回归用例

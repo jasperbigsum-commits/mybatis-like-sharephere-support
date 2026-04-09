@@ -92,25 +92,91 @@
 
 ### 1. Maven
 
-如果该模块已经发布到你的 Maven 私服或本地仓库，可直接引入：
+以 `spring3-starter` 为主：
 
 ```xml
 <dependency>
-  <groupId>io.github.jasper</groupId>
-  <artifactId>mybatis-like-sharephere-support</artifactId>
+  <groupId>io.github.jasperbigsum-commits</groupId>
+  <artifactId>mybatis-like-sharephere-support-spring3-starter</artifactId>
   <version>1.0.0-SNAPSHOT</version>
+</dependency>
+```
+
+如果你使用的是 `-SNAPSHOT` 版本（已发布到 `central.sonatype.com`），需要额外添加快照仓库：
+
+```xml
+<repositories>
+  <repository>
+    <id>central-portal-snapshots</id>
+    <name>Central Portal Snapshots</name>
+    <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+    <releases>
+      <enabled>false</enabled>
+    </releases>
+    <snapshots>
+      <enabled>true</enabled>
+    </snapshots>
+  </repository>
+</repositories>
+```
+
+如果后续切换到正式发布版本，可移除该快照仓库，直接使用 Maven Central。
+
+如果你希望统一管理版本，推荐引入 BOM：
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>io.github.jasperbigsum-commits</groupId>
+      <artifactId>mybatis-like-sharephere-support-bom</artifactId>
+      <version>1.0.0-SNAPSHOT</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+```
+
+然后在 `dependencies` 里不写版本：
+
+```xml
+<dependency>
+  <groupId>io.github.jasperbigsum-commits</groupId>
+  <artifactId>mybatis-like-sharephere-support-spring3-starter</artifactId>
 </dependency>
 ```
 
 ### 2. Gradle
 
 ```gradle
-implementation "io.github.jasper:mybatis-like-sharephere-support:1.0.0-SNAPSHOT"
+repositories {
+    mavenCentral()
+    maven {
+        name = "Central Portal Snapshots"
+        url = uri("https://central.sonatype.com/repository/maven-snapshots/")
+        mavenContent {
+            snapshotsOnly()
+        }
+        content {
+            includeGroup("io.github.jasperbigsum-commits")
+        }
+    }
+}
+
+dependencies {
+    implementation "io.github.jasperbigsum-commits:mybatis-like-sharephere-support-spring3-starter:1.0.0-SNAPSHOT"
+}
 ```
+
+如果使用正式发布版本，可删除 `Central Portal Snapshots` 仓库配置，仅保留 `mavenCentral()`。
 
 ### 3. 多模块工程直接依赖
 
-如果你的业务工程和当前项目在同一个多模块仓库中，可以在业务模块里直接声明模块依赖。
+如果你的业务工程和当前项目在同一个多模块仓库中，可以直接依赖：
+
+- `mybatis-like-sharephere-support-spring3-starter`（Spring Boot 3）
+- `mybatis-like-sharephere-support-spring2-starter`（Spring Boot 2）
 
 ### 4. 接入前提
 
@@ -389,14 +455,14 @@ create table user_phone_encrypt (
 ## 项目结构
 
 ```text
-src/main/java/tech/jasper/mybatis/encrypt
-├─ algorithm      算法 SPI 与默认实现
-├─ annotation     注解声明模型
-├─ config         Spring Boot 自动配置与属性模型
-├─ core           元数据、SQL 改写、结果解密核心逻辑
-├─ exception      异常定义
-├─ plugin         MyBatis 拦截器
-└─ util           工具类
+mybatis-like-sharephere-support
+├─ bom                              统一版本管理（BOM）
+├─ common                           核心能力（算法 SPI、元数据、SQL 改写、解密、拦截器）
+│  └─ src/main/java/io/github/jasper/mybatis/encrypt
+├─ spring-starter                   Starter 聚合模块
+│  ├─ spring3-starter               Spring Boot 3.x 接入模块（主推荐）
+│  └─ spring2-starter               Spring Boot 2.x 接入模块
+└─ docs                             架构、开发与支持矩阵文档
 ```
 
 ## 测试与开发状态

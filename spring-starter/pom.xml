@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.jasperbigsum-commits</groupId>
         <artifactId>mybatis-like-sharephere-support</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>mybatis-like-sharephere-spring-starter</artifactId>

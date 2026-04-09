@@ -27,7 +27,7 @@ jobs:
           gpg-passphrase: GPG_PASSPHRASE
 
       - name: Publish to Central
-        run: mvn clean deploy -pl :mybatis-like-sharephere-support-common,:mybatis-like-sharephere-support-spring2-starter,:mybatis-like-sharephere-support-spring3-starter -am -DskipTests -Dgpg.skip=false --batch-mode
+        run: mvn clean deploy -pl :mybatis-like-sharephere-support-spring2-starter,:mybatis-like-sharephere-support-spring3-starter -am -DskipTests --batch-mode
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}

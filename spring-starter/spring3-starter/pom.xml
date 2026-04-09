@@ -11,6 +11,9 @@
     </parent>
 
     <artifactId>mybatis-like-sharephere-support-spring3-starter</artifactId>
+    <name>mybatis-like-sharephere-spring3-starter</name>
+    <description>Spring 3.x Support of mybatis-like-sharephere-support.</description>
+    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>

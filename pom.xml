@@ -142,7 +142,8 @@
   <!-- 源码管理信息 (必须) -->
   <scm>
     <connection>scm:git:git://github.com/jasperbigsum-commits/mybatis-like-sharephere-support.git</connection>
-    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-suppor</url>
+    <developerConnection>scm:git:ssh://github.com/jasperbigsum-commits/mybatis-like-sharephere-support.git</developerConnection>
+    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
   </scm>
 
   <developers>

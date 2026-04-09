@@ -10,6 +10,10 @@
     </parent>
 
     <artifactId>mybatis-like-sharephere-spring-starter</artifactId>
+    <packaging>pom</packaging>
+    <name>mybatis-like-sharephere-spring-starter</name>
+    <description>Aggregator module for Spring starter variants of mybatis-like-sharephere-support.</description>
+    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>

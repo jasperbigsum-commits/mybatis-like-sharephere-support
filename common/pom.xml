@@ -10,6 +10,9 @@
     </parent>
 
     <artifactId>mybatis-like-sharephere-support-common</artifactId>
+    <name>mybatis-like-sharephere-support-common</name>
+    <description>Core encryption metadata, SQL rewrite, and MyBatis interceptor support for mybatis-like-sharephere-support.</description>
+    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>

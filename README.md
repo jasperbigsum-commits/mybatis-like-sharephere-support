@@ -322,6 +322,8 @@ mybatis:
 - `MYSQL`
 - `OCEANBASE`
 - `DM`
+- `ORACLE12`
+- `CLICKHOUSE`
 
 配置方式：
 

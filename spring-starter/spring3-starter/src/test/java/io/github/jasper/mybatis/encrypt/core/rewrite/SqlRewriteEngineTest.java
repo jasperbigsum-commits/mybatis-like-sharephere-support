@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.config.SqlDialect;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
@@ -1251,6 +1252,74 @@ class SqlRewriteEngineTest {
         assertFalse(result.changed());
     }
 
+    @Test
+    void shouldRewriteAcrossStorageModesUsingOracle12Dialect() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties(SqlDialect.ORACLE12);
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id, u.phone, u.id_card FROM user_account u WHERE u.phone = ? AND u.id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("phone", "13800138000", "idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.\"phone_cipher\" AS phone") || result.sql().contains("u.\"phone_cipher\" phone"));
+        assertTrue(result.sql().contains("u.\"phone_hash\" = ?") || result.sql().contains("\"phone_hash\" = ?"));
+        assertTrue(result.sql().contains("\"user_id_card_encrypt\""));
+        assertTrue(result.sql().contains("\"id_card_hash\" = ?"));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertTrue(boundSql.getParameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(2, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteAcrossStorageModesUsingClickHouseDialect() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties(SqlDialect.CLICKHOUSE);
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id, u.phone, u.id_card FROM user_account u WHERE u.phone = ? AND u.id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("phone", "13800138000", "idCard", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_cipher` AS phone") || result.sql().contains("u.`phone_cipher` phone"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("`phone_hash` = ?"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?"));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertTrue(boundSql.getParameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(2, result.maskedParameters().size());
+    }
+
     private DatabaseEncryptionProperties sampleProperties() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
@@ -1284,6 +1353,12 @@ class SqlRewriteEngineTest {
         properties.getTables().put("userArchive", archiveTableRule);
 
         properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties sampleProperties(SqlDialect sqlDialect) {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        properties.setSqlDialect(sqlDialect);
         return properties;
     }
 

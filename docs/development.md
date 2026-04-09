@@ -41,6 +41,8 @@ mvn "-Dmaven.repo.local=.m2repo" -pl spring-starter/spring3-starter -am test
 - MySQL
 - OceanBase
 - 达梦
+- Oracle12
+- ClickHouse
 
 验收重点：
 

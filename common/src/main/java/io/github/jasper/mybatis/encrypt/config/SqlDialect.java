@@ -15,7 +15,15 @@ public enum SqlDialect {
     /**
      * 达梦双引号。
      */
-    DM("\"", "\"");
+    DM("\"", "\""),
+    /**
+     * Oracle 12 双引号。
+     */
+    ORACLE12("\"", "\""),
+    /**
+     * ClickHouse 反引号。
+     */
+    CLICKHOUSE("`", "`");
 
     private final String openQuote;
     private final String closeQuote;

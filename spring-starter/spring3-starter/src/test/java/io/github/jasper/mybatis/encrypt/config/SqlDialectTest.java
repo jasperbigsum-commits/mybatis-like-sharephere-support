@@ -16,4 +16,14 @@ class SqlDialectTest {
     void shouldQuoteDmIdentifiers() {
         assertEquals("\"USER_ACCOUNT\"", SqlDialect.DM.quote("USER_ACCOUNT"));
     }
+
+    @Test
+    void shouldQuoteOracle12Identifiers() {
+        assertEquals("\"user_account\"", SqlDialect.ORACLE12.quote("user_account"));
+    }
+
+    @Test
+    void shouldQuoteClickHouseIdentifiers() {
+        assertEquals("`user_account`", SqlDialect.CLICKHOUSE.quote("user_account"));
+    }
 }

@@ -81,7 +81,7 @@ public class MybatisEncryptionAutoConfiguration {
 
     /**
      * 注册默认 SM3 辅助查询算法实现。
-     *
+     * @param properties 插件配置属性
      * @return SM3 辅助查询算法 Bean
      */
     @Bean(name = "sm3")

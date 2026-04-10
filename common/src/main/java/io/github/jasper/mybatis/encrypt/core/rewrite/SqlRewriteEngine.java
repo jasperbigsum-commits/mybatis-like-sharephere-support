@@ -695,6 +695,18 @@ public class SqlRewriteEngine {
             consumeExpression(binaryExpression.getRightExpression(), context);
             return;
         }
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
+            consumeExpression(caseExpression.getSwitchExpression(), context);
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    consumeExpression(whenClause.getWhenExpression(), context);
+                    consumeExpression(whenClause.getThenExpression(), context);
+                }
+            }
+            consumeExpression(caseExpression.getElseExpression(), context);
+            return;
+        }
         if (expression instanceof Function && ((Function) expression).getParameters() != null) {
             Function function = (Function) expression;
             for (Expression item : function.getParameters()) {

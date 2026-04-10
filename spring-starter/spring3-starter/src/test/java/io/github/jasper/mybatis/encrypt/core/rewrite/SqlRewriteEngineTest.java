@@ -976,6 +976,95 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldPreserveCrmCustomerCountQueryParameterOrderWhenEncryptingOuterContactNamePredicate() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        DatabaseEncryptionProperties.TableRuleProperties contactTableRule =
+                new DatabaseEncryptionProperties.TableRuleProperties();
+        contactTableRule.setTable("crm_external_contact");
+        DatabaseEncryptionProperties.FieldRuleProperties nameFieldRule =
+                new DatabaseEncryptionProperties.FieldRuleProperties();
+        nameFieldRule.setColumn("name");
+        nameFieldRule.setStorageColumn("name_cipher");
+        nameFieldRule.setAssistedQueryColumn("name_hash");
+        nameFieldRule.setLikeQueryColumn("name_like");
+        contactTableRule.getFields().put("name", nameFieldRule);
+        properties.getTables().put("crmExternalContact", contactTableRule);
+
+        AlgorithmRegistry algorithmRegistry = sampleAlgorithms();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                algorithmRegistry,
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT COUNT(*) AS total FROM (" +
+                        "SELECT a.external_userid, " +
+                        "coalesce(max(CASE WHEN a.userid = ? THEN a.wx_createtime END), min(a.wx_createtime)) AS wx_createtime, " +
+                        "max(a.userid = ?) AS is_edit, " +
+                        "GROUP_CONCAT(a.remark) AS remark, " +
+                        "GROUP_CONCAT(u.realname) AS gridman, " +
+                        "GROUP_CONCAT(a.userid) AS userid " +
+                        "FROM crm_follow_user a " +
+                        "JOIN sys_user u ON a.userid = u.id " +
+                        "WHERE a.del_flag = 0 AND a.external_userid IS NOT NULL " +
+                        "GROUP BY a.external_userid) a " +
+                        "JOIN crm_external_contact e ON a.external_userid = e.id " +
+                        "JOIN crm_cust_info c ON e.external_userid = c.external_userid AND c.del_flag = 0 " +
+                        "LEFT JOIN crm_cust_filter f ON c.id = f.cust_id AND f.del_flag = 0 " +
+                        "LEFT JOIN hx_bank_cust_tag t ON c.id_card = t.id_card " +
+                        "WHERE (a.userid REGEXP 'ff8080818a44c9fb018a44c9fb5d0000' " +
+                        "AND (e.name = ? " +
+                        "OR EXISTS (SELECT 1 FROM `crm_encrypt_name` WHERE `id` = c.`realname` AND `hash` = ?) " +
+                        "OR a.remark = ?))",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "userIdForCase", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "userIdForMax", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "contactName", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "realnameHash", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "remark", String.class).build()
+                ),
+                Map.of(
+                        "userIdForCase", "ff8080818a44c9fb018a44c9fb5d0000",
+                        "userIdForMax", "ff8080818a44c9fb018a44c9fb5d0000",
+                        "contactName", "测试1",
+                        "realnameHash", "8c5342b5f4af7646e4bb90f7a3eda3e8da58272edcf7e764de2ade614f061ae8",
+                        "remark", "测试1"
+                )
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains(
+                "SELECT COUNT(*) AS total FROM (SELECT a.external_userid, " +
+                        "coalesce(max(CASE WHEN a.userid = ? THEN a.wx_createtime END), min(a.wx_createtime)) AS wx_createtime, " +
+                        "max(a.userid = ?) AS is_edit, GROUP_CONCAT(a.remark) AS remark, GROUP_CONCAT(u.realname) AS gridman, " +
+                        "GROUP_CONCAT(a.userid) AS userid FROM crm_follow_user a JOIN sys_user u ON a.userid = u.id " +
+                        "WHERE a.del_flag = 0 AND a.external_userid IS NOT NULL GROUP BY a.external_userid) a " +
+                        "JOIN crm_external_contact e ON a.external_userid = e.id " +
+                        "JOIN crm_cust_info c ON e.external_userid = c.external_userid AND c.del_flag = 0 " +
+                        "LEFT JOIN crm_cust_filter f ON c.id = f.cust_id AND f.del_flag = 0 " +
+                        "LEFT JOIN hx_bank_cust_tag t ON c.id_card = t.id_card"), result.sql());
+        assertTrue(result.sql().contains(
+                "WHERE (a.userid REGEXP 'ff8080818a44c9fb018a44c9fb5d0000' " +
+                        "AND (e.`name_hash` = ? OR EXISTS (SELECT 1 FROM `crm_encrypt_name` WHERE `id` = c.`realname` AND `hash` = ?) OR a.remark = ?))"), result.sql());
+        result.applyTo(boundSql);
+        assertEquals(5, boundSql.getParameterMappings().size());
+        assertEquals("userIdForCase", boundSql.getParameterMappings().get(0).getProperty());
+        assertEquals("userIdForMax", boundSql.getParameterMappings().get(1).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(2).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals("realnameHash", boundSql.getParameterMappings().get(3).getProperty());
+        assertEquals("remark", boundSql.getParameterMappings().get(4).getProperty());
+        assertEquals(
+                algorithmRegistry.assisted("sm3").transform("测试1"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(2).getProperty())
+        );
+    }
+
+    @Test
     void shouldRewriteUpdateAcrossStorageModes() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();

@@ -18,10 +18,18 @@ public final class MaskedValue {
         this.value = value;
     }
 
+    /**
+     * 获取脱敏类别
+     * @return 脱敏类别
+     */
     public String kind() {
         return kind;
     }
 
+    /**
+     * 获取最终日志中展示的值
+     * @return 最终日志中展示的值
+     */
     public String value() {
         return value;
     }

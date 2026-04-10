@@ -62,50 +62,98 @@ public final class EncryptColumnRule {
         this.storageIdColumn = storageIdColumn;
     }
 
+    /**
+     * 实体属性名
+     * @return 实体属性名
+     */
     public String property() {
         return property;
     }
 
+    /**
+     * 字段来源的物理表；为空时默认继承所属实体规则的表名
+     * @return 字段来源的物理表
+     */
     public String table() {
         return table;
     }
 
+    /**
+     * 获取 应用 SQL 使用的原始业务列名
+     * @return 应用 SQL 使用的原始业务列名
+     */
     public String column() {
         return column;
     }
 
+    /**
+     * 获取加密算法 bean 名称
+     * @return 加密算法 bean 名称
+     */
     public String cipherAlgorithm() {
         return cipherAlgorithm;
     }
 
+    /**
+     * 辅助等值查询列
+     * @return 辅助等值查询列
+     */
     public String assistedQueryColumn() {
         return assistedQueryColumn;
     }
 
+    /**
+     * 获取辅助等值算法 bean 名称
+     * @return 辅助等值算法 bean 名称
+     */
     public String assistedQueryAlgorithm() {
         return assistedQueryAlgorithm;
     }
 
+    /**
+     * 获取  LIKE 辅助查询列
+     * @return  LIKE 辅助查询列
+     */
     public String likeQueryColumn() {
         return likeQueryColumn;
     }
 
+    /**
+     * 获取 LIKE 辅助算法 bean 名称
+     * @return LIKE 辅助算法 bean 名称
+     */
     public String likeQueryAlgorithm() {
         return likeQueryAlgorithm;
     }
 
+    /**
+     * 获取密文存储模式
+     * @return 密文存储模式
+     */
     public FieldStorageMode storageMode() {
         return storageMode;
     }
 
+    /**
+     * 获取启用独立表模式时使用的外部密文表
+     * @return 启用独立表模式时使用的外部密文表
+     */
     public String storageTable() {
         return storageTable;
     }
 
+    /**
+     * 获取实际密文存储列，默认与 {@code column} 一致
+     * @return 获取实际密文存储列
+     */
     public String storageColumn() {
         return storageColumn;
     }
 
+    /**
+     * 获取外部表标识列
+     * @return 外部表标识列
+     */
     public String storageIdColumn() {
         return storageIdColumn;
     }

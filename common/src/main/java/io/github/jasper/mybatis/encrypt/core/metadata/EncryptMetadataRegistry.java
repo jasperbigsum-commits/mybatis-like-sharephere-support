@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.metadata;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ResultMap;
 
@@ -40,7 +41,7 @@ public class EncryptMetadataRegistry {
      * @return 命中的表规则，存在时返回
      */
     public Optional<EncryptTableRule> findByTable(String table) {
-        if (table == null || table.isBlank()) {
+        if (StringUtils.isBlank(table)) {
             return Optional.empty();
         }
         return Optional.ofNullable(tableRules.get(NameUtils.normalizeIdentifier(table)));
@@ -106,7 +107,8 @@ public class EncryptMetadataRegistry {
             findByEntity(parameterObject.getClass());
             return;
         }
-        if (parameterObject instanceof Map<?, ?> map) {
+        if (parameterObject instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) parameterObject;
             map.values().stream()
                     .filter(value -> value != null && isCandidateType(value.getClass()))
                     .forEach(value -> findByEntity(value.getClass()));
@@ -169,7 +171,7 @@ public class EncryptMetadataRegistry {
         if (!rule.isStoredInSeparateTable()) {
             return;
         }
-        if (rule.storageTable() == null || rule.storageTable().isBlank()) {
+        if (StringUtils.isBlank(rule.storageTable())) {
             throw new IllegalArgumentException(
                     "Separate-table encrypted field must define storageTable: " + rule.property());
         }
@@ -181,7 +183,7 @@ public class EncryptMetadataRegistry {
 
     private String firstNonBlank(String... candidates) {
         for (String candidate : candidates) {
-            if (candidate != null && !candidate.isBlank()) {
+            if (StringUtils.isNotBlank(candidate)) {
                 return candidate;
             }
         }

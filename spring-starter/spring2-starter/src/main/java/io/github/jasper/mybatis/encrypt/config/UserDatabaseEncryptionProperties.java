@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.config;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,12 @@ public class UserDatabaseEncryptionProperties {
     private String defaultCipherKey = "change-me-before-production";
 
     /**
+     * 做HASH计算的时候所用到的盐，若存在则附加SLAT
+     */
+    private String defaultHexSlat = "";
+
+
+    /**
      * 是否在启动阶段扫描实体注解并预注册加密元数据。
      */
     private boolean scanEntityAnnotations = true;
@@ -43,7 +50,7 @@ public class UserDatabaseEncryptionProperties {
     /**
      * 实体扫描器使用的基础包列表；为空时使用 Spring Boot 自动配置包。
      */
-    private List<String> scanPackages = List.of();
+    private List<String> scanPackages = new ArrayList<>();
 
     /**
      * 改写 SQL 时用于引用标识符的 SQL 方言。
@@ -126,6 +133,20 @@ public class UserDatabaseEncryptionProperties {
     public void setDefaultCipherKey(String defaultCipherKey) {
         this.defaultCipherKey = defaultCipherKey;
     }
+
+    /**
+     * 返回 默认盐
+     * @return 默认盐
+     */
+    public String getDefaultHexSlat() {
+        return defaultHexSlat;
+    }
+
+    /**
+     * 设置 默认盐
+     * @param defaultHexSlat 默认盐
+     */
+    public void setDefaultHexSlat(String defaultHexSlat) {}
 
     /**
      * 返回是否启用实体注解扫描。

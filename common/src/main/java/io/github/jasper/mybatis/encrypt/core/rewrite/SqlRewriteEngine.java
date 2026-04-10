@@ -8,6 +8,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
@@ -76,14 +77,14 @@ public class SqlRewriteEngine {
             Statement statement = CCJSqlParserUtil.parse(boundSql.getSql());
             SqlRewriteContext context = new SqlRewriteContext(
                     mappedStatement.getConfiguration(), boundSql, parameterValueResolver);
-            if (statement instanceof Insert insert) {
-                rewriteInsert(insert, context);
-            } else if (statement instanceof Update update) {
-                rewriteUpdate(update, context);
-            } else if (statement instanceof Delete delete) {
-                rewriteDelete(delete, context);
-            } else if (statement instanceof Select select) {
-                rewriteSelect(select, context);
+            if (statement instanceof Insert) {
+                rewriteInsert((Insert) statement, context);
+            } else if (statement instanceof Update) {
+                rewriteUpdate((Update) statement, context);
+            } else if (statement instanceof Delete) {
+                rewriteDelete((Delete) statement, context);
+            } else if (statement instanceof Select) {
+                rewriteSelect((Select) statement, context);
             }
             if (!context.changed()) {
                 return RewriteResult.unchanged();
@@ -246,21 +247,24 @@ public class SqlRewriteEngine {
      * 落在哪个投影模式，通常能更快定位问题是在投影阶段还是条件阶段。</p>
      */
     private void rewriteSelect(Select select, SqlRewriteContext context, ProjectionMode projectionMode) {
-        if (select instanceof SetOperationList setOperationList) {
+        if (select instanceof SetOperationList) {
+            SetOperationList setOperationList = (SetOperationList) select;
             for (Select child : setOperationList.getSelects()) {
                 rewriteSelect(child, context, projectionMode);
             }
             return;
         }
-        if (select instanceof ParenthesedSelect parenthesedSelect) {
+        if (select instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) select;
             if (parenthesedSelect.getSelect() != null) {
                 rewriteSelect(parenthesedSelect.getSelect(), context, projectionMode);
             }
             return;
         }
-        if (!(select instanceof PlainSelect plainSelect)) {
+        if (!(select instanceof PlainSelect)) {
             throw new UnsupportedEncryptedOperationException("Only plain select and set-operation select are supported for encrypted SQL rewrite.");
         }
+        PlainSelect plainSelect = (PlainSelect) select;
         SqlTableContext tableContext = new SqlTableContext();
         registerFromItem(tableContext, plainSelect.getFromItem(), context);
         if (plainSelect.getJoins() != null) {
@@ -302,25 +306,31 @@ public class SqlRewriteEngine {
         if (expression == null) {
             return null;
         }
-        if (expression instanceof Parenthesis parenthesis) {
+        if (expression instanceof Parenthesis) {
+            Parenthesis parenthesis = (Parenthesis) expression;
             parenthesis.setExpression(rewriteCondition(parenthesis.getExpression(), tableContext, context));
             return parenthesis;
         }
-        if (expression instanceof ParenthesedExpressionList parenthesis) {
+        if (expression instanceof ParenthesedExpressionList) {
+            @SuppressWarnings("rawtypes")
+            ParenthesedExpressionList parenthesis = (ParenthesedExpressionList) expression;
             parenthesis.replaceAll(exp -> rewriteCondition((Expression) exp, tableContext, context));
             return parenthesis;
         }
-        if (expression instanceof ExistsExpression existsExpression) {
-            if (existsExpression.getRightExpression() instanceof Select subquery) {
-                rewriteSelect(subquery, context);
+        if (expression instanceof ExistsExpression) {
+            ExistsExpression existsExpression = (ExistsExpression) expression;
+            if (existsExpression.getRightExpression() instanceof Select) {
+                rewriteSelect((Select) existsExpression.getRightExpression(), context);
             }
             return existsExpression;
         }
-        if (expression instanceof NotExpression notExpression) {
+        if (expression instanceof NotExpression) {
+            NotExpression notExpression = (NotExpression) expression;
             notExpression.setExpression(rewriteCondition(notExpression.getExpression(), tableContext, context));
             return notExpression;
         }
-        if (expression instanceof CaseExpression caseExpression) {
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
             if (caseExpression.getSwitchExpression() != null) {
                 caseExpression.setSwitchExpression(rewriteCondition(caseExpression.getSwitchExpression(), tableContext, context));
             }
@@ -335,36 +345,39 @@ public class SqlRewriteEngine {
             }
             return caseExpression;
         }
-        if (expression instanceof Select select) {
-            rewriteSelect(select, context);
+        if (expression instanceof Select) {
+            rewriteSelect((Select) expression, context);
             return expression;
         }
-        if (expression instanceof AndExpression andExpression) {
+        if (expression instanceof AndExpression) {
+            AndExpression andExpression = (AndExpression) expression;
             andExpression.setLeftExpression(rewriteCondition(andExpression.getLeftExpression(), tableContext, context));
             andExpression.setRightExpression(rewriteCondition(andExpression.getRightExpression(), tableContext, context));
             return andExpression;
         }
-        if (expression instanceof OrExpression orExpression) {
+        if (expression instanceof OrExpression) {
+            OrExpression orExpression = (OrExpression) expression;
             orExpression.setLeftExpression(rewriteCondition(orExpression.getLeftExpression(), tableContext, context));
             orExpression.setRightExpression(rewriteCondition(orExpression.getRightExpression(), tableContext, context));
             return orExpression;
         }
-        if (expression instanceof EqualsTo equalsTo) {
-            return rewriteEquality(equalsTo, tableContext, context);
+        if (expression instanceof EqualsTo) {
+            return rewriteEquality((EqualsTo) expression, tableContext, context);
         }
-        if (expression instanceof NotEqualsTo notEqualsTo) {
-            return rewriteEquality(notEqualsTo, tableContext, context);
+        if (expression instanceof NotEqualsTo) {
+            return rewriteEquality((NotEqualsTo) expression, tableContext, context);
         }
-        if (expression instanceof LikeExpression likeExpression) {
-            return rewriteLikeCondition(likeExpression, tableContext, context);
+        if (expression instanceof LikeExpression) {
+            return rewriteLikeCondition((LikeExpression) expression, tableContext, context);
         }
-        if (expression instanceof InExpression inExpression) {
-            return rewriteInCondition(inExpression, tableContext, context);
+        if (expression instanceof InExpression) {
+            return rewriteInCondition((InExpression) expression, tableContext, context);
         }
-        if (expression instanceof IsNullExpression isNullExpression) {
-            return rewriteIsNullCondition(isNullExpression, tableContext, context);
+        if (expression instanceof IsNullExpression) {
+            return rewriteIsNullCondition((IsNullExpression) expression, tableContext, context);
         }
-        if (expression instanceof Between between) {
+        if (expression instanceof Between) {
+            Between between = (Between) expression;
             validateNonRangeEncryptedColumn(between.getLeftExpression(), tableContext,
                     "BETWEEN is not supported on encrypted fields.");
             consumeExpression(between.getBetweenExpressionStart(), context);
@@ -379,12 +392,14 @@ public class SqlRewriteEngine {
             consumeExpression(binaryExpression.getRightExpression(), context);
             return expression;
         }
-        if (expression instanceof BinaryExpression binaryExpression) {
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
             binaryExpression.setLeftExpression(rewriteCondition(binaryExpression.getLeftExpression(), tableContext, context));
             binaryExpression.setRightExpression(rewriteCondition(binaryExpression.getRightExpression(), tableContext, context));
             return binaryExpression;
         }
-        if (expression instanceof Function function && function.getParameters() != null) {
+        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
+            Function function = (Function) expression;
             for (Expression item : function.getParameters()) {
                 rewriteCondition(item, tableContext, context);
             }
@@ -473,8 +488,8 @@ public class SqlRewriteEngine {
     private Expression rewriteInCondition(InExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
-            if (expression.getRightExpression() instanceof Select subquery) {
-                rewriteSelect(subquery, context);
+            if (expression.getRightExpression() instanceof Select) {
+                rewriteSelect((Select) expression.getRightExpression(), context);
             }
             consumeItemsList(expression.getRightExpression(), context);
             return expression;
@@ -487,14 +502,15 @@ public class SqlRewriteEngine {
         // IN 查询与等值查询使用同一套目标列选择策略。
         String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
         expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
-        if (expression.getRightExpression() instanceof Select subquery) {
-            rewriteSelect(subquery, context, ProjectionMode.COMPARISON);
+        if (expression.getRightExpression() instanceof Select) {
+            rewriteSelect((Select) expression.getRightExpression(), context, ProjectionMode.COMPARISON);
             context.markChanged();
             return expression;
         }
-        if (!(expression.getRightExpression() instanceof ExpressionList<?> expressionList)) {
+        if (!(expression.getRightExpression() instanceof ExpressionList<?>)) {
             throw new UnsupportedEncryptedOperationException("Unsupported IN operand for encrypted fields.");
         }
+        ExpressionList<?> expressionList = (ExpressionList<?>) expression.getRightExpression();
         for (Expression item : expressionList) {
             rewriteOperand(item, context,
                     rule.hasAssistedQueryColumn() ? valueTransformer.transformAssisted(rule, readOperandValue(item, context))
@@ -532,7 +548,8 @@ public class SqlRewriteEngine {
             context.replaceLastConsumed(transformedValue, maskingMode);
             return;
         }
-        if (expression instanceof StringValue stringValue) {
+        if (expression instanceof StringValue) {
+            StringValue stringValue = (StringValue) expression;
             stringValue.setValue(transformedValue);
             return;
         }
@@ -554,7 +571,7 @@ public class SqlRewriteEngine {
                                                      String targetColumn,
                                                      boolean assisted) {
         EncryptColumnRule rule = resolution.rule();
-        if (targetColumn == null || targetColumn.isBlank()) {
+        if (StringUtils.isBlank(targetColumn)) {
             throw new UnsupportedEncryptedOperationException(
                     "Separate-table encrypted field requires query column: " + rule.property());
         }
@@ -592,7 +609,8 @@ public class SqlRewriteEngine {
             context.replaceLastConsumed(cipherValue, MaskingMode.MASKED);
             return new WriteValue(expression, plainValue, true);
         }
-        if (expression instanceof StringValue stringValue) {
+        if (expression instanceof StringValue) {
+            StringValue stringValue = (StringValue) expression;
             stringValue.setValue(cipherValue);
             return new WriteValue(stringValue, plainValue, false);
         }
@@ -642,11 +660,11 @@ public class SqlRewriteEngine {
             int parameterIndex = context.consumeOriginal();
             return context.originalValue(parameterIndex);
         }
-        if (expression instanceof StringValue stringValue) {
-            return stringValue.getValue();
+        if (expression instanceof StringValue) {
+            return ((StringValue) expression).getValue();
         }
-        if (expression instanceof LongValue longValue) {
-            return longValue.getStringValue();
+        if (expression instanceof LongValue) {
+            return ((LongValue) expression).getStringValue();
         }
         return null;
     }
@@ -659,22 +677,26 @@ public class SqlRewriteEngine {
             context.consumeOriginal();
             return;
         }
-        if (expression instanceof Parenthesis parenthesis) {
+        if (expression instanceof Parenthesis) {
+            Parenthesis parenthesis = (Parenthesis) expression;
             consumeExpression(parenthesis.getExpression(), context);
             return;
         }
-        if (expression instanceof ParenthesedExpressionList parenthesis) {
+        if (expression instanceof ParenthesedExpressionList) {
+            ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
             for (Object exp : parenthesis) {
                 consumeExpression((Expression) exp, context);
             }
             return;
         }
-        if (expression instanceof BinaryExpression binaryExpression) {
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
             consumeExpression(binaryExpression.getLeftExpression(), context);
             consumeExpression(binaryExpression.getRightExpression(), context);
             return;
         }
-        if (expression instanceof Function function && function.getParameters() != null) {
+        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
+            Function function = (Function) expression;
             for (Expression item : function.getParameters()) {
                 consumeExpression(item, context);
             }
@@ -682,7 +704,8 @@ public class SqlRewriteEngine {
     }
 
     private void consumeItemsList(Object itemsList, SqlRewriteContext context) {
-        if (itemsList instanceof ExpressionList<?> expressionList) {
+        if (itemsList instanceof ExpressionList<?>) {
+            ExpressionList<?> expressionList = (ExpressionList<?>) itemsList;
             for (Expression item : expressionList) {
                 consumeExpression(item, context);
             }
@@ -730,7 +753,8 @@ public class SqlRewriteEngine {
         List<SelectItem<?>> rewritten = new ArrayList<>();
         for (SelectItem<?> item : plainSelect.getSelectItems()) {
             Expression expression = item.getExpression();
-            if (expression instanceof AllTableColumns allTableColumns) {
+            if (expression instanceof AllTableColumns) {
+                AllTableColumns allTableColumns = (AllTableColumns) expression;
                 rewritten.add(item);
                 appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
                         allTableColumns.getTable(), projectionMode);
@@ -805,7 +829,7 @@ public class SqlRewriteEngine {
                 continue;
             }
             Column sourceColumn = new Column(rule.column());
-            if (tableReference != null && tableReference.getName() != null && !tableReference.getName().isBlank()) {
+            if (tableReference != null && StringUtils.isNotBlank(tableReference.getName())) {
                 sourceColumn.setTable(new Table(tableReference.getName()));
             }
             SelectItem<?> storageItem = buildSelectStorageItem(new SelectItem<>(sourceColumn), new ColumnResolution(sourceColumn, rule, true));
@@ -851,7 +875,7 @@ public class SqlRewriteEngine {
     }
 
     private String selectAliasName(SelectItem<?> item, ColumnResolution resolution) {
-        return item.getAlias() != null && item.getAlias().getName() != null && !item.getAlias().getName().isBlank()
+        return item.getAlias() != null && item.getAlias().getName() != null && StringUtils.isNotBlank(item.getAlias().getName())
                 ? item.getAlias().getName()
                 : resolution.column().getColumnName();
     }
@@ -949,22 +973,28 @@ public class SqlRewriteEngine {
     }
 
     private ColumnResolution resolveEncryptedColumn(Expression expression, SqlTableContext tableContext) {
-        if (!(expression instanceof Column column)) {
+        if (!(expression instanceof Column)) {
             return null;
         }
+        Column column = (Column) expression;
         EncryptColumnRule rule = tableContext.resolve(column).orElse(null);
         return rule == null ? null : new ColumnResolution(column, rule, true);
     }
 
     private void registerFromItem(SqlTableContext tableContext, FromItem fromItem, SqlRewriteContext context) {
-        if (fromItem instanceof Table table) {
+        if (fromItem instanceof Table) {
+            Table table = (Table) fromItem;
             registerTable(tableContext, table);
             return;
         }
-        if (fromItem instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
+        if (fromItem instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            if (parenthesedSelect.getSelect() == null) {
+                return;
+            }
             rewriteSelect(parenthesedSelect.getSelect(), context, ProjectionMode.DERIVED);
             if (parenthesedSelect.getAlias() != null && parenthesedSelect.getAlias().getName() != null
-                    && !parenthesedSelect.getAlias().getName().isBlank()) {
+                    && StringUtils.isNotBlank(parenthesedSelect.getAlias().getName())) {
                 EncryptTableRule derivedRule = derivedTableRuleBuilder.build(parenthesedSelect.getAlias().getName(),
                         parenthesedSelect.getSelect());
                 if (derivedRule != null) {
@@ -1010,8 +1040,8 @@ public class SqlRewriteEngine {
         }
         for (SelectItem<?> item : selectItems) {
             Expression expression = item.getExpression();
-            if (expression instanceof AnalyticExpression analyticExpression
-                    && containsEncryptedReference(analyticExpression, tableContext)) {
+            if (expression instanceof AnalyticExpression
+                    && containsEncryptedReference((AnalyticExpression) expression, tableContext)) {
                 throw new UnsupportedEncryptedOperationException(
                         "Window function is not supported on encrypted fields.");
             }
@@ -1035,7 +1065,7 @@ public class SqlRewriteEngine {
             return;
         }
         for (Object item : groupByElement.getGroupByExpressionList()) {
-            if (item instanceof Expression expression && containsEncryptedReference(expression, tableContext)) {
+            if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
                 throw new UnsupportedEncryptedOperationException("GROUP BY is not supported on encrypted fields.");
             }
         }
@@ -1048,22 +1078,26 @@ public class SqlRewriteEngine {
         if (resolveEncryptedColumn(expression, tableContext) != null) {
             return true;
         }
-        if (expression instanceof Parenthesis parenthesis) {
+        if (expression instanceof Parenthesis) {
+            Parenthesis parenthesis = (Parenthesis) expression;
             return containsEncryptedReference(parenthesis.getExpression(), tableContext);
         }
-        if (expression instanceof ParenthesedExpressionList parenthesis) {
+        if (expression instanceof ParenthesedExpressionList) {
+            ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
             for (Object item : parenthesis) {
-                if (item instanceof Expression child && containsEncryptedReference(child, tableContext)) {
+                if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
                     return true;
                 }
             }
             return false;
         }
-        if (expression instanceof BinaryExpression binaryExpression) {
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
             return containsEncryptedReference(binaryExpression.getLeftExpression(), tableContext)
                     || containsEncryptedReference(binaryExpression.getRightExpression(), tableContext);
         }
-        if (expression instanceof Function function && function.getParameters() != null) {
+        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
+            Function function = (Function) expression;
             for (Expression item : function.getParameters()) {
                 if (containsEncryptedReference(item, tableContext)) {
                     return true;
@@ -1071,7 +1105,8 @@ public class SqlRewriteEngine {
             }
             return false;
         }
-        if (expression instanceof CaseExpression caseExpression) {
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
             if (containsEncryptedReference(caseExpression.getSwitchExpression(), tableContext)) {
                 return true;
             }
@@ -1085,10 +1120,12 @@ public class SqlRewriteEngine {
             }
             return containsEncryptedReference(caseExpression.getElseExpression(), tableContext);
         }
-        if (expression instanceof NotExpression notExpression) {
+        if (expression instanceof NotExpression) {
+            NotExpression notExpression = (NotExpression) expression;
             return containsEncryptedReference(notExpression.getExpression(), tableContext);
         }
-        if (expression instanceof AnalyticExpression analyticExpression) {
+        if (expression instanceof AnalyticExpression) {
+            AnalyticExpression analyticExpression = (AnalyticExpression) expression;
             if (containsEncryptedReference(analyticExpression.getExpression(), tableContext)
                     || containsEncryptedReference(analyticExpression.getFilterExpression(), tableContext)
                     || containsEncryptedReference(analyticExpression.getOffset(), tableContext)
@@ -1097,7 +1134,7 @@ public class SqlRewriteEngine {
             }
             if (analyticExpression.getPartitionExpressionList() != null) {
                 for (Object item : analyticExpression.getPartitionExpressionList()) {
-                    if (item instanceof Expression child && containsEncryptedReference(child, tableContext)) {
+                    if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
                         return true;
                     }
                 }
@@ -1123,7 +1160,7 @@ public class SqlRewriteEngine {
         }
         if (windowDefinition.getPartitionExpressionList() != null) {
             for (Object item : windowDefinition.getPartitionExpressionList()) {
-                if (item instanceof Expression expression && containsEncryptedReference(expression, tableContext)) {
+                if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
                     return true;
                 }
             }
@@ -1142,7 +1179,8 @@ public class SqlRewriteEngine {
         if (expression == null) {
             return false;
         }
-        if (expression instanceof Function function) {
+        if (expression instanceof Function) {
+            Function function = (Function) expression;
             if (isAggregateFunction(function)) {
                 if (function.isAllColumns()) {
                     return false;
@@ -1165,25 +1203,30 @@ public class SqlRewriteEngine {
             }
             return false;
         }
-        if (expression instanceof BinaryExpression binaryExpression) {
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
             return containsUnsupportedAggregate(binaryExpression.getLeftExpression(), tableContext)
                     || containsUnsupportedAggregate(binaryExpression.getRightExpression(), tableContext);
         }
-        if (expression instanceof Parenthesis parenthesis) {
+        if (expression instanceof Parenthesis) {
+            Parenthesis parenthesis = (Parenthesis) expression;
             return containsUnsupportedAggregate(parenthesis.getExpression(), tableContext);
         }
-        if (expression instanceof ParenthesedExpressionList parenthesis) {
+        if (expression instanceof ParenthesedExpressionList) {
+            ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
             for (Object item : parenthesis) {
-                if (item instanceof Expression child && containsUnsupportedAggregate(child, tableContext)) {
+                if (item instanceof Expression && containsUnsupportedAggregate((Expression) item, tableContext)) {
                     return true;
                 }
             }
             return false;
         }
-        if (expression instanceof NotExpression notExpression) {
+        if (expression instanceof NotExpression) {
+            NotExpression notExpression = (NotExpression) expression;
             return containsUnsupportedAggregate(notExpression.getExpression(), tableContext);
         }
-        if (expression instanceof CaseExpression caseExpression) {
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
             if (containsUnsupportedAggregate(caseExpression.getSwitchExpression(), tableContext)
                     || containsUnsupportedAggregate(caseExpression.getElseExpression(), tableContext)) {
                 return true;
@@ -1198,14 +1241,17 @@ public class SqlRewriteEngine {
             }
             return false;
         }
-        if (expression instanceof AnalyticExpression analyticExpression) {
+        if (expression instanceof AnalyticExpression) {
+            AnalyticExpression analyticExpression = (AnalyticExpression) expression;
             return containsUnsupportedAggregate(analyticExpression.getExpression(), tableContext)
                     || containsUnsupportedAggregate(analyticExpression.getFilterExpression(), tableContext)
                     || containsUnsupportedAggregate(analyticExpression.getOffset(), tableContext)
                     || containsUnsupportedAggregate(analyticExpression.getDefaultValue(), tableContext);
         }
-        if (expression instanceof Select select) {
-            if (select instanceof PlainSelect plainSelect) {
+        if (expression instanceof Select) {
+            Select select = (Select) expression;
+            if (select instanceof PlainSelect) {
+                PlainSelect plainSelect = (PlainSelect) select;
                 return containsUnsupportedAggregate(plainSelect.getHaving(), tableContext)
                         || containsUnsupportedAggregate(plainSelect.getQualify(), tableContext);
             }
@@ -1219,10 +1265,16 @@ public class SqlRewriteEngine {
         if (name == null) {
             return false;
         }
-        return switch (name.toUpperCase(Locale.ROOT)) {
-            case "COUNT", "SUM", "AVG", "MIN", "MAX", "LISTAGG", "STRING_AGG", "GROUP_CONCAT", "ARRAY_AGG" -> true;
-            default -> false;
-        };
+        String upperName = name.toUpperCase(Locale.ROOT);
+        return "COUNT".equals(upperName)
+                || "SUM".equals(upperName)
+                || "AVG".equals(upperName)
+                || "MIN".equals(upperName)
+                || "MAX".equals(upperName)
+                || "LISTAGG".equals(upperName)
+                || "STRING_AGG".equals(upperName)
+                || "GROUP_CONCAT".equals(upperName)
+                || "ARRAY_AGG".equals(upperName);
     }
 
     private void registerTable(SqlTableContext tableContext, Table table) {
@@ -1242,10 +1294,54 @@ public class SqlRewriteEngine {
         return column;
     }
 
-    private record WriteValue(Expression expression, Object plainValue, boolean parameterized) {
+    private static final class WriteValue {
+
+        private final Expression expression;
+        private final Object plainValue;
+        private final boolean parameterized;
+
+        private WriteValue(Expression expression, Object plainValue, boolean parameterized) {
+            this.expression = expression;
+            this.plainValue = plainValue;
+            this.parameterized = parameterized;
+        }
+
+        private Expression expression() {
+            return expression;
+        }
+
+        private Object plainValue() {
+            return plainValue;
+        }
+
+        private boolean parameterized() {
+            return parameterized;
+        }
     }
 
-    private record ColumnResolution(Column column, EncryptColumnRule rule, boolean leftColumn) {
+    private static final class ColumnResolution {
+
+        private final Column column;
+        private final EncryptColumnRule rule;
+        private final boolean leftColumn;
+
+        private ColumnResolution(Column column, EncryptColumnRule rule, boolean leftColumn) {
+            this.column = column;
+            this.rule = rule;
+            this.leftColumn = leftColumn;
+        }
+
+        private Column column() {
+            return column;
+        }
+
+        private EncryptColumnRule rule() {
+            return rule;
+        }
+
+        private boolean leftColumn() {
+            return leftColumn;
+        }
     }
 
     private enum ProjectionMode {

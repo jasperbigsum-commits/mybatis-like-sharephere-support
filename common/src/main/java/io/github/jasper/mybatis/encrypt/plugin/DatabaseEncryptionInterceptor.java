@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -97,9 +98,10 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
      */
     private Object interceptExecutor(Invocation invocation) throws Throwable {
         Object[] args = invocation.getArgs();
-        if (!(args[0] instanceof MappedStatement mappedStatement)) {
+        if (!(args[0] instanceof MappedStatement)) {
             return invocation.proceed();
         }
+        MappedStatement mappedStatement = (MappedStatement) args[0];
         boolean queryScopeOpened = false;
         if ("query".equals(invocation.getMethod().getName())) {
             resultDecryptor.beginQueryScope();
@@ -141,8 +143,8 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
      * @return 本次执行应使用的 BoundSql
      */
     private BoundSql resolveBoundSql(MappedStatement mappedStatement, Object parameterObject, Object[] args) {
-        if (args.length == 6 && args[5] instanceof BoundSql provided) {
-            return provided;
+        if (args.length == 6 && args[5] instanceof BoundSql) {
+            return (BoundSql) args[5];
         }
         return mappedStatement.getBoundSql(parameterObject);
     }
@@ -160,7 +162,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     private MappedStatement rewriteMappedStatement(MappedStatement mappedStatement, BoundSql boundSql) {
         prepareSeparateTableReferences(mappedStatement, boundSql);
         String originalSql = boundSql.getSql();
-        List<ParameterMapping> originalParameterMappings = List.copyOf(boundSql.getParameterMappings());
+        List<ParameterMapping> originalParameterMappings = new ArrayList<ParameterMapping>(boundSql.getParameterMappings());
         RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
         if (!rewriteResult.changed()
                 && !boundSql.hasAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER)) {
@@ -190,16 +192,14 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (!properties.isLogMaskedSql() || !log.isDebugEnabled()) {
             return;
         }
-        log.debug("""
-                Encrypted SQL rewrite detail:
-                statementId: {}
-                commandType: {}
-                originalSql: {}
-                rewrittenMaskedSql: {}
-                originalParameterMappings: {}
-                rewrittenParameterMappings: {}
-                maskedParameters: {}
-                """,
+        log.debug("Encrypted SQL rewrite detail:\n"
+                        + "statementId: {}\n"
+                        + "commandType: {}\n"
+                        + "originalSql: {}\n"
+                        + "rewrittenMaskedSql: {}\n"
+                        + "originalParameterMappings: {}\n"
+                        + "rewrittenParameterMappings: {}\n"
+                        + "maskedParameters: {}",
                 mappedStatement.getId(),
                 mappedStatement.getSqlCommandType(),
                 singleLine(originalSql),
@@ -276,10 +276,12 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (candidate == null) {
             return false;
         }
-        if (candidate instanceof Map<?, ?> map) {
+        if (candidate instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) candidate;
             return map.values().stream().anyMatch(value -> hasSeparateTableRule(value, boundSql));
         }
-        if (candidate instanceof Iterable<?> iterable) {
+        if (candidate instanceof Iterable<?>) {
+            Iterable<?> iterable = (Iterable<?>) candidate;
             for (Object value : iterable) {
                 if (hasSeparateTableRule(value, boundSql)) {
                     return true;

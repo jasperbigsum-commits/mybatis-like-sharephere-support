@@ -1,5 +1,12 @@
 package io.github.jasper.mybatis.encrypt.algorithm.support;
 
+import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -7,11 +14,6 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
-import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
-import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
 /**
  * 基于 SM4-GCM 的国密主加密算法实现。
@@ -81,7 +83,7 @@ public class Sm4CipherAlgorithm implements CipherAlgorithm {
     }
 
     private byte[] deriveKey(String keyMaterial) {
-        if (keyMaterial == null || keyMaterial.isBlank()) {
+        if (StringUtils.isBlank(keyMaterial)) {
             throw new EncryptionConfigurationException("mybatis.encrypt.default-cipher-key must not be blank.");
         }
         try {

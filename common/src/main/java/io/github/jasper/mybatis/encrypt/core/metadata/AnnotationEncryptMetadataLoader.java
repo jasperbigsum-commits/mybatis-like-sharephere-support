@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 /**
  * 从实体注解中加载加密元数据。
@@ -55,7 +56,7 @@ public class AnnotationEncryptMetadataLoader {
 
     private String resolveTableName(Class<?> type) {
         EncryptTable encryptTable = type.getAnnotation(EncryptTable.class);
-        if (encryptTable != null && !encryptTable.value().isBlank()) {
+        if (encryptTable != null && StringUtils.isNotBlank(encryptTable.value())) {
             return encryptTable.value();
         }
         String tableName = firstNonBlank(
@@ -86,7 +87,10 @@ public class AnnotationEncryptMetadataLoader {
             }
             try {
                 Object value = annotation.annotationType().getMethod(attributeName).invoke(annotation);
-                return value instanceof String string && !string.isBlank() ? string : null;
+                if (value instanceof String && StringUtils.isNotBlank((String) value)) {
+                    return (String) value;
+                }
+                return null;
             } catch (ReflectiveOperationException ignore) {
                 return null;
             }
@@ -96,7 +100,7 @@ public class AnnotationEncryptMetadataLoader {
 
     private String firstNonBlank(String... candidates) {
         for (String candidate : candidates) {
-            if (candidate != null && !candidate.isBlank()) {
+            if (StringUtils.isNotBlank(candidate)) {
                 return candidate;
             }
         }
@@ -104,10 +108,10 @@ public class AnnotationEncryptMetadataLoader {
     }
 
     private String blankToDefault(String value, String defaultValue) {
-        return value == null || value.isBlank() ? defaultValue : value;
+        return StringUtils.isBlank(value) ? defaultValue : value;
     }
 
     private String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value;
+        return StringUtils.isBlank(value) ? null : value;
     }
 }

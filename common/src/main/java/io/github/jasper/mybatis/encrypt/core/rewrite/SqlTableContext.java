@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -13,6 +14,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 /**
  * 当前查询块可见表规则的解析上下文。
@@ -26,19 +28,19 @@ final class SqlTableContext {
 
     void register(String tableName, String alias, EncryptTableRule rule) {
         ruleByAlias.put(NameUtils.normalizeIdentifier(tableName), rule);
-        if (alias != null && !alias.isBlank()) {
+        if (StringUtils.isNotBlank(alias)) {
             ruleByAlias.put(NameUtils.normalizeIdentifier(alias), rule);
         }
     }
 
     void registerDerived(String alias, EncryptTableRule rule) {
-        if (alias != null && !alias.isBlank()) {
+        if (StringUtils.isNotBlank(alias)) {
             ruleByAlias.put(NameUtils.normalizeIdentifier(alias), rule);
         }
     }
 
     Optional<EncryptColumnRule> resolve(Column column) {
-        if (column.getTable() != null && column.getTable().getName() != null && !column.getTable().getName().isBlank()) {
+        if (column.getTable() != null && StringUtils.isNotBlank(column.getTable().getName())) {
             EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
             if (tableRule != null) {
                 return tableRule.findByColumn(column.getColumnName());
@@ -60,19 +62,19 @@ final class SqlTableContext {
     }
 
     List<EncryptColumnRule> rulesForSelectExpansion(Table table) {
-        if (table != null && table.getName() != null && !table.getName().isBlank()) {
+        if (table != null && StringUtils.isNotBlank(table.getName())) {
             EncryptTableRule rule = ruleByAlias.get(NameUtils.normalizeIdentifier(table.getName()));
-            return rule == null ? List.of() : new ArrayList<>(rule.getColumnRules());
+            return rule == null ? Collections.<EncryptColumnRule>emptyList() : new ArrayList<EncryptColumnRule>(rule.getColumnRules());
         }
         Collection<EncryptTableRule> uniqueRules = uniqueRules();
         if (uniqueRules.size() != 1) {
-            return List.of();
+            return Collections.emptyList();
         }
         return new ArrayList<>(uniqueRules.iterator().next().getColumnRules());
     }
 
     Optional<EncryptColumnRule> resolveProjected(Column column) {
-        if (column.getTable() != null && column.getTable().getName() != null && !column.getTable().getName().isBlank()) {
+        if (column.getTable() != null && StringUtils.isNotBlank(column.getTable().getName())) {
             EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
             if (tableRule != null) {
                 return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName()));

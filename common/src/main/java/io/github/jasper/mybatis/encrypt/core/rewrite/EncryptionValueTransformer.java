@@ -38,14 +38,14 @@ final class EncryptionValueTransformer {
             return null;
         }
         String value = String.valueOf(plainValue);
-        if (algorithm instanceof CipherAlgorithm cipherAlgorithm) {
-            return cipherAlgorithm.encrypt(value);
+        if (algorithm instanceof CipherAlgorithm) {
+            return ((CipherAlgorithm) algorithm).encrypt(value);
         }
-        if (algorithm instanceof AssistedQueryAlgorithm assistedQueryAlgorithm) {
-            return assistedQueryAlgorithm.transform(value);
+        if (algorithm instanceof AssistedQueryAlgorithm) {
+            return ((AssistedQueryAlgorithm) algorithm).transform(value);
         }
-        if (algorithm instanceof LikeQueryAlgorithm likeQueryAlgorithm) {
-            return likeQueryAlgorithm.transform(value);
+        if (algorithm instanceof LikeQueryAlgorithm) {
+            return ((LikeQueryAlgorithm) algorithm).transform(value);
         }
         throw new EncryptionConfigurationException("Unsupported algorithm for field: " + rule.property());
     }

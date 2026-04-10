@@ -5,7 +5,7 @@
 
   <groupId>io.github.jasperbigsum-commits</groupId>
   <artifactId>mybatis-like-sharephere-support</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>mybatis-like-sharephere-support</name>
   <description>MyBatis database field encryption plugin inspired by ShardingSphere.</description>
@@ -14,14 +14,12 @@
     <module>common</module>
     <module>bom</module>
     <module>spring-starter</module>
-    <module>spring-starter/spring3-starter</module>
     <module>spring-starter/spring2-starter</module>
   </modules>
 
   <properties>
-    <java.version>17</java.version>
-    <maven.compiler.release>${java.version}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>8</maven.compiler.release>
     <mybatis.version>3.5.19</mybatis.version>
     <slf4j.version>2.0.17</slf4j.version>
   </properties>
@@ -38,6 +36,7 @@
         <artifactId>mybatis</artifactId>
         <version>${mybatis.version}</version>
         <scope>provided</scope>
+        <optional>true</optional>
       </dependency>
       <dependency>
         <groupId>org.slf4j</groupId>
@@ -143,5 +142,17 @@
       <email>jasper.bigsum@gmail.com</email>
     </developer>
   </developers>
+
+  <profiles>
+    <profile>
+      <id>java17-plus</id>
+      <activation>
+        <jdk>[17,)</jdk>
+      </activation>
+      <modules>
+        <module>spring-starter/spring3-starter</module>
+      </modules>
+    </profile>
+  </profiles>
 
 </project>

@@ -36,6 +36,11 @@ public class UserDatabaseEncryptionProperties {
     private String defaultCipherKey = "change-me-before-production";
 
     /**
+     * 做HASH计算的时候所用到的盐，若存在则附加SLAT
+     */
+    private String defaultHexSlat = "";
+
+    /**
      * 是否在启动阶段扫描实体注解并预注册加密元数据。
      */
     private boolean scanEntityAnnotations = true;
@@ -126,6 +131,20 @@ public class UserDatabaseEncryptionProperties {
     public void setDefaultCipherKey(String defaultCipherKey) {
         this.defaultCipherKey = defaultCipherKey;
     }
+
+    /**
+     * 返回 默认盐
+     * @return 默认盐
+     */
+    public String getDefaultHexSlat() {
+        return defaultHexSlat;
+    }
+
+    /**
+     * 设置 默认盐
+     * @param defaultHexSlat 默认盐
+     */
+    public void setDefaultHexSlat(String defaultHexSlat) {}
 
     /**
      * 返回是否启用实体注解扫描。

@@ -5,6 +5,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
 
@@ -98,11 +99,13 @@ public class ResultDecryptor {
         if (candidate == null || isSimpleValueType(candidate.getClass())) {
             return;
         }
-        if (candidate instanceof Map<?, ?> map) {
+        if (candidate instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) candidate;
             map.values().forEach(value -> decryptGraph(value, visited));
             return;
         }
-        if (candidate instanceof Collection<?> collection) {
+        if (candidate instanceof Collection<?>) {
+            Collection<?> collection = (Collection<?>) candidate;
             collection.forEach(value -> decryptGraph(value, visited));
             return;
         }
@@ -148,10 +151,11 @@ public class ResultDecryptor {
                 continue;
             }
             Object value = metaObject.getValue(rule.property());
-            if (!(value instanceof String cipherText) || cipherText.isBlank()) {
+            if (!(value instanceof String) || StringUtils.isBlank((String) value)) {
                 continue;
             }
-            metaObject.setValue(rule.property(), algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt(cipherText));
+            metaObject.setValue(rule.property(),
+                    algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt((String) value));
         }
     }
 

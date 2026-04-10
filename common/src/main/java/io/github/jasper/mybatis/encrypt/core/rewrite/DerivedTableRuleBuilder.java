@@ -10,6 +10,7 @@ import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.*;
 
 import java.util.List;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 /**
  * 派生表规则构建器。
@@ -30,15 +31,20 @@ final class DerivedTableRuleBuilder {
     }
 
     EncryptTableRule build(String alias, Select select) {
-        if (select instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
-            return build(alias, parenthesedSelect.getSelect());
+        if (select instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) select;
+            if (parenthesedSelect.getSelect() != null) {
+                return build(alias, parenthesedSelect.getSelect());
+            }
         }
-        if (select instanceof SetOperationList setOperationList) {
+        if (select instanceof SetOperationList) {
+            SetOperationList setOperationList = (SetOperationList) select;
             return setOperationList.getSelects().isEmpty() ? null : build(alias, setOperationList.getSelect(0));
         }
-        if (!(select instanceof PlainSelect plainSelect)) {
+        if (!(select instanceof PlainSelect)) {
             return null;
         }
+        PlainSelect plainSelect = (PlainSelect) select;
         SqlTableContext childContext = new SqlTableContext();
         registerLookupFromItem(childContext, plainSelect.getFromItem());
         if (plainSelect.getJoins() != null) {
@@ -53,7 +59,8 @@ final class DerivedTableRuleBuilder {
         }
         for (SelectItem<?> item : selectItems) {
             Expression expression = item.getExpression();
-            if (expression instanceof AllTableColumns allTableColumns) {
+            if (expression instanceof AllTableColumns) {
+                AllTableColumns allTableColumns = (AllTableColumns) expression;
                 for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(allTableColumns.getTable())) {
                     if (!rule.isStoredInSeparateTable()) {
                         derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
@@ -69,14 +76,16 @@ final class DerivedTableRuleBuilder {
                 }
                 continue;
             }
-            if (!(expression instanceof Column column)) {
+            if (!(expression instanceof Column)) {
                 continue;
             }
+            Column column = (Column) expression;
             EncryptColumnRule sourceRule = childContext.resolveProjected(column).orElse(null);
             if (sourceRule == null || sourceRule.isStoredInSeparateTable()) {
                 continue;
             }
-            String aliasName = item.getAlias() != null && item.getAlias().getName() != null && !item.getAlias().getName().isBlank()
+            String aliasName = item.getAlias() != null && item.getAlias().getName() != null
+                    && StringUtils.isNotBlank(item.getAlias().getName())
                     ? item.getAlias().getName()
                     : column.getColumnName();
             if (aliasName.startsWith(HIDDEN_ASSISTED_PREFIX) || aliasName.startsWith(HIDDEN_LIKE_PREFIX)) {
@@ -88,15 +97,20 @@ final class DerivedTableRuleBuilder {
     }
 
     void registerLookupFromItem(SqlTableContext tableContext, FromItem fromItem) {
-        if (fromItem instanceof Table table) {
+        if (fromItem instanceof Table) {
+            Table table = (Table) fromItem;
             registerTable(tableContext, table);
             return;
         }
-        if (fromItem instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getAlias() != null
-                && parenthesedSelect.getAlias().getName() != null && parenthesedSelect.getSelect() != null) {
-            EncryptTableRule derivedRule = build(parenthesedSelect.getAlias().getName(), parenthesedSelect.getSelect());
-            if (derivedRule != null) {
-                tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
+        if (fromItem instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            if (parenthesedSelect.getAlias() != null
+                    && parenthesedSelect.getAlias().getName() != null
+                    && parenthesedSelect.getSelect() != null) {
+                EncryptTableRule derivedRule = build(parenthesedSelect.getAlias().getName(), parenthesedSelect.getSelect());
+                if (derivedRule != null) {
+                    tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
+                }
             }
         }
     }

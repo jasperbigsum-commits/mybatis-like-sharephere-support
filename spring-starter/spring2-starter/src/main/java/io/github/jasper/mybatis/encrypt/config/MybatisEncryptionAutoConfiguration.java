@@ -86,8 +86,8 @@ public class MybatisEncryptionAutoConfiguration {
      */
     @Bean(name = "sm3")
     @ConditionalOnMissingBean(name = "sm3")
-    public AssistedQueryAlgorithm sm3AssistedQueryAlgorithm() {
-        return new Sm3AssistedQueryAlgorithm();
+    public AssistedQueryAlgorithm sm3AssistedQueryAlgorithm(DatabaseEncryptionProperties properties) {
+        return new Sm3AssistedQueryAlgorithm(properties.getDefaultHexSlat());
     }
 
     /**

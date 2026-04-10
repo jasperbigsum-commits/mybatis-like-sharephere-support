@@ -35,7 +35,7 @@ public final class NameUtils {
      * @return 下划线风格名称
      */
     public static String camelToSnake(String value) {
-        if (value == null || value.isBlank()) {
+        if (StringUtils.isBlank(value)) {
             return value;
         }
         StringBuilder builder = new StringBuilder(value.length() + 8);

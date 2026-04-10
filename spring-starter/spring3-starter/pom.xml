@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.jasperbigsum-commits</groupId>
         <artifactId>mybatis-like-sharephere-support</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -16,8 +16,7 @@
     <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring.boot.version>3.5.13</spring.boot.version>
         <mybatis.spring.version>3.0.4</mybatis.spring.version>

@@ -7,6 +7,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ParameterMapping;
@@ -307,11 +308,13 @@ public class SeparateTableEncryptionManager {
         if (candidate == null || isSimpleValueType(candidate.getClass())) {
             return;
         }
-        if (candidate instanceof Map<?, ?> map) {
+        if (candidate instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) candidate;
             map.values().forEach(value -> collectHydrationCandidates(value, results, visited));
             return;
         }
-        if (candidate instanceof Collection<?> collection) {
+        if (candidate instanceof Collection<?>) {
+            Collection<?> collection = (Collection<?>) candidate;
             collection.forEach(value -> collectHydrationCandidates(value, results, visited));
             return;
         }
@@ -439,7 +442,7 @@ public class SeparateTableEncryptionManager {
 
     private List<Object> unwrapCandidates(Object parameterObject) {
         if (parameterObject == null) {
-            return List.of();
+            return Collections.emptyList();
         }
         List<Object> results = new ArrayList<>();
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -451,11 +454,13 @@ public class SeparateTableEncryptionManager {
         if (parameterObject == null) {
             return;
         }
-        if (parameterObject instanceof Map<?, ?> map) {
+        if (parameterObject instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) parameterObject;
             map.values().forEach(value -> collectCandidates(value, results, visited));
             return;
         }
-        if (parameterObject instanceof Collection<?> collection) {
+        if (parameterObject instanceof Collection<?>) {
+            Collection<?> collection = (Collection<?>) parameterObject;
             collection.forEach(value -> collectCandidates(value, results, visited));
             return;
         }
@@ -485,8 +490,8 @@ public class SeparateTableEncryptionManager {
     private Map<String, Object> preparedReferences(BoundSql boundSql) {
         if (boundSql.hasAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER)) {
             Object existing = boundSql.getAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER);
-            if (existing instanceof Map<?, ?> references) {
-                return (Map<String, Object>) references;
+            if (existing instanceof Map<?, ?>) {
+                return (Map<String, Object>) existing;
             }
         }
         Map<String, Object> preparedReferences = new LinkedHashMap<>();
@@ -539,14 +544,15 @@ public class SeparateTableEncryptionManager {
             return null;
         }
         String value = String.valueOf(referenceId);
-        return value.isBlank() ? null : value;
+        return StringUtils.isBlank(value) ? null : value;
     }
 
     private Object normalizeReferenceId(Object referenceId) {
-        if (referenceId instanceof Number number) {
-            return number.longValue();
+        if (referenceId instanceof Number) {
+            return ((Number) referenceId).longValue();
         }
-        if (referenceId instanceof String string) {
+        if (referenceId instanceof String) {
+            String string = (String) referenceId;
             try {
                 return Long.parseLong(string);
             } catch (NumberFormatException ignore) {
@@ -591,6 +597,22 @@ public class SeparateTableEncryptionManager {
         return properties.getSqlDialect().quote(identifier);
     }
 
-    private record ExternalRowValues(List<String> columns, List<Object> values) {
+    private static final class ExternalRowValues {
+
+        private final List<String> columns;
+        private final List<Object> values;
+
+        private ExternalRowValues(List<String> columns, List<Object> values) {
+            this.columns = columns;
+            this.values = values;
+        }
+
+        private List<String> columns() {
+            return columns;
+        }
+
+        private List<Object> values() {
+            return values;
+        }
     }
 }

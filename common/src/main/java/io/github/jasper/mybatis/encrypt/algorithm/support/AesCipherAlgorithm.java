@@ -12,6 +12,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 /**
  * 基于 AES-256-GCM 的主加密算法实现。
@@ -75,7 +76,7 @@ public class AesCipherAlgorithm implements CipherAlgorithm {
     }
 
     private byte[] deriveKey(String keyMaterial) {
-        if (keyMaterial == null || keyMaterial.isBlank()) {
+        if (StringUtils.isBlank(keyMaterial)) {
             throw new EncryptionConfigurationException("mybatis.encrypt.default-cipher-key must not be blank.");
         }
         try {

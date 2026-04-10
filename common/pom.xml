@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.jasperbigsum-commits</groupId>
         <artifactId>mybatis-like-sharephere-support</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>mybatis-like-sharephere-support-common</artifactId>
@@ -15,12 +15,12 @@
     <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>8</maven.compiler.release>
         <jsqlparser.version>4.9</jsqlparser.version>
         <bouncycastle.version>1.80</bouncycastle.version>
         <mybatis.version>3.5.19</mybatis.version>
+        <lombok.version>1.18.44</lombok.version>
     </properties>
 
     <dependencies>
@@ -41,6 +41,14 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <!-- 兼容java8 要求 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+            <optional>true</optional>
         </dependency>
     </dependencies>
 

@@ -1,5 +1,7 @@
 package io.github.jasper.mybatis.encrypt.config;
 
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
+
 /**
  * SQL 方言。
  */
@@ -40,7 +42,7 @@ public enum SqlDialect {
      * @return 引用后的标识符
      */
     public String quote(String identifier) {
-        if (identifier == null || identifier.isBlank()) {
+        if (StringUtils.isBlank(identifier)) {
             return identifier;
         }
         // 避免对已引用的标识符重复添加引号

@@ -42,8 +42,11 @@ public class ParameterValueResolver {
         }
         if (boundSql.hasAdditionalParameter(PREPARED_REFERENCE_PARAMETER)) {
             Object preparedReferences = boundSql.getAdditionalParameter(PREPARED_REFERENCE_PARAMETER);
-            if (preparedReferences instanceof java.util.Map<?, ?> references && references.containsKey(property)) {
-                return references.get(property);
+            if (preparedReferences instanceof java.util.Map<?, ?>) {
+                java.util.Map<?, ?> references = (java.util.Map<?, ?>) preparedReferences;
+                if (references.containsKey(property)) {
+                    return references.get(property);
+                }
             }
         }
         String root = new PropertyTokenizer(property).getName();

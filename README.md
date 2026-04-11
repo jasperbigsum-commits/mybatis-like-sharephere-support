@@ -486,6 +486,119 @@ mybatis-like-sharephere-support
 - 完善 SQL 日志脱敏策略与扩展点
 - 补充生产可用配置示例与兼容性说明
 
+## 存量迁移模块
+
+`mybatis-like-sharephere-support-migration` 是独立的 JDBC 任务模块，专门用于历史数据迁移与校验，不依赖 Spring Boot 自动装配和 MyBatis 插件执行链。
+
+约束与能力：
+
+- 仅基于已注册的 MyBatis 实体类生成迁移计划，拒绝 DTO 和多表拼装元数据
+- 同表模式下补齐 `storageColumn`、`assistedQueryColumn`、`likeQueryColumn`
+- 独立表模式下按 hash 复用或新建外表记录，并把主表原字段回填为引用 id
+- 按主键分页批量执行，支持中断后按最后一次已提交批次继续
+- 通过文件状态记录迁移表范围、累计处理量、最后断点和完成状态
+- 可选开启写后校验，密文字段按“解密后等于原文”验证，hash/like 按确定性值验证
+
+最小示例：
+
+```java
+MigrationTask task = JdbcMigrationTasks.create(
+        dataSource,
+        EntityMigrationDefinition.builder(UserAccount.class, "id")
+                .batchSize(500)
+                .verifyAfterWrite(true)
+                .build(),
+        metadataRegistry,
+        algorithmRegistry,
+        encryptionProperties,
+        new FileMigrationStateStore(Paths.get("migration-state"))
+);
+
+MigrationReport report = task.execute();
+```
+
+状态文件包含：
+
+- `status`
+- `totalRows`
+- `rangeStart` / `rangeEnd`
+- `lastProcessedId`
+- `scannedRows` / `migratedRows` / `skippedRows` / `verifiedRows`
+
+文件确认模式示例：
+
+```java
+MigrationTask task = JdbcMigrationTasks.create(
+        dataSource,
+        definition,
+        metadataRegistry,
+        algorithmRegistry,
+        encryptionProperties,
+        new FileMigrationStateStore(Paths.get("migration-state")),
+        new FileMigrationConfirmationPolicy(Paths.get("migration-confirmation"))
+);
+```
+
+首次执行时会先生成确认文件并阻断，操作人员确认无误后将 `approved=true` 再重新执行。
+
+确认文件样例：
+
+```properties
+approved=true
+entityName=com.example.UserAccount
+tableName=user_account
+entry.1=UPDATE|user_account|phone_cipher
+entry.2=UPDATE|user_account|phone_hash
+entry.3=UPDATE|user_account|phone_like
+```
+
+配置白名单确认模式示例：
+
+```java
+MigrationTask task = JdbcMigrationTasks.create(
+        dataSource,
+        definition,
+        metadataRegistry,
+        algorithmRegistry,
+        encryptionProperties,
+        new FileMigrationStateStore(Paths.get("migration-state")),
+        ExpectedRiskConfirmationPolicy.of(
+                "UPDATE|user_account|phone_cipher",
+                "UPDATE|user_account|phone_hash",
+                "UPDATE|user_account|phone_like"
+        )
+);
+```
+
+如果实际将要变更的表名或字段名和配置不一致，任务会直接失败，避免误改其他业务字段。
+
+状态文件样例：
+
+```properties
+entityName=com.example.UserAccount
+tableName=user_account
+idColumn=id
+idJavaType=java.lang.Long
+status=RUNNING
+totalRows=200000
+rangeStart=1
+rangeEnd=200000
+lastProcessedId=10500
+scannedRows=10500
+migratedRows=10480
+skippedRows=20
+verifiedRows=10480
+verificationEnabled=true
+```
+
+推荐操作流程：
+
+1. 用实体类创建迁移任务，先启用 `FileMigrationConfirmationPolicy` 生成确认清单。
+2. 由操作人员核对本次会变更的表名、字段名、操作类型，确认后将确认文件中的 `approved` 改为 `true`。
+3. 执行迁移任务，按批次推进；任务每次成功提交后都会刷新状态文件。
+4. 中断或失败后，不要删除状态文件，修复问题后直接重跑，任务会从 `lastProcessedId` 之后继续。
+5. 若字段范围发生变化，确认文件或配置白名单会与真实风险清单不一致并直接阻断，需要重新确认。
+
 ## SQL Support Matrix
 
 详细 SQL 支持矩阵见 [docs/sql-support-matrix.md](docs/sql-support-matrix.md)。

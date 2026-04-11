@@ -12,6 +12,7 @@
   <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
   <modules>
     <module>common</module>
+    <module>migration</module>
     <module>bom</module>
     <module>spring-starter</module>
     <module>spring-starter/spring2-starter</module>
@@ -29,6 +30,11 @@
       <dependency>
         <groupId>io.github.jasperbigsum-commits</groupId>
         <artifactId>mybatis-like-sharephere-support-common</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-migration</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

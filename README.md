@@ -1,5 +1,10 @@
 # mybatis-like-sharephere-support
 
+[中文](README.md) | [English](README.en.md)
+
+- 中文迁移指南：[docs/migration-guide.zh-CN.md](docs/migration-guide.zh-CN.md)
+- English migration guide: [docs/migration-guide.en.md](docs/migration-guide.en.md)
+
 一个面向 MyBatis / MyBatis-Plus 的数据库字段加密插件，目标是在尽量不侵入业务代码的前提下，为敏感字段提供透明加密、辅助等值查询、LIKE 查询列改写以及结果自动解密能力。
 
 默认算法已切换为国密组合：

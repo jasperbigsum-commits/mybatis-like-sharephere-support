@@ -38,11 +38,11 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         } catch (IOException ex) {
             throw new MigrationException("Failed to read migration confirmation file: " + file, ex);
         }
-        Set<String> expectedEntries = new LinkedHashSet<String>();
+        Set<String> expectedEntries = new LinkedHashSet<>();
         for (MigrationRiskEntry entry : manifest.getEntries()) {
             expectedEntries.add(entry.asToken());
         }
-        Set<String> configuredEntries = new LinkedHashSet<String>();
+        Set<String> configuredEntries = new LinkedHashSet<>();
         for (String name : properties.stringPropertyNames()) {
             if (name.startsWith("entry.")) {
                 configuredEntries.add(properties.getProperty(name));

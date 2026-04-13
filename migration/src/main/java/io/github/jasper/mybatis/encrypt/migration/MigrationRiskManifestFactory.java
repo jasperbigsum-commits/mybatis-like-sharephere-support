@@ -12,6 +12,11 @@ import java.util.Set;
  */
 public class MigrationRiskManifestFactory {
 
+    /**
+     * 创建任务元数工厂创建方法
+     * @param plan 实例迁移计划
+     * @return 迁移元数据
+     */
     public MigrationRiskManifest create(EntityMigrationPlan plan) {
         Set<MigrationRiskEntry> entries = new LinkedHashSet<MigrationRiskEntry>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
@@ -38,6 +43,6 @@ public class MigrationRiskManifestFactory {
             }
         }
         return new MigrationRiskManifest(plan.getEntityType().getName(), plan.getTableName(),
-                new ArrayList<MigrationRiskEntry>(entries));
+                new ArrayList<>(entries));
     }
 }

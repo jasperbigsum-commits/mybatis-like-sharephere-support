@@ -22,6 +22,11 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
     private final DatabaseEncryptionProperties properties;
     private final MigrationValueResolver valueResolver;
 
+    /**
+     * jdbc记录迁移验证器
+     * @param properties 配置
+     * @param algorithmRegistry 加密算法
+     */
     public JdbcMigrationRecordVerifier(DatabaseEncryptionProperties properties, AlgorithmRegistry algorithmRegistry) {
         this.algorithmRegistry = algorithmRegistry;
         this.properties = properties;
@@ -43,6 +48,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                     throw new MigrationVerificationException("Missing separate-table reference id for field: "
                             + columnPlan.getProperty());
                 }
+                assertMatches(columnPlan.getProperty(), "referenceHash", expected.getHashValue(), referenceId);
                 Map<String, Object> externalRow = loadExternalRow(connection, columnPlan, referenceId);
                 assertCipherMatches(columnPlan, plainValue,
                         externalRow.get(columnPlan.getStorageColumn()));
@@ -130,7 +136,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             sql.append(", ").append(quote(columnPlan.getLikeQueryColumn()));
         }
         sql.append(" from ").append(quote(columnPlan.getStorageTable()))
-                .append(" where ").append(quote(columnPlan.getStorageIdColumn())).append(" = ?");
+                .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             statement.setObject(1, referenceId);
             try (ResultSet resultSet = statement.executeQuery()) {

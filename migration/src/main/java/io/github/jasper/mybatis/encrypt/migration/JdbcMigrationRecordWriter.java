@@ -22,6 +22,12 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
     private final ReferenceIdGenerator referenceIdGenerator;
     private final MigrationValueResolver valueResolver;
 
+    /**
+     * jdbc迁移记录写入
+     * @param properties 配置文件
+     * @param algorithmRegistry 加密算法
+     * @param referenceIdGenerator 引用id生成器
+     */
     public JdbcMigrationRecordWriter(DatabaseEncryptionProperties properties,
                                      AlgorithmRegistry algorithmRegistry,
                                      ReferenceIdGenerator referenceIdGenerator) {
@@ -40,15 +46,12 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
                 continue;
             }
             if (columnPlan.isStoredInSeparateTable()) {
-                if (existsSeparateReference(connection, columnPlan, plainValue)) {
-                    continue;
+                String referenceHash = derivedFieldValues.getHashValue();
+                if (!existsSeparateReference(connection, columnPlan, referenceHash)) {
+                    Object storageId = referenceIdGenerator.nextReferenceId(columnPlan, record);
+                    insertSeparateRow(connection, columnPlan, storageId, derivedFieldValues);
                 }
-                Object referenceId = findReferenceIdByHash(connection, columnPlan, derivedFieldValues.getHashValue());
-                if (referenceId == null) {
-                    referenceId = referenceIdGenerator.nextReferenceId(columnPlan, record);
-                    insertSeparateRow(connection, columnPlan, referenceId, derivedFieldValues);
-                }
-                mainTableUpdates.put(columnPlan.getSourceColumn(), referenceId);
+                mainTableUpdates.put(columnPlan.getSourceColumn(), referenceHash);
                 continue;
             }
             mainTableUpdates.put(columnPlan.getStorageColumn(), derivedFieldValues.getCipherText());
@@ -87,31 +90,17 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         }
     }
 
-    private boolean existsSeparateReference(Connection connection, EntityMigrationColumnPlan columnPlan, Object sourceValue)
+    private boolean existsSeparateReference(Connection connection, EntityMigrationColumnPlan columnPlan, String referenceHash)
             throws SQLException {
-        if (sourceValue == null) {
+        if (referenceHash == null) {
             return false;
         }
         String sql = "select 1 from " + quote(columnPlan.getStorageTable())
-                + " where " + quote(columnPlan.getStorageIdColumn()) + " = ?";
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setObject(1, sourceValue);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next();
-            }
-        }
-    }
-
-    private Object findReferenceIdByHash(Connection connection,
-                                         EntityMigrationColumnPlan columnPlan,
-                                         String hashValue) throws SQLException {
-        String sql = "select " + quote(columnPlan.getStorageIdColumn())
-                + " from " + quote(columnPlan.getStorageTable())
                 + " where " + quote(columnPlan.getAssistedQueryColumn()) + " = ?";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, hashValue);
+            statement.setString(1, referenceHash);
             try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next() ? resultSet.getObject(1) : null;
+                return resultSet.next();
             }
         }
     }

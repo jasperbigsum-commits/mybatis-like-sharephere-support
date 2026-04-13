@@ -26,6 +26,9 @@ public class SnowflakeReferenceIdGenerator implements ReferenceIdGenerator {
     private long lastTimestamp = -1L;
     private long sequence;
 
+    /**
+     * Create a generator with runtime-derived worker and datacenter ids.
+     */
     public SnowflakeReferenceIdGenerator() {
         this.workerId = normalizeToRange(resolveRuntimeName().hashCode(), MAX_WORKER_ID);
         this.datacenterId = normalizeToRange(resolveHostName().hashCode(), MAX_DATACENTER_ID);

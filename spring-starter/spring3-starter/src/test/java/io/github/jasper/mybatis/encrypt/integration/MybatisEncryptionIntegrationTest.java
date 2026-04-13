@@ -940,14 +940,15 @@ class MybatisEncryptionIntegrationTest {
 
     private void assertSeparateTableStorage(String referenceId, String plainIdCard) throws Exception {
         try (Connection connection = dataSource.getConnection();
-             Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(
-                     "select id_card_cipher, id_card_hash, id_card_like from user_id_card_encrypt where id = "
-                             + referenceId)) {
+             PreparedStatement statement = connection.prepareStatement(
+                     "select id_card_cipher, id_card_hash, id_card_like from user_id_card_encrypt where id_card_hash = ?")) {
+            statement.setString(1, referenceId);
+            try (ResultSet resultSet = statement.executeQuery()) {
             resultSet.next();
             assertNotEquals(plainIdCard, resultSet.getString("id_card_cipher"));
             assertNotNull(resultSet.getString("id_card_hash"));
             assertEquals(plainIdCard, resultSet.getString("id_card_like"));
+            }
         }
     }
 
@@ -962,11 +963,13 @@ class MybatisEncryptionIntegrationTest {
 
     private String loadSeparateTableHash(String referenceId) throws Exception {
         try (Connection connection = dataSource.getConnection();
-             Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(
-                     "select id_card_hash from user_id_card_encrypt where id = " + referenceId)) {
-            resultSet.next();
-            return resultSet.getString(1);
+             PreparedStatement statement = connection.prepareStatement(
+                     "select id_card_hash from user_id_card_encrypt where id_card_hash = ?")) {
+            statement.setString(1, referenceId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getString(1);
+            }
         }
     }
 

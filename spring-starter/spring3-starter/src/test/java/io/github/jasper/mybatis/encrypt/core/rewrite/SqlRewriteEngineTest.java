@@ -570,8 +570,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
     }
 
@@ -597,8 +597,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertEquals(1, result.maskedParameters().size());
     }
@@ -625,8 +625,8 @@ class SqlRewriteEngineTest {
 
         assertTrue(result.changed());
         assertTrue(result.sql().contains("NOT EXISTS"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
     }
 
     @Test
@@ -689,8 +689,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertEquals(3, result.maskedParameters().size());
     }
 
@@ -716,8 +716,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         assertEquals(1, result.maskedParameters().size());
     }
@@ -744,8 +744,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertEquals(1, result.maskedParameters().size());
     }
@@ -772,8 +772,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("NOT EXISTS"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
     }
 
     @Test
@@ -801,8 +801,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("OR"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertEquals(1, result.maskedParameters().size());
     }
 
@@ -834,8 +834,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertEquals(2, result.maskedParameters().size());
     }
 
@@ -862,8 +862,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("WHERE EXISTS (SELECT 1 FROM user_account u"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id` = u.`id_card`") || result.sql().contains("`id` = `id_card`")
-                || result.sql().contains("id = u.id_card") || result.sql().contains("id = id_card"));
+        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
+                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         assertEquals(1, result.maskedParameters().size());
     }

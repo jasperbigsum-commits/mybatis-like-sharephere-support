@@ -5,6 +5,11 @@ package io.github.jasper.mybatis.encrypt.migration;
  */
 public class MigrationVerificationException extends MigrationException {
 
+    /**
+     * Create a verification exception with a message only.
+     *
+     * @param message error message
+     */
     public MigrationVerificationException(String message) {
         super(message);
     }

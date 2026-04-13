@@ -17,6 +17,10 @@ public class FileMigrationStateStore implements MigrationStateStore {
 
     private final Path directory;
 
+    /**
+     * 文件类型迁移状态存储器
+     * @param directory 存储目录地址
+     */
     public FileMigrationStateStore(Path directory) {
         this.directory = directory;
     }

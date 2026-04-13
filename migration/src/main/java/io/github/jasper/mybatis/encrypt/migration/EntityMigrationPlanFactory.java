@@ -16,10 +16,19 @@ public class EntityMigrationPlanFactory {
 
     private final EncryptMetadataRegistry metadataRegistry;
 
+    /**
+     * 实体迁移计划创建工厂
+     * @param metadataRegistry 元注册信息
+     */
     public EntityMigrationPlanFactory(EncryptMetadataRegistry metadataRegistry) {
         this.metadataRegistry = metadataRegistry;
     }
 
+    /**
+     * 创建方法
+     * @param definition 定义信息
+     * @return entityMigrationPlan 实例
+     */
     public EntityMigrationPlan create(EntityMigrationDefinition definition) {
         EncryptTableRule tableRule = metadataRegistry.findByEntity(definition.getEntityType())
                 .orElseThrow(() -> new MigrationException("Missing registered entity encryption rule: "

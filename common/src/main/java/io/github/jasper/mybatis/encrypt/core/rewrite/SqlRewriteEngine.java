@@ -415,7 +415,7 @@ public class SqlRewriteEngine {
      * 改写等值与不等值比较。
      *
      * <p>同表模式优先落到辅助查询列；独立表模式则改写成 `EXISTS` 子查询，
-     * 通过主表逻辑列中保存的引用 id 去关联独立表记录。</p>
+     * 通过主表逻辑列中保存的 hash 值去关联独立表记录。</p>
      */
     private Expression rewriteEquality(BinaryExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveComparison(expression, tableContext);
@@ -453,7 +453,7 @@ public class SqlRewriteEngine {
      * 改写 `LIKE` 条件。
      *
      * <p>同表模式要求配置 `likeQueryColumn`；独立表模式会改写成外层 `EXISTS`，
-     * 其中关联条件仍然是“独立表主键 = 主表逻辑列中的引用 id”。</p>
+     * 其中关联条件仍然是“独立表 hash 列 = 主表逻辑列中的引用值”。</p>
      */
     private Expression rewriteLikeCondition(LikeExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
@@ -524,7 +524,7 @@ public class SqlRewriteEngine {
     /**
      * 改写 `IS NULL` / `IS NOT NULL`。
      *
-     * <p>同表模式判断密文列本身；独立表模式判断的是主表中的引用 id 是否能在独立表中找到记录，
+     * <p>同表模式判断密文列本身；独立表模式判断的是主表中的 hash 引用值是否能在独立表中找到记录，
      * 因而会被改写成存在性子查询。</p>
      */
     private Expression rewriteIsNullCondition(IsNullExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
@@ -563,7 +563,7 @@ public class SqlRewriteEngine {
      * 把独立表字段条件改写成 `EXISTS` 子查询。
      *
      * <p>这个方法统一处理独立表等值和 LIKE 两种查询。它先把业务明文转换成查询态值，
-     * 再同步重建参数绑定，最后生成带有“引用 id 关联条件”的 `EXISTS`。</p>
+     * 再同步重建参数绑定，最后生成带有“hash 关联条件”的 `EXISTS`。</p>
      */
     private Expression rewriteSeparateTableCondition(ColumnResolution resolution,
                                                      Expression operand,
@@ -631,7 +631,7 @@ public class SqlRewriteEngine {
     /**
      * 改写独立表字段在主表写 SQL 中对应的参数。
      *
-     * <p>独立表模式下，主表逻辑列写入的不再是业务明文，而是写前阶段已经准备好的独立表引用 id。
+     * <p>独立表模式下，主表逻辑列写入的不再是业务明文，而是写前阶段已经准备好的独立表 hash 引用值。
      * 这里会把原参数槽位替换成该引用值，并同步重建参数映射类型，避免运行时仍按原业务字段类型绑定。</p>
      */
     private Expression rewriteSeparateTableReferenceExpression(Expression expression, SqlRewriteContext context) {
@@ -916,7 +916,7 @@ public class SqlRewriteEngine {
     /**
      * 构造独立表等值/LIKE 查询使用的 `EXISTS` 子查询。
      *
-     * <p>子查询中始终同时包含两部分谓词：一是“独立表主键 = 主表逻辑列里的引用 id”，
+     * <p>子查询中始终同时包含两部分谓词：一是“独立表 hash 列 = 主表逻辑列里的引用值”，
      * 二是目标查询列与转换后查询值的比较。排查独立表条件问题时，这两个条件缺一不可。</p>
      */
     private Expression buildExistsSubQuery(Column sourceColumn,
@@ -928,7 +928,7 @@ public class SqlRewriteEngine {
         subQueryBody.addSelectItems(SelectItem.from(new LongValue(1)));
         subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
         EqualsTo joinEquals = new EqualsTo();
-        joinEquals.setLeftExpression(new Column(quote(rule.storageIdColumn())));
+        joinEquals.setLeftExpression(new Column(quote(rule.assistedQueryColumn())));
         joinEquals.setRightExpression(buildColumn(sourceColumn, rule.column()));
         Expression valuePredicate;
         if (equality) {
@@ -951,7 +951,7 @@ public class SqlRewriteEngine {
     /**
      * 构造独立表 `IS NULL` / `IS NOT NULL` 对应的存在性子查询。
      *
-     * <p>这里判断的不是业务明文是否为空，而是主表中保存的引用 id 是否能在独立表中定位到记录。</p>
+     * <p>这里判断的不是业务明文是否为空，而是主表中保存的 hash 引用值是否能在独立表中定位到记录。</p>
      */
     private Expression buildExistsPresenceSubQuery(Column sourceColumn,
                                                    EncryptColumnRule rule,
@@ -960,7 +960,7 @@ public class SqlRewriteEngine {
         subQueryBody.addSelectItems(SelectItem.from(new LongValue(1)));
         subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
         EqualsTo joinEquals = new EqualsTo();
-        joinEquals.setLeftExpression(new Column(quote(rule.storageIdColumn())));
+        joinEquals.setLeftExpression(new Column(quote(rule.assistedQueryColumn())));
         joinEquals.setRightExpression(buildColumn(sourceColumn, rule.column()));
         subQueryBody.setWhere(joinEquals);
         ExistsExpression existsExpression = new ExistsExpression();

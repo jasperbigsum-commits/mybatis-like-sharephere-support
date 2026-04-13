@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
 /**
  * 独立加密表管理器。
  *
- * <p>负责两类工作：一是在主表 SQL 执行前准备独立表引用 id，二是在查询结果返回后按引用 id
+ * <p>负责两类工作：一是在主表 SQL 执行前准备独立表 hash 引用值，二是在查询结果返回后按 hash
  * 回填并解密独立加密表中的字段。</p>
  */
 public class SeparateTableEncryptionManager {
@@ -59,7 +59,7 @@ public class SeparateTableEncryptionManager {
     }
 
     /**
-     * 为写操作预先准备独立表引用 id。
+     * 为写操作预先准备独立表 hash 引用值。
      *
      * @param mappedStatement 当前 mapped statement
      * @param boundSql 当前 BoundSql
@@ -123,7 +123,7 @@ public class SeparateTableEncryptionManager {
      * 为当前待写实体准备独立表引用值。
      *
      * <p>这个方法只处理独立表字段。它会根据当前 SQL 类型和运行时参数状态，
-     * 决定是复用已有引用、回查主表现有引用，还是新建独立表记录，最后再把引用 id 写回 BoundSql。</p>
+     * 决定是复用已有引用、回查主表现有引用，还是新建独立表记录，最后再把 hash 引用值写回 BoundSql。</p>
      */
     private void prepareCandidateReferences(MappedStatement mappedStatement,
                                             BoundSql boundSql,
@@ -151,11 +151,11 @@ public class SeparateTableEncryptionManager {
     }
 
     /**
-     * 决定本次主表写入应使用的独立表引用 id。
+     * 决定本次主表写入应使用的独立表 hash 引用值。
      *
      * <p>它会先尝试复用当前 BoundSql 已准备好的引用值；如果是 UPDATE 且当前没有引用，
      * 就回主表查询已有引用；若已有引用对应的独立表记录与当前明文一致则直接复用，
-     * 否则再按 assignField 对应的 hash 值查找可复用记录，仍然没有时新建独立表记录。</p>
+     * 否则再按 assistedQueryColumn 对应的 hash 值查找可复用记录，仍然没有时新建独立表记录。</p>
      */
     private String determineReferenceId(BoundSql boundSql,
                                         SqlCommandType commandType,
@@ -167,17 +167,19 @@ public class SeparateTableEncryptionManager {
         if (referenceId != null) {
             return referenceId;
         }
+        String assignedHash = assignHash(rule, plainValue);
         if (commandType == SqlCommandType.UPDATE) {
+            // 当前的hash值引用值
             String currentStoredReferenceId = loadExistingReferenceId(tableRule, rule, metaObject);
-            // 双重引用判断
             if (currentStoredReferenceId != null
-                    && matchesAssignedHash(rule, currentStoredReferenceId, plainValue)) {
-                return currentStoredReferenceId;
+                    && matchesAssignedHash(currentStoredReferenceId, assignedHash)) {
+                // 同时更新判断是否独立表表是否存在，不匹配则创建记录
+                return Optional.ofNullable(findReferenceIdByAssignedHash(rule, assignedHash))
+                        .orElseGet(() -> insertExternalRow(rule, plainValue, assignedHash));
             }
         }
-        String matchedReferenceId = findReferenceIdByAssignedHash(rule, plainValue);
-        return matchedReferenceId != null ? matchedReferenceId :
-                insertExternalRow(rule, plainValue);
+        return Optional.ofNullable(findReferenceIdByAssignedHash(rule, assignedHash))
+                .orElseGet(() -> insertExternalRow(rule, plainValue, assignedHash));
     }
 
     /**
@@ -230,34 +232,22 @@ public class SeparateTableEncryptionManager {
      * <p>独立表当前采用增量追加模式，不做原地更新；因此只有在旧引用对应记录与当前 hash
      * 一致时才复用旧引用，否则应切换到已有同值记录或新建记录。</p>
      */
-    private boolean matchesAssignedHash(EncryptColumnRule rule, String referenceId, Object plainValue) {
-        String sql = "select 1 from " + quote(rule.storageTable())
-                + " where " + quote(rule.storageIdColumn()) + " = ?"
-                + " and " + quote(rule.assistedQueryColumn()) + " = ?";
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setObject(1, referenceId);
-            statement.setString(2, algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue)));
-            try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next();
-            }
-        } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to verify existing separate-table reference id.", ex);
-        }
+    private boolean matchesAssignedHash(String currentStoredReferenceId, String assignedHash) {
+        return Objects.equals(currentStoredReferenceId, assignedHash);
     }
 
     /**
-     * 按 assignField 对应的 hash 值查找可复用的独立表记录。
+     * 按 assistedQueryColumn 对应的 hash 值查找可复用的独立表记录。
      *
      * <p>独立表不执行更新和删除时，相同明文应尽量复用同一条外表记录，避免重复插入。</p>
      */
-    private String findReferenceIdByAssignedHash(EncryptColumnRule rule, Object plainValue) {
-        String sql = "select " + quote(rule.storageIdColumn())
+    private String findReferenceIdByAssignedHash(EncryptColumnRule rule, String assignedHash) {
+        String sql = "select " + quote(rule.assistedQueryColumn())
                 + " from " + quote(rule.storageTable())
                 + " where " + quote(rule.assistedQueryColumn()) + " = ?";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue)));
+            statement.setString(1, assignedHash);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
                     return toReferenceId(resultSet.getObject(1));
@@ -366,9 +356,9 @@ public class SeparateTableEncryptionManager {
 
     private Map<Object, String> loadCipherValues(EncryptColumnRule rule, List<Object> ids) {
         String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(", "));
-        String sql = "select " + quote(rule.storageIdColumn()) + ", " + quote(rule.storageColumn())
+        String sql = "select " + quote(rule.assistedQueryColumn()) + ", " + quote(rule.storageColumn())
                 + " from " + quote(rule.storageTable())
-                + " where " + quote(rule.storageIdColumn()) + " in (" + placeholders + ")";
+                + " where " + quote(rule.assistedQueryColumn()) + " in (" + placeholders + ")";
         Map<Object, String> result = new LinkedHashMap<>();
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -385,13 +375,13 @@ public class SeparateTableEncryptionManager {
     }
 
     /**
-     * 生成一条新的独立表记录并返回引用 id。
+     * 生成一条新的独立表记录并返回 hash 引用值。
      *
-     * <p>独立表主键由框架内部使用雪花算法预生成，再与密文列一起写入外表。
-     * 这样无论外表主键是否自增，主表都能稳定拿到可回填的引用 id。</p>
+     * <p>独立表主键由框架内部使用雪花算法预生成，再与密文列一起写入外表；
+     * 主表实际保存的是 assistedQueryColumn 对应的 hash 值，避免跨系统依赖独立表内部主键。</p>
      */
-    private String insertExternalRow(EncryptColumnRule rule, Object plainValue) {
-        ExternalRowValues values = buildExternalRowValues(rule, plainValue);
+    private String insertExternalRow(EncryptColumnRule rule, Object plainValue, String assignedHash) {
+        ExternalRowValues values = buildExternalRowValues(rule, plainValue, assignedHash);
         long generatedId = idGenerator.nextId();
         List<String> insertColumns = new ArrayList<>();
         insertColumns.add(rule.storageIdColumn());
@@ -407,7 +397,7 @@ public class SeparateTableEncryptionManager {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             bind(statement, insertValues);
             statement.executeUpdate();
-            return toReferenceId(generatedId);
+            return assignedHash;
         } catch (SQLException ex) {
             throw new EncryptionConfigurationException("Failed to insert separate-table encrypted value.", ex);
         }
@@ -418,7 +408,7 @@ public class SeparateTableEncryptionManager {
      *
      * <p>独立表当前采用增量追加模式，相同明文依赖 hash 复用，未命中时再插入一条新记录。</p>
      */
-    private ExternalRowValues buildExternalRowValues(EncryptColumnRule rule, Object plainValue) {
+    private ExternalRowValues buildExternalRowValues(EncryptColumnRule rule, Object plainValue, String assignedHash) {
         // 独立表只做增量插入，因此这里统一生成插入所需的密文列、辅助列和 like 列。
         List<String> columns = new ArrayList<>();
         List<Object> values = new ArrayList<>();
@@ -426,7 +416,7 @@ public class SeparateTableEncryptionManager {
         columns.add(rule.storageColumn());
         values.add(algorithmRegistry.cipher(rule.cipherAlgorithm()).encrypt(plainText));
         columns.add(rule.assistedQueryColumn());
-        values.add(algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(plainText));
+        values.add(assignedHash);
         if (rule.hasLikeQueryColumn()) {
             columns.add(rule.likeQueryColumn());
             values.add(algorithmRegistry.like(rule.likeQueryAlgorithm()).transform(plainText));
@@ -548,18 +538,11 @@ public class SeparateTableEncryptionManager {
     }
 
     private Object normalizeReferenceId(Object referenceId) {
-        if (referenceId instanceof Number) {
-            return ((Number) referenceId).longValue();
-        }
-        if (referenceId instanceof String) {
-            String string = (String) referenceId;
-            try {
-                return Long.parseLong(string);
-            } catch (NumberFormatException ignore) {
-                return string;
-            }
-        }
-        return referenceId;
+        return toReferenceId(referenceId);
+    }
+
+    private String assignHash(EncryptColumnRule rule, Object plainValue) {
+        return algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue));
     }
 
     private boolean isSimpleValueType(Class<?> type) {

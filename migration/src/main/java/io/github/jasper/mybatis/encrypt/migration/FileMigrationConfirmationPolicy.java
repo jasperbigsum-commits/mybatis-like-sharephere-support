@@ -16,6 +16,10 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
 
     private final Path directory;
 
+    /**
+     * 文件类型迁移确认策略
+     * @param directory 目录路径
+     */
     public FileMigrationConfirmationPolicy(Path directory) {
         this.directory = directory;
     }

@@ -88,7 +88,7 @@ class JdbcEntityMigrationTaskTest {
     }
 
     @Test
-    void shouldMigrateSeparateTableColumnsAndReplaceMainColumnWithReferenceId() throws Exception {
+    void shouldMigrateSeparateTableColumnsAndReplaceMainColumnWithReferenceHash() throws Exception {
         DataSource dataSource = newDataSource("separate_table");
         executeSql(dataSource,
                 "create table user_account (" +
@@ -119,16 +119,16 @@ class JdbcEntityMigrationTaskTest {
 
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
-             ResultSet mainResult = statement.executeQuery("select id_card from user_account where id = 1")) {
+            ResultSet mainResult = statement.executeQuery("select id_card from user_account where id = 1")) {
             assertTrue(mainResult.next());
             String migratedReferenceId = mainResult.getString(1);
             assertNotEquals("320101199001011234", migratedReferenceId);
             try (ResultSet externalResult = statement.executeQuery(
-                    "select id_card_cipher, id_card_hash, id_card_like from user_id_card_encrypt where id = '"
+                    "select id_card_cipher, id_card_hash, id_card_like from user_id_card_encrypt where id_card_hash = '"
                             + migratedReferenceId + "'")) {
                 assertTrue(externalResult.next());
                 assertTrue(externalResult.getString("id_card_cipher") != null);
-                assertTrue(externalResult.getString("id_card_hash") != null);
+                assertEquals(migratedReferenceId, externalResult.getString("id_card_hash"));
                 assertTrue(externalResult.getString("id_card_like") != null);
             }
         }

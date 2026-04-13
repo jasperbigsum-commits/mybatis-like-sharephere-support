@@ -14,6 +14,17 @@ public final class JdbcMigrationTasks {
     private JdbcMigrationTasks() {
     }
 
+    /**
+     * Create the default standalone JDBC migration task with permissive risk confirmation.
+     *
+     * @param dataSource JDBC data source
+     * @param definition user-facing task definition
+     * @param metadataRegistry encryption metadata registry
+     * @param algorithmRegistry algorithm registry
+     * @param properties SQL dialect and encryption properties
+     * @param stateStore checkpoint state store
+     * @return executable migration task
+     */
     public static MigrationTask create(DataSource dataSource,
                                        EntityMigrationDefinition definition,
                                        EncryptMetadataRegistry metadataRegistry,
@@ -24,6 +35,18 @@ public final class JdbcMigrationTasks {
                 AllowAllMigrationConfirmationPolicy.INSTANCE);
     }
 
+    /**
+     * Create the default standalone JDBC migration task with a custom confirmation policy.
+     *
+     * @param dataSource JDBC data source
+     * @param definition user-facing task definition
+     * @param metadataRegistry encryption metadata registry
+     * @param algorithmRegistry algorithm registry
+     * @param properties SQL dialect and encryption properties
+     * @param stateStore checkpoint state store
+     * @param confirmationPolicy risk confirmation policy
+     * @return executable migration task
+     */
     public static MigrationTask create(DataSource dataSource,
                                        EntityMigrationDefinition definition,
                                        EncryptMetadataRegistry metadataRegistry,

@@ -19,6 +19,10 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
 
     private final DatabaseEncryptionProperties properties;
 
+    /**
+     * jdbc迁移记录读取器
+     * @param properties 配置
+     */
     public JdbcMigrationRecordReader(DatabaseEncryptionProperties properties) {
         this.properties = properties;
     }

@@ -11,14 +11,28 @@ public class ExpectedRiskConfirmationPolicy implements MigrationConfirmationPoli
 
     private final Set<String> expectedEntries;
 
+    /**
+     * 构造方法
+     * @param expectedEntries 期望实体集合
+     */
     public ExpectedRiskConfirmationPolicy(Set<String> expectedEntries) {
-        this.expectedEntries = new LinkedHashSet<String>(expectedEntries);
+        this.expectedEntries = new LinkedHashSet<>(expectedEntries);
     }
 
+    /**
+     * 静态方法构造
+     * @param expectedEntries 期望实体集合
+     * @return 任务策略
+     */
     public static ExpectedRiskConfirmationPolicy of(String... expectedEntries) {
         return new ExpectedRiskConfirmationPolicy(new LinkedHashSet<String>(Arrays.asList(expectedEntries)));
     }
 
+    /**
+     * 确认信息
+     * @param plan migration plan
+     * @param manifest concrete mutation manifest
+     */
     @Override
     public void confirm(EntityMigrationPlan plan, MigrationRiskManifest manifest) {
         Set<String> actualEntries = new LinkedHashSet<String>();

@@ -22,6 +22,17 @@ public class JdbcEntityMigrationTask implements MigrationTask {
     private final MigrationConfirmationPolicy confirmationPolicy;
     private final MigrationRiskManifestFactory riskManifestFactory;
 
+    /**
+     * jdbc实例迁移任务
+     * @param dataSource 数据源
+     * @param plan 计划
+     * @param rangeReader 读取范围限制器
+     * @param recordReader 读取器
+     * @param recordWriter 写入器
+     * @param recordVerifier 验证器
+     * @param stateStore 状态存储器
+     * @param confirmationPolicy 确认策略
+     */
     public JdbcEntityMigrationTask(DataSource dataSource,
                                    EntityMigrationPlan plan,
                                    MigrationRangeReader rangeReader,

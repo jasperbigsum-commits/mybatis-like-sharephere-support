@@ -4,7 +4,7 @@ create table user_account (
     phone_cipher varchar(512),
     phone_hash varchar(128),
     phone_like varchar(255),
-    id_card bigint
+    id_card varchar(128)
 );
 
 create table order_account (

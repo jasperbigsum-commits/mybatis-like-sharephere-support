@@ -11,24 +11,51 @@ public final class MigrationRiskEntry {
     private final String tableName;
     private final String columnName;
 
+    /**
+     * Create one immutable risk entry.
+     *
+     * @param operation mutation operation such as INSERT or UPDATE
+     * @param tableName affected table name
+     * @param columnName affected column name
+     */
     public MigrationRiskEntry(String operation, String tableName, String columnName) {
         this.operation = operation;
         this.tableName = tableName;
         this.columnName = columnName;
     }
 
+    /**
+     * Return the mutation operation name.
+     *
+     * @return operation name
+     */
     public String getOperation() {
         return operation;
     }
 
+    /**
+     * Return the affected table name.
+     *
+     * @return table name
+     */
     public String getTableName() {
         return tableName;
     }
 
+    /**
+     * Return the affected column name.
+     *
+     * @return column name
+     */
     public String getColumnName() {
         return columnName;
     }
 
+    /**
+     * Convert the entry to a stable token for text-based confirmation files.
+     *
+     * @return stable operation token
+     */
     public String asToken() {
         return operation + "|" + tableName + "|" + columnName;
     }

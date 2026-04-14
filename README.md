@@ -540,6 +540,9 @@ public class UserAccountMigrationRunner {
 }
 ```
 
+迁移 builder 中涉及字段选择的参数现在支持两种写法：加密属性名或主表源列名。
+例如可以写 `backupColumn("idCard", "id_card_backup")`，也可以写 `backupColumnByColumn("id_card", "id_card_backup")`。
+
 自动装配默认会提供：
 
 - `MigrationTaskFactory`

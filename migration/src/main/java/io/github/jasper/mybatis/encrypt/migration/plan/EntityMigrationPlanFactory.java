@@ -1,8 +1,12 @@
-package io.github.jasper.mybatis.encrypt.migration;
+package io.github.jasper.mybatis.encrypt.migration.plan;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationDefinition;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
+import io.github.jasper.mybatis.encrypt.migration.MigrationException;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
@@ -31,37 +35,10 @@ public class EntityMigrationPlanFactory {
      */
     public EntityMigrationPlan create(EntityMigrationDefinition definition) {
         ResolvedDefinition resolved = resolveDefinition(definition);
-        EncryptTableRule tableRule = resolved.tableRule();
-        String normalizedTable = tableRule.getTableName();
-        List<EntityMigrationColumnPlan> columnPlans = new ArrayList<>();
-        for (EncryptColumnRule columnRule : tableRule.getColumnRules()) {
-            if (resolved.entityType() != null
-                    && StringUtils.isNotBlank(columnRule.table())
-                    && !normalizedTable.equals(NameUtils.normalizeIdentifier(columnRule.table()))) {
-                throw new MigrationException("Migration only supports registered entity rules and ignores DTO fields: "
-                        + resolved.entityName());
-            }
-            if (!definition.getIncludedProperties().isEmpty()
-                    && !definition.getIncludedProperties().contains(columnRule.property())) {
-                continue;
-            }
-            String backupColumn = definition.getBackupColumns().get(columnRule.property());
-            validateBackupColumn(columnRule, backupColumn);
-            columnPlans.add(new EntityMigrationColumnPlan(
-                    columnRule.property(),
-                    columnRule.column(),
-                    columnRule.storageColumn(),
-                    columnRule.assistedQueryColumn(),
-                    columnRule.likeQueryColumn(),
-                    columnRule.cipherAlgorithm(),
-                    columnRule.assistedQueryAlgorithm(),
-                    columnRule.likeQueryAlgorithm(),
-                    columnRule.isStoredInSeparateTable(),
-                    columnRule.storageTable(),
-                    columnRule.storageIdColumn(),
-                    backupColumn
-            ));
-        }
+        String normalizedTable = resolved.tableRule().getTableName();
+        MigrationFieldSelectorResolver selectorResolver = new MigrationFieldSelectorResolver(definition);
+        List<EntityMigrationColumnPlan> columnPlans = collectColumnPlans(resolved, normalizedTable, selectorResolver);
+        selectorResolver.assertResolved();
         if (columnPlans.isEmpty()) {
             throw new MigrationException("No encrypt fields available for migration target: "
                     + resolved.entityName());
@@ -69,6 +46,50 @@ public class EntityMigrationPlanFactory {
         return new EntityMigrationPlan(resolved.entityType(), resolved.entityName(), normalizedTable,
                 definition.getCursorColumns(),
                 definition.getBatchSize(), definition.isVerifyAfterWrite(), columnPlans);
+    }
+
+    private List<EntityMigrationColumnPlan> collectColumnPlans(ResolvedDefinition resolved,
+                                                               String normalizedTable,
+                                                               MigrationFieldSelectorResolver selectorResolver) {
+        List<EntityMigrationColumnPlan> columnPlans = new ArrayList<>();
+        for (EncryptColumnRule columnRule : resolved.tableRule().getColumnRules()) {
+            rejectDtoStyleRuleIfNecessary(resolved, normalizedTable, columnRule);
+            if (!selectorResolver.includes(columnRule)) {
+                continue;
+            }
+            String backupColumn = selectorResolver.resolveBackupColumn(columnRule);
+            validateBackupColumn(columnRule, backupColumn);
+            columnPlans.add(toColumnPlan(columnRule, backupColumn));
+        }
+        return columnPlans;
+    }
+
+    private void rejectDtoStyleRuleIfNecessary(ResolvedDefinition resolved,
+                                               String normalizedTable,
+                                               EncryptColumnRule columnRule) {
+        if (resolved.entityType() != null
+                && StringUtils.isNotBlank(columnRule.table())
+                && !normalizedTable.equals(NameUtils.normalizeIdentifier(columnRule.table()))) {
+            throw new MigrationException("Migration only supports registered entity rules and ignores DTO fields: "
+                    + resolved.entityName());
+        }
+    }
+
+    private EntityMigrationColumnPlan toColumnPlan(EncryptColumnRule columnRule, String backupColumn) {
+        return new EntityMigrationColumnPlan(
+                columnRule.property(),
+                columnRule.column(),
+                columnRule.storageColumn(),
+                columnRule.assistedQueryColumn(),
+                columnRule.likeQueryColumn(),
+                columnRule.cipherAlgorithm(),
+                columnRule.assistedQueryAlgorithm(),
+                columnRule.likeQueryAlgorithm(),
+                columnRule.isStoredInSeparateTable(),
+                columnRule.storageTable(),
+                columnRule.storageIdColumn(),
+                backupColumn
+        );
     }
 
     private void validateBackupColumn(EncryptColumnRule columnRule, String backupColumn) {

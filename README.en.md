@@ -96,6 +96,10 @@ public class UserAccountMigrationRunner {
 }
 ```
 
+Field-related selectors in the migration builder now support either the encrypt property name or the main-table
+source column name. For example, both `backupColumn("idCard", "id_card_backup")` and
+`backupColumnByColumn("id_card", "id_card_backup")` are valid.
+
 Auto-configuration provides these defaults:
 
 - `MigrationTaskFactory`

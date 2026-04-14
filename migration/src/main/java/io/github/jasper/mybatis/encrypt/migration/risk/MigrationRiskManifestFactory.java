@@ -1,5 +1,9 @@
-package io.github.jasper.mybatis.encrypt.migration;
+package io.github.jasper.mybatis.encrypt.migration.risk;
 
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRiskEntry;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRiskManifest;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import java.util.ArrayList;

@@ -1,4 +1,7 @@
-package io.github.jasper.mybatis.encrypt.migration;
+package io.github.jasper.mybatis.encrypt.migration.jdbc;
+
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
+import io.github.jasper.mybatis.encrypt.migration.MigrationException;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;

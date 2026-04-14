@@ -102,7 +102,7 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
         MigrationReport report = migrationTaskFactory.executeForEntity(
                 AutoConfiguredUserRecord.class,
                 "id",
-                builder -> builder.backupColumn("idCard", "id_card_backup"));
+                builder -> builder.backupColumnByColumn("id_card", "id_card_backup"));
 
         assertEquals(1L, report.getMigratedRows());
         assertEquals("21", report.getLastProcessedCursor());

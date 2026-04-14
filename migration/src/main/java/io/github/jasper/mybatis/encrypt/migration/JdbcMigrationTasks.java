@@ -3,6 +3,11 @@ package io.github.jasper.mybatis.encrypt.migration;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcEntityMigrationTask;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordReader;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordVerifier;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordWriter;
+import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 
 import javax.sql.DataSource;
 

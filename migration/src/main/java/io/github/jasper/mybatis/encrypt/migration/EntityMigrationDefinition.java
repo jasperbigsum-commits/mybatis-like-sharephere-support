@@ -18,7 +18,7 @@ public final class EntityMigrationDefinition {
     private final List<String> cursorColumns;
     private final int batchSize;
     private final boolean verifyAfterWrite;
-    private final Set<String> includedProperties;
+    private final Set<String> includedFields;
     private final Map<String, String> backupColumns;
 
     private EntityMigrationDefinition(Builder builder) {
@@ -41,7 +41,7 @@ public final class EntityMigrationDefinition {
         this.cursorColumns = Collections.unmodifiableList(new ArrayList<>(builder.cursorColumns));
         this.batchSize = builder.batchSize;
         this.verifyAfterWrite = builder.verifyAfterWrite;
-        this.includedProperties = Collections.unmodifiableSet(new LinkedHashSet<>(builder.includedProperties));
+        this.includedFields = Collections.unmodifiableSet(new LinkedHashSet<>(builder.includedFields));
         this.backupColumns = Collections.unmodifiableMap(new LinkedHashMap<>(builder.backupColumns));
     }
 
@@ -135,18 +135,33 @@ public final class EntityMigrationDefinition {
     }
 
     /**
-     * Return the explicitly included property names.
+     * Return the explicitly included field selectors.
      *
-     * @return immutable included property set
+     * <p>One selector can be either the encrypt property name or the plaintext source column name.</p>
+     *
+     * @return immutable included field selector set
      */
-    public Set<String> getIncludedProperties() {
-        return includedProperties;
+    public Set<String> getIncludedFields() {
+        return includedFields;
     }
 
     /**
-     * Return configured plaintext backup columns keyed by property name.
+     * Return the explicitly included field selectors.
      *
-     * @return immutable property-to-backup-column mapping
+     * @return immutable included field selector set
+     * @deprecated use {@link #getIncludedFields()}
+     */
+    @Deprecated
+    public Set<String> getIncludedProperties() {
+        return getIncludedFields();
+    }
+
+    /**
+     * Return configured plaintext backup columns keyed by field selector.
+     *
+     * <p>The selector can be either the encrypt property name or the plaintext source column name.</p>
+     *
+     * @return immutable field-selector-to-backup-column mapping
      */
     public Map<String, String> getBackupColumns() {
         return backupColumns;
@@ -171,7 +186,7 @@ public final class EntityMigrationDefinition {
         private final List<String> cursorColumns;
         private int batchSize = 200;
         private boolean verifyAfterWrite = true;
-        private final Set<String> includedProperties = new LinkedHashSet<>();
+        private final Set<String> includedFields = new LinkedHashSet<>();
         private final Map<String, String> backupColumns = new LinkedHashMap<>();
 
         private Builder(Class<?> entityType, String tableName, List<String> cursorColumns) {
@@ -209,26 +224,59 @@ public final class EntityMigrationDefinition {
          * @return current builder
          */
         public Builder includeProperty(String property) {
-            this.includedProperties.add(property);
+            return includeField(property);
+        }
+
+        /**
+         * Restrict the task to one encrypted source column.
+         *
+         * @param sourceColumn plaintext source column name to include
+         * @return current builder
+         */
+        public Builder includeColumn(String sourceColumn) {
+            return includeField(sourceColumn);
+        }
+
+        /**
+         * Restrict the task to one encrypted field selected by property name or source column name.
+         *
+         * @param selector property name or source column name
+         * @return current builder
+         */
+        public Builder includeField(String selector) {
+            this.includedFields.add(requireFieldSelector(selector, "selector"));
             return this;
         }
 
         /**
          * Persist the original plaintext value to one backup column when migration overwrites the source column.
          *
-         * @param property encrypted property name
+         * @param selector encrypted property name or plaintext source column name
          * @param backupColumn backup column in the main table
          * @return current builder
          */
-        public Builder backupColumn(String property, String backupColumn) {
-            if (property == null || property.trim().isEmpty()) {
-                throw new IllegalArgumentException("property must not be blank");
-            }
-            if (backupColumn == null || backupColumn.trim().isEmpty()) {
-                throw new IllegalArgumentException("backupColumn must not be blank");
-            }
-            this.backupColumns.put(property, backupColumn);
+        public Builder backupColumn(String selector, String backupColumn) {
+            this.backupColumns.put(requireFieldSelector(selector, "selector"),
+                    requireFieldSelector(backupColumn, "backupColumn"));
             return this;
+        }
+
+        /**
+         * Persist the original plaintext value to one backup column selected by source column name.
+         *
+         * @param sourceColumn plaintext source column name
+         * @param backupColumn backup column in the main table
+         * @return current builder
+         */
+        public Builder backupColumnByColumn(String sourceColumn, String backupColumn) {
+            return backupColumn(sourceColumn, backupColumn);
+        }
+
+        private String requireFieldSelector(String value, String fieldName) {
+            if (value == null || value.trim().isEmpty()) {
+                throw new IllegalArgumentException(fieldName + " must not be blank");
+            }
+            return value.trim();
         }
 
         /**

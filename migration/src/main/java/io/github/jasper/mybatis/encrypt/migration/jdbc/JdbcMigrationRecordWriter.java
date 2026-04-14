@@ -1,7 +1,13 @@
-package io.github.jasper.mybatis.encrypt.migration;
+package io.github.jasper.mybatis.encrypt.migration.jdbc;
 
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecordWriter;
+import io.github.jasper.mybatis.encrypt.migration.ReferenceIdGenerator;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import java.sql.Connection;

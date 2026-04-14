@@ -1,4 +1,21 @@
-package io.github.jasper.mybatis.encrypt.migration;
+package io.github.jasper.mybatis.encrypt.migration.jdbc;
+
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
+import io.github.jasper.mybatis.encrypt.migration.MigrationConfirmationPolicy;
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
+import io.github.jasper.mybatis.encrypt.migration.MigrationException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRange;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRangeReader;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecordReader;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecordVerifier;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecordWriter;
+import io.github.jasper.mybatis.encrypt.migration.MigrationReport;
+import io.github.jasper.mybatis.encrypt.migration.MigrationState;
+import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
+import io.github.jasper.mybatis.encrypt.migration.MigrationStatus;
+import io.github.jasper.mybatis.encrypt.migration.MigrationTask;
+import io.github.jasper.mybatis.encrypt.migration.risk.MigrationRiskManifestFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;

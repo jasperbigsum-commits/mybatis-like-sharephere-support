@@ -10,6 +10,12 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcEntityMigrationTask;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordReader;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordVerifier;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordWriter;
+import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
+import io.github.jasper.mybatis.encrypt.migration.risk.MigrationRiskManifestFactory;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.Test;
 
@@ -150,7 +156,7 @@ class JdbcEntityMigrationTaskTest {
         MigrationTask task = JdbcMigrationTasks.create(
                 dataSource,
                 EntityMigrationDefinition.builder(SeparateTableUserEntity.class, "id")
-                        .backupColumn("idCard", "id_card_backup")
+                        .backupColumnByColumn("id_card", "id_card_backup")
                         .build(),
                 metadataRegistry(),
                 algorithmRegistry(),

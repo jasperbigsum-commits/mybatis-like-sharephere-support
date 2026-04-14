@@ -95,6 +95,9 @@ public class UserAccountMigrationRunner {
 }
 ```
 
+`builder` 中和字段选择相关的参数现在既可以传加密属性名，也可以直接传主表源列名。
+例如 `backupColumn("idCard", "id_card_backup")` 与 `backupColumnByColumn("id_card", "id_card_backup")` 都可用。
+
 如果你希望先构建任务，再决定执行时机：
 
 ```java

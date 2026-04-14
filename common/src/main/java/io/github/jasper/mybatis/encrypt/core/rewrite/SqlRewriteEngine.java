@@ -682,8 +682,8 @@ public class SqlRewriteEngine {
         }
         if (expression instanceof ParenthesedExpressionList) {
             ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
-            for (Object exp : parenthesis) {
-                consumeExpression((Expression) exp, context);
+            for (Expression exp : parenthesis) {
+                consumeExpression(exp, context);
             }
             return;
         }
@@ -804,7 +804,8 @@ public class SqlRewriteEngine {
      * 改写普通 `SELECT` 的投影列表。
      *
      * <p>`NORMAL` 模式输出业务可见的逻辑列别名；`DERIVED` 模式会额外注入隐藏的辅助列别名，
-     * 供外层查询继续按逻辑字段名改写条件。独立表字段不会在这里展开，因为它依赖结果回填阶段解密。</p>
+     * 供外层查询继续按逻辑字段名改写条件。通配符场景会优先输出逻辑别名列，再保留原始 `*`，
+     * 避免 JDBC/MyBatis 在重复列名时优先读取到 wildcard 中的旧列值。</p>
      */
     private void rewriteSelectItems(PlainSelect plainSelect,
                                     SqlTableContext tableContext,
@@ -818,16 +819,20 @@ public class SqlRewriteEngine {
             Expression expression = item.getExpression();
             if (expression instanceof AllTableColumns) {
                 AllTableColumns allTableColumns = (AllTableColumns) expression;
+                if (appendSelectAliasesForWildcard(rewritten,
+                        tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
+                        allTableColumns.getTable(), projectionMode)) {
+                    context.markChanged();
+                }
                 rewritten.add(item);
-                appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
-                        allTableColumns.getTable(), projectionMode);
-                context.markChanged();
                 continue;
             }
             if (expression instanceof AllColumns) {
+                if (appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(null), null,
+                        projectionMode)) {
+                    context.markChanged();
+                }
                 rewritten.add(item);
-                appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(null), null, projectionMode);
-                context.markChanged();
                 continue;
             }
             ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
@@ -883,10 +888,11 @@ public class SqlRewriteEngine {
         }
     }
 
-    private void appendSelectAliasesForWildcard(List<SelectItem<?>> target,
-                                                List<EncryptColumnRule> rules,
-                                                Table tableReference,
-                                                ProjectionMode projectionMode) {
+    private boolean appendSelectAliasesForWildcard(List<SelectItem<?>> target,
+                                                   List<EncryptColumnRule> rules,
+                                                   Table tableReference,
+                                                   ProjectionMode projectionMode) {
+        boolean appended = false;
         for (EncryptColumnRule rule : rules) {
             if (rule.isStoredInSeparateTable()) {
                 continue;
@@ -897,10 +903,12 @@ public class SqlRewriteEngine {
             }
             SelectItem<?> storageItem = buildSelectStorageItem(new SelectItem<>(sourceColumn), new ColumnResolution(sourceColumn, rule, true));
             target.add(storageItem);
+            appended = true;
             if (projectionMode == ProjectionMode.DERIVED) {
                 appendDerivedHelperSelectItems(target, storageItem, new ColumnResolution(sourceColumn, rule, true));
             }
         }
+        return appended;
     }
 
     private void appendDerivedHelperSelectItems(List<SelectItem<?>> target,
@@ -1133,7 +1141,7 @@ public class SqlRewriteEngine {
         for (SelectItem<?> item : selectItems) {
             Expression expression = item.getExpression();
             if (expression instanceof AnalyticExpression
-                    && containsEncryptedReference((AnalyticExpression) expression, tableContext)) {
+                    && containsEncryptedReference(expression, tableContext)) {
                 throw new UnsupportedEncryptedOperationException(
                         "Window function is not supported on encrypted fields.");
             }
@@ -1176,8 +1184,8 @@ public class SqlRewriteEngine {
         }
         if (expression instanceof ParenthesedExpressionList) {
             ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
-            for (Object item : parenthesis) {
-                if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
+            for (Expression item : parenthesis) {
+                if (containsEncryptedReference(item, tableContext)) {
                     return true;
                 }
             }

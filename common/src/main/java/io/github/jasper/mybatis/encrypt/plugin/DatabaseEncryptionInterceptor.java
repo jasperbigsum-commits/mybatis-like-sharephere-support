@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 /**
  * MyBatis 插件入口。
  *
- * <p>负责在 Executor 层完成写前准备与 SQL 改写，在查询结果返回给业务代码前完成解密。</p>
+ * <p>负责在 Executor 层完成写前准备与 SQL 改写，在 ResultSet 阶段完成结果回填与解密。</p>
  */
 @Intercepts({
         @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
@@ -107,40 +107,27 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
             return invocation.proceed();
         }
         Executor executor = (Executor) invocation.getTarget();
-        boolean queryScopeOpened = false;
-        if ("query".equals(invocation.getMethod().getName())) {
-            resultDecryptor.beginQueryScope(mappedStatement);
-            if (separateTableEncryptionManager != null) {
-                separateTableEncryptionManager.beginQueryScope();
-            }
-            queryScopeOpened = true;
-        }
         Object parameterObject = args.length > 1 ? args[1] : null;
-        try {
-            BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
-            MappedStatement rewrittenStatement = rewriteMappedStatement(executor, mappedStatement, boundSql);
-            if (rewrittenStatement != mappedStatement) {
-                args[0] = rewrittenStatement;
-                if (args.length == 6) {
-                    args[5] = boundSql;
-                }
-            }
-            return invocation.proceed();
-        } finally {
-            if (queryScopeOpened) {
-                resultDecryptor.endQueryScope();
-                if (separateTableEncryptionManager != null) {
-                    separateTableEncryptionManager.endQueryScope();
-                }
+        BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
+        MappedStatement rewrittenStatement = rewriteMappedStatement(executor, mappedStatement, boundSql);
+        if (rewrittenStatement != mappedStatement) {
+            args[0] = rewrittenStatement;
+            if (args.length == 6) {
+                args[5] = boundSql;
             }
         }
+        return invocation.proceed();
     }
 
     private Object interceptResultSet(Invocation invocation) throws Throwable {
         MappedStatement mappedStatement = resolveResultSetMappedStatement(invocation.getTarget());
+        BoundSql boundSql = resolveResultSetBoundSql(invocation.getTarget());
         boolean queryScopeOpened = false;
         if (mappedStatement != null) {
-            resultDecryptor.beginQueryScope(mappedStatement);
+            resultDecryptor.beginQueryScope(mappedStatement, boundSql);
+            if (separateTableEncryptionManager != null) {
+                separateTableEncryptionManager.beginQueryScope();
+            }
             queryScopeOpened = true;
         }
         try {
@@ -148,6 +135,9 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         } finally {
             if (queryScopeOpened) {
                 resultDecryptor.endQueryScope();
+                if (separateTableEncryptionManager != null) {
+                    separateTableEncryptionManager.endQueryScope();
+                }
             }
         }
     }
@@ -185,6 +175,26 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
             Object mappedStatement = metaObject.getValue("delegate.mappedStatement");
             if (mappedStatement instanceof MappedStatement) {
                 return (MappedStatement) mappedStatement;
+            }
+        }
+        return null;
+    }
+
+    private BoundSql resolveResultSetBoundSql(Object target) {
+        if (target == null) {
+            return null;
+        }
+        MetaObject metaObject = SystemMetaObject.forObject(target);
+        if (metaObject.hasGetter("boundSql")) {
+            Object boundSql = metaObject.getValue("boundSql");
+            if (boundSql instanceof BoundSql) {
+                return (BoundSql) boundSql;
+            }
+        }
+        if (metaObject.hasGetter("delegate.boundSql")) {
+            Object boundSql = metaObject.getValue("delegate.boundSql");
+            if (boundSql instanceof BoundSql) {
+                return (BoundSql) boundSql;
             }
         }
         return null;

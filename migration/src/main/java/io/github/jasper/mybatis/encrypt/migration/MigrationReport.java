@@ -283,7 +283,7 @@ public final class MigrationReport {
     }
 
     private List<String> immutableCopy(List<String> values) {
-        return values == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<String>(values));
+        return values == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(values));
     }
 
     private Map<String, String> toCursorMap(List<String> values) {

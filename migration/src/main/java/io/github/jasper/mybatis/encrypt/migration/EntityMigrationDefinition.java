@@ -153,7 +153,7 @@ public final class EntityMigrationDefinition {
     }
 
     private static List<String> mergeCursorColumns(String cursorColumn, String... additionalCursorColumns) {
-        List<String> cursorColumns = new ArrayList<String>();
+        List<String> cursorColumns = new ArrayList<>();
         cursorColumns.add(cursorColumn);
         if (additionalCursorColumns != null) {
             Collections.addAll(cursorColumns, additionalCursorColumns);

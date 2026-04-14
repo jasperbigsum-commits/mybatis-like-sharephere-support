@@ -104,6 +104,32 @@ class DatabaseEncryptionInterceptorTest {
     }
 
     @Test
+    void shouldNotOpenDecryptScopeDuringExecutorQueryInterception() throws Throwable {
+        Configuration configuration = new Configuration();
+        TestExecutor executor = new TestExecutor();
+        RecordingResultDecryptor decryptor = recordingDecryptor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, decryptor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.selectByPhone",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id from user_account where phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build())
+        );
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("query", MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class),
+                new Object[]{mappedStatement, Map.of("phone", "13800138000"), RowBounds.DEFAULT, null}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertEquals(0, decryptor.beginScopeCalls);
+    }
+
+    @Test
     void shouldPrepareSeparateTableReferencesBeforeExecutorUpdateRewrite() throws Throwable {
         Configuration configuration = new Configuration();
         RecordingSeparateTableEncryptionManager manager = new RecordingSeparateTableEncryptionManager();
@@ -172,14 +198,28 @@ class DatabaseEncryptionInterceptorTest {
     }
 
     private DatabaseEncryptionInterceptor interceptor(SeparateTableEncryptionManager manager) {
+        return interceptor(manager, null);
+    }
+
+    private DatabaseEncryptionInterceptor interceptor(SeparateTableEncryptionManager manager,
+                                                      ResultDecryptor customDecryptor) {
         DatabaseEncryptionProperties properties = sampleProperties();
         EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(
                 properties, new AnnotationEncryptMetadataLoader());
         AlgorithmRegistry algorithmRegistry = sampleAlgorithms();
         SqlRewriteEngine sqlRewriteEngine = new SqlRewriteEngine(metadataRegistry, algorithmRegistry, properties);
-        ResultDecryptor resultDecryptor = new ResultDecryptor(metadataRegistry, algorithmRegistry, manager);
+        ResultDecryptor resultDecryptor = customDecryptor != null
+                ? customDecryptor
+                : new ResultDecryptor(metadataRegistry, algorithmRegistry, manager);
         return new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties, manager,
                 metadataRegistry);
+    }
+
+    private RecordingResultDecryptor recordingDecryptor() {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(
+                properties, new AnnotationEncryptMetadataLoader());
+        return new RecordingResultDecryptor(metadataRegistry, sampleAlgorithms(), null);
     }
 
     private DatabaseEncryptionProperties sampleProperties() {
@@ -319,6 +359,23 @@ class DatabaseEncryptionInterceptorTest {
         public void prepareWriteReferences(MappedStatement mappedStatement, BoundSql boundSql) {
             prepareCalls++;
             boundSql.setAdditionalParameter("idCard", "1001");
+        }
+    }
+
+    static class RecordingResultDecryptor extends ResultDecryptor {
+
+        private int beginScopeCalls;
+
+        RecordingResultDecryptor(EncryptMetadataRegistry metadataRegistry,
+                                 AlgorithmRegistry algorithmRegistry,
+                                 SeparateTableEncryptionManager separateTableEncryptionManager) {
+            super(metadataRegistry, algorithmRegistry, separateTableEncryptionManager);
+        }
+
+        @Override
+        public void beginQueryScope(MappedStatement mappedStatement, BoundSql boundSql) {
+            beginScopeCalls++;
+            super.beginQueryScope(mappedStatement, boundSql);
         }
     }
 

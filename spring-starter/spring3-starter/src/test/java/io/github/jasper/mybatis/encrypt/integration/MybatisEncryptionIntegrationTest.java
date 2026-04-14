@@ -464,6 +464,25 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldDecryptPlainDtoWithoutEncryptFieldUsingMappedStatementProjection() {
+        UserRecord user = user(52L, "Rita", "13200132052", "320101199001010152");
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            PlainUserProjectionDto dto = mapper.selectPlainProjectionDto(52L);
+            assertNotNull(dto);
+            assertEquals(52L, dto.getId());
+            assertEquals("Rita", dto.getDisplayName());
+            assertEquals("13200132052", dto.getPhone());
+            assertEquals("320101199001010152", dto.getIdCard());
+        }
+    }
+
+    @Test
     void shouldReadNestedDtoAssociationListAcrossStorageModes() throws Exception {
         UserRecord owner = user(61L, "Rita", "13300133061", "320101199001010161");
         UserRecord reviewer = user(62L, "Sam", "13300133062", "320101199001010162");
@@ -1191,6 +1210,16 @@ class MybatisEncryptionIntegrationTest {
         UserProjectionDto selectUserProjectionDto(@Param("id") Long id);
 
         @Select("""
+                select id,
+                       name as display_name,
+                       phone,
+                       id_card
+                from user_account
+                where id = #{id}
+                """)
+        PlainUserProjectionDto selectPlainProjectionDto(@Param("id") Long id);
+
+        @Select("""
                 select o.id as order_id,
                        owner.id as owner_id,
                        owner.name as owner_display_name,
@@ -1661,6 +1690,46 @@ class MybatisEncryptionIntegrationTest {
                 assistedQueryColumn = "id_card_hash",
                 likeQueryColumn = "id_card_like"
         )
+        private String idCard;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getIdCard() {
+            return idCard;
+        }
+
+        public void setIdCard(String idCard) {
+            this.idCard = idCard;
+        }
+    }
+
+    static class PlainUserProjectionDto {
+
+        private Long id;
+        private String displayName;
+        private String phone;
         private String idCard;
 
         public Long getId() {

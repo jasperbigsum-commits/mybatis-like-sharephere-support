@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.util.List;
 import java.util.Map;
@@ -29,21 +30,19 @@ class ResultDecryptorTest {
     @Test
     void shouldDecryptAnnotatedEntityCollection() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
-        ResultDecryptor decryptor = new ResultDecryptor(
-                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader()),
-                new AlgorithmRegistry(
-                        Map.of("sm4", sm4),
-                        Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
-                        Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
-                ),
-                null
-        );
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
 
         UserEntity entity = new UserEntity();
         entity.setPhone(sm4.encrypt("13800138000"));
         entity.setName("jasper");
 
-        decryptor.decrypt(List.of(entity));
+        MappedStatement mappedStatement = entityMappedStatement(UserEntity.class, "test.selectEntity");
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(entity));
+        } finally {
+            decryptor.endQueryScope();
+        }
 
         assertEquals("13800138000", entity.getPhone());
         assertEquals("jasper", entity.getName());
@@ -52,21 +51,19 @@ class ResultDecryptorTest {
     @Test
     void shouldDecryptFieldLevelAnnotatedDtoWithoutEncryptTable() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
-        ResultDecryptor decryptor = new ResultDecryptor(
-                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader()),
-                new AlgorithmRegistry(
-                        Map.of("sm4", sm4),
-                        Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
-                        Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
-                ),
-                null
-        );
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
 
         UserProjectionDto dto = new UserProjectionDto();
         dto.setPhone(sm4.encrypt("13900139000"));
         dto.setName("nora");
 
-        decryptor.decrypt(List.of(dto));
+        MappedStatement mappedStatement = entityMappedStatement(UserProjectionDto.class, "test.selectAnnotatedDto");
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(dto));
+        } finally {
+            decryptor.endQueryScope();
+        }
 
         assertEquals("13900139000", dto.getPhone());
         assertEquals("nora", dto.getName());
@@ -75,22 +72,14 @@ class ResultDecryptorTest {
     @Test
     void shouldDecryptMappedNestedPropertyWithoutTraversingUnmappedGetter() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
-        ResultDecryptor decryptor = new ResultDecryptor(
-                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader()),
-                new AlgorithmRegistry(
-                        Map.of("sm4", sm4),
-                        Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
-                        Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
-                ),
-                null
-        );
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
         ProjectionWrapper wrapper = new ProjectionWrapper();
         UserProjectionDto dto = new UserProjectionDto();
         dto.setPhone(sm4.encrypt("13700137000"));
         wrapper.setUser(dto);
         MappedStatement mappedStatement = mappedStatement();
 
-        decryptor.beginQueryScope(mappedStatement);
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
         try {
             assertDoesNotThrow(() -> decryptor.decrypt(List.of(wrapper)));
         } finally {
@@ -98,6 +87,58 @@ class ResultDecryptorTest {
         }
 
         assertEquals("13700137000", wrapper.getUser().getPhone());
+    }
+
+    @Test
+    void shouldDecryptConfiguredDtoWithoutEncryptFieldByExplicitResultMapping() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13600136000"));
+        dto.setName("iris");
+        MappedStatement mappedStatement = configuredDtoMappedStatement();
+
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(dto));
+        } finally {
+            decryptor.endQueryScope();
+        }
+
+        assertEquals("13600136000", dto.getPhone());
+        assertEquals("iris", dto.getName());
+    }
+
+    @Test
+    void shouldDecryptConfiguredDtoWithoutEncryptFieldByAutoMappedProjectionAlias() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13500135000"));
+        dto.setName("zoe");
+        MappedStatement mappedStatement = autoMappedConfiguredDtoStatement();
+
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(dto));
+        } finally {
+            decryptor.endQueryScope();
+        }
+
+        assertEquals("13500135000", dto.getPhone());
+        assertEquals("zoe", dto.getName());
+    }
+
+    private ResultDecryptor createDecryptor(Sm4CipherAlgorithm sm4, DatabaseEncryptionProperties properties) {
+        return new ResultDecryptor(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                new AlgorithmRegistry(
+                        Map.of("sm4", sm4),
+                        Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
+                        Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
+                ),
+                null
+        );
     }
 
     private MappedStatement mappedStatement() {
@@ -109,6 +150,59 @@ class ResultDecryptorTest {
         return new MappedStatement.Builder(configuration, "test.selectWrapper", sqlSource, SqlCommandType.SELECT)
                 .resultMaps(List.of(resultMap))
                 .build();
+    }
+
+    private MappedStatement entityMappedStatement(Class<?> resultType, String id) {
+        Configuration configuration = new Configuration();
+        ResultMap resultMap = new ResultMap.Builder(configuration, id + ".rm", resultType, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration, "select * from user_account", List.of(),
+                parameterObject);
+        return new MappedStatement.Builder(configuration, id, sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement configuredDtoMappedStatement() {
+        Configuration configuration = new Configuration();
+        ResultMapping idMapping = new ResultMapping.Builder(configuration, "id", "id", Long.class).build();
+        ResultMapping nameMapping = new ResultMapping.Builder(configuration, "name", "name", String.class).build();
+        ResultMapping phoneMapping = new ResultMapping.Builder(configuration, "phone", "phone_value", String.class).build();
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.configuredDtoMap", PlainUserProjectionDto.class,
+                List.of(idMapping, nameMapping, phoneMapping)).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id, u.name, u.phone as phone_value from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, "test.selectConfiguredDto", sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement autoMappedConfiguredDtoStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.autoMappedConfiguredDto", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id, u.name, u.phone as phone from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, "test.selectAutoMappedConfiguredDto", sqlSource,
+                SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private DatabaseEncryptionProperties configuredUserTableProperties() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("user_account");
+        DatabaseEncryptionProperties.FieldRuleProperties phoneRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        phoneRule.setColumn("phone");
+        phoneRule.setProperty("phone");
+        phoneRule.setStorageColumn("phone");
+        phoneRule.setCipherAlgorithm("sm4");
+        tableRule.setFields(List.of(phoneRule));
+        properties.setTables(List.of(tableRule));
+        assertNotNull(properties.getTables());
+        return properties;
     }
 
     @EncryptTable("user_account")
@@ -142,6 +236,37 @@ class ResultDecryptorTest {
         private String phone;
 
         private String name;
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+    }
+
+    static class PlainUserProjectionDto {
+
+        private Long id;
+        private String phone;
+        private String name;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
 
         public String getPhone() {
             return phone;

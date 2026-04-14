@@ -14,7 +14,13 @@ import java.util.List;
  */
 public final class QueryResultPlan {
 
+    private static final QueryResultPlan EMPTY = new QueryResultPlan(Collections.emptyList());
+
     private final List<TypePlan> typePlans;
+
+    public static QueryResultPlan empty() {
+        return EMPTY;
+    }
 
     /**
      * 创建查询结果计划。

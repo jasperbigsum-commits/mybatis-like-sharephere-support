@@ -145,8 +145,35 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("*, `phone_cipher` AS phone") || result.sql().contains("*, `phone_cipher` phone"));
+        assertTrue(result.sql().contains("`phone_cipher` AS phone, *")
+                || result.sql().contains("`phone_cipher` phone, *"));
         assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteAliasedWildcardByPrependingEncryptedAliasBeforeTableWildcard() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.*, o.id FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_cipher` AS phone, u.*, o.id")
+                || result.sql().contains("u.`phone_cipher` phone, u.*, o.id"));
+        assertFalse(result.sql().contains("u.*, u.`phone_cipher` AS phone"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?"));
     }
 
     @Test

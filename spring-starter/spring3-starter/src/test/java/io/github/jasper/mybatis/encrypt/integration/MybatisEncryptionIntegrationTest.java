@@ -613,6 +613,57 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldReadComplexDashboardProjectionWithoutTouchingUnmappedBusinessGetters() throws Exception {
+        UserRecord owner = user(87L, "Dora", "13500135087", "320101199001010187");
+        UserRecord reviewer = user(88L, "Ethan", "13500135088", "320101199001010188");
+        UserRecord participant = user(89L, "Fiona", "13500135089", "320101199001010189");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(owner));
+            assertEquals(1, mapper.insertUser(reviewer));
+            assertEquals(1, mapper.insertUser(participant));
+        }
+
+        insertOrderAccountRow(603L, 87L, 88L, 6003L, "dashboard-risk", "grid-m3", 0);
+        insertOrderParticipantRow(707L, 603L, 87L, 1);
+        insertOrderParticipantRow(708L, 603L, 88L, 2);
+        insertOrderParticipantRow(709L, 603L, 89L, 3);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertDoesNotThrow(() -> {
+                List<ProblematicDashboardDto> dashboards = mapper.selectProblematicDashboards();
+                assertEquals(1, dashboards.size());
+
+                ProblematicDashboardDto dashboard = dashboards.get(0);
+                assertEquals(603L, dashboard.getOrderId());
+                assertEquals("dashboard-risk", dashboard.getRemark());
+                assertNotNull(dashboard.getParticipants());
+                assertNotNull(dashboard.getParticipants().getOwner());
+                assertEquals("Dora", dashboard.getParticipants().getOwner().getDisplayName());
+                assertEquals("13500135087", dashboard.getParticipants().getOwner().getPhone());
+                assertEquals("320101199001010187", dashboard.getParticipants().getOwner().getIdCard());
+                assertNotNull(dashboard.getParticipants().getReviewer());
+                assertEquals("Ethan", dashboard.getParticipants().getReviewer().getDisplayName());
+                assertEquals("13500135088", dashboard.getParticipants().getReviewer().getPhone());
+                assertEquals("320101199001010188", dashboard.getParticipants().getReviewer().getIdCard());
+                assertNotNull(dashboard.getParticipantList());
+                assertEquals(3, dashboard.getParticipantList().size());
+                assertEquals("Dora", dashboard.getParticipantList().get(0).getDisplayName());
+                assertEquals("13500135087", dashboard.getParticipantList().get(0).getPhone());
+                assertEquals("320101199001010187", dashboard.getParticipantList().get(0).getIdCard());
+                assertEquals("Ethan", dashboard.getParticipantList().get(1).getDisplayName());
+                assertEquals("13500135088", dashboard.getParticipantList().get(1).getPhone());
+                assertEquals("320101199001010188", dashboard.getParticipantList().get(1).getIdCard());
+                assertEquals("Fiona", dashboard.getParticipantList().get(2).getDisplayName());
+                assertEquals("13500135089", dashboard.getParticipantList().get(2).getPhone());
+                assertEquals("320101199001010189", dashboard.getParticipantList().get(2).getIdCard());
+            });
+        }
+    }
+
+    @Test
     void shouldReadMultiUnionNestedSubqueryQueryAcrossStorageModes() throws Exception {
         UserRecord first = user(91L, "Milo", "13600136091", "320101199001010191");
         UserRecord second = user(92L, "Nina", "13600136092", "320101199001010192");
@@ -1198,6 +1249,39 @@ class MybatisEncryptionIntegrationTest {
         List<ComplexMixedModeOrderDto> selectComplexMixedModeOrders();
 
         @Select("""
+                select o.id as order_id,
+                       o.remark as order_remark,
+                       owner.id as owner_id,
+                       owner.name as owner_display_name,
+                       owner.phone as owner_phone,
+                       owner.id_card as owner_id_card,
+                       reviewer.id as reviewer_id,
+                       reviewer.name as reviewer_display_name,
+                       reviewer.phone as reviewer_phone,
+                       reviewer.id_card as reviewer_id_card
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                join user_account reviewer on o.related_user_id = reviewer.id
+                where o.deleted = 0
+                order by o.id
+                """)
+        @Results(id = "problematicDashboardMap", value = {
+                @Result(property = "orderId", column = "order_id"),
+                @Result(property = "remark", column = "order_remark"),
+                @Result(property = "participants.owner.id", column = "owner_id"),
+                @Result(property = "participants.owner.displayName", column = "owner_display_name"),
+                @Result(property = "participants.owner.phone", column = "owner_phone"),
+                @Result(property = "participants.owner.idCard", column = "owner_id_card"),
+                @Result(property = "participants.reviewer.id", column = "reviewer_id"),
+                @Result(property = "participants.reviewer.displayName", column = "reviewer_display_name"),
+                @Result(property = "participants.reviewer.phone", column = "reviewer_phone"),
+                @Result(property = "participants.reviewer.idCard", column = "reviewer_id_card"),
+                @Result(property = "participantList", column = "order_id",
+                        many = @Many(select = "selectDangerousParticipantsByOrderId"))
+        })
+        List<ProblematicDashboardDto> selectProblematicDashboards();
+
+        @Select("""
                 select t.id,
                        t.display_name,
                        t.phone,
@@ -1349,6 +1433,18 @@ class MybatisEncryptionIntegrationTest {
                 order by op.seq_no
                 """)
         List<UserProjectionDto> selectParticipantsByOrderId(@Param("orderId") Long orderId);
+
+        @Select("""
+                select u.id,
+                       u.name as display_name,
+                       u.phone_cipher as phone,
+                       u.id_card
+                from order_participant op
+                join user_account u on op.user_id = u.id
+                where op.order_id = #{orderId}
+                order by op.seq_no
+                """)
+        List<DangerousUserProjectionDto> selectDangerousParticipantsByOrderId(@Param("orderId") Long orderId);
 
         @Update("""
                 update user_account
@@ -1693,6 +1789,139 @@ class MybatisEncryptionIntegrationTest {
 
         public void setParticipantList(List<UserProjectionDto> participantList) {
             this.participantList = participantList;
+        }
+    }
+
+    static class ProblematicDashboardDto {
+
+        private Long orderId;
+        private String remark;
+        private ProblematicParticipantBundleDto participants;
+        private List<DangerousUserProjectionDto> participantList;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getRemark() {
+            return remark;
+        }
+
+        public void setRemark(String remark) {
+            this.remark = remark;
+        }
+
+        public ProblematicParticipantBundleDto getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(ProblematicParticipantBundleDto participants) {
+            this.participants = participants;
+        }
+
+        public List<DangerousUserProjectionDto> getParticipantList() {
+            return participantList;
+        }
+
+        public void setParticipantList(List<DangerousUserProjectionDto> participantList) {
+            this.participantList = participantList;
+        }
+
+        public String getDashboardSummary() {
+            throw new IllegalStateException("unmapped dashboard getter should not be touched");
+        }
+    }
+
+    static class ProblematicParticipantBundleDto {
+
+        private DangerousUserProjectionDto owner;
+        private DangerousUserProjectionDto reviewer;
+
+        public DangerousUserProjectionDto getOwner() {
+            return owner;
+        }
+
+        public void setOwner(DangerousUserProjectionDto owner) {
+            this.owner = owner;
+        }
+
+        public DangerousUserProjectionDto getReviewer() {
+            return reviewer;
+        }
+
+        public void setReviewer(DangerousUserProjectionDto reviewer) {
+            this.reviewer = reviewer;
+        }
+
+        public String getParticipantDigest() {
+            throw new IllegalStateException("unmapped participant bundle getter should not be touched");
+        }
+    }
+
+    static class DangerousUserProjectionDto {
+
+        private Long id;
+        private String displayName;
+
+        @EncryptField(
+                table = "user_account",
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone_like"
+        )
+        private String phone;
+
+        @EncryptField(
+                table = "user_account",
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like"
+        )
+        private String idCard;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getIdCard() {
+            return idCard;
+        }
+
+        public void setIdCard(String idCard) {
+            this.idCard = idCard;
+        }
+
+        public String getDerivedMask() {
+            throw new IllegalStateException("unmapped user projection getter should not be touched");
         }
     }
 

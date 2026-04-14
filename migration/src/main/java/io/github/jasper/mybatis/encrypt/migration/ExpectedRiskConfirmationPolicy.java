@@ -41,7 +41,7 @@ public class ExpectedRiskConfirmationPolicy implements MigrationConfirmationPoli
         }
         if (!actualEntries.equals(expectedEntries)) {
             throw new MigrationException("Configured confirmation scope does not match actual mutation scope for entity: "
-                    + plan.getEntityType().getName());
+                    + plan.getEntityName());
         }
     }
 }

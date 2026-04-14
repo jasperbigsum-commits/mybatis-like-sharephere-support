@@ -188,13 +188,15 @@ class DatabaseEncryptionInterceptorTest {
         tableRule.setTable("user_account");
 
         DatabaseEncryptionProperties.FieldRuleProperties phoneRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        phoneRule.setProperty("phone");
         phoneRule.setColumn("phone");
         phoneRule.setStorageColumn("phone_cipher");
         phoneRule.setAssistedQueryColumn("phone_hash");
         phoneRule.setLikeQueryColumn("phone_like");
-        tableRule.getFields().put("phone", phoneRule);
+        tableRule.getFields().add(phoneRule);
 
         DatabaseEncryptionProperties.FieldRuleProperties idCardRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        idCardRule.setProperty("idCard");
         idCardRule.setColumn("id_card");
         idCardRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
         idCardRule.setStorageTable("user_id_card_encrypt");
@@ -202,9 +204,9 @@ class DatabaseEncryptionInterceptorTest {
         idCardRule.setStorageIdColumn("id");
         idCardRule.setAssistedQueryColumn("id_card_hash");
         idCardRule.setLikeQueryColumn("id_card_like");
-        tableRule.getFields().put("idCard", idCardRule);
+        tableRule.getFields().add(idCardRule);
 
-        properties.getTables().put("userAccount", tableRule);
+        properties.getTables().add(tableRule);
         properties.setDefaultCipherKey("unit-test-key");
         properties.setLogMaskedSql(false);
         return properties;

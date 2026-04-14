@@ -30,21 +30,23 @@ public class EntityMigrationPlanFactory {
      * @return entityMigrationPlan 实例
      */
     public EntityMigrationPlan create(EntityMigrationDefinition definition) {
-        EncryptTableRule tableRule = metadataRegistry.findByEntity(definition.getEntityType())
-                .orElseThrow(() -> new MigrationException("Missing registered entity encryption rule: "
-                        + definition.getEntityType().getName()));
+        ResolvedDefinition resolved = resolveDefinition(definition);
+        EncryptTableRule tableRule = resolved.tableRule();
         String normalizedTable = tableRule.getTableName();
         List<EntityMigrationColumnPlan> columnPlans = new ArrayList<EntityMigrationColumnPlan>();
         for (EncryptColumnRule columnRule : tableRule.getColumnRules()) {
-            if (StringUtils.isNotBlank(columnRule.table())
+            if (resolved.entityType() != null
+                    && StringUtils.isNotBlank(columnRule.table())
                     && !normalizedTable.equals(NameUtils.normalizeIdentifier(columnRule.table()))) {
                 throw new MigrationException("Migration only supports registered entity rules and ignores DTO fields: "
-                        + definition.getEntityType().getName());
+                        + resolved.entityName());
             }
             if (!definition.getIncludedProperties().isEmpty()
                     && !definition.getIncludedProperties().contains(columnRule.property())) {
                 continue;
             }
+            String backupColumn = definition.getBackupColumns().get(columnRule.property());
+            validateBackupColumn(columnRule, backupColumn);
             columnPlans.add(new EntityMigrationColumnPlan(
                     columnRule.property(),
                     columnRule.column(),
@@ -56,14 +58,69 @@ public class EntityMigrationPlanFactory {
                     columnRule.likeQueryAlgorithm(),
                     columnRule.isStoredInSeparateTable(),
                     columnRule.storageTable(),
-                    columnRule.storageIdColumn()
+                    columnRule.storageIdColumn(),
+                    backupColumn
             ));
         }
         if (columnPlans.isEmpty()) {
-            throw new MigrationException("No encrypt fields available for entity migration: "
-                    + definition.getEntityType().getName());
+            throw new MigrationException("No encrypt fields available for migration target: "
+                    + resolved.entityName());
         }
-        return new EntityMigrationPlan(definition.getEntityType(), normalizedTable, definition.getIdColumn(),
+        return new EntityMigrationPlan(resolved.entityType(), resolved.entityName(), normalizedTable,
+                definition.getCursorColumns(),
                 definition.getBatchSize(), definition.isVerifyAfterWrite(), columnPlans);
+    }
+
+    private void validateBackupColumn(EncryptColumnRule columnRule, String backupColumn) {
+        if (StringUtils.isBlank(backupColumn)) {
+            return;
+        }
+        String normalizedBackup = NameUtils.normalizeIdentifier(backupColumn);
+        if (normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.column()))
+                || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.storageColumn()))
+                || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.assistedQueryColumn()))
+                || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.likeQueryColumn()))) {
+            throw new MigrationException("Backup column conflicts with migration target columns for property: "
+                    + columnRule.property());
+        }
+    }
+
+    private ResolvedDefinition resolveDefinition(EntityMigrationDefinition definition) {
+        if (definition.getEntityType() != null) {
+            Class<?> entityType = definition.getEntityType();
+            EncryptTableRule tableRule = metadataRegistry.findByEntity(entityType)
+                    .orElseThrow(() -> new MigrationException("Missing registered entity encryption rule: "
+                            + entityType.getName()));
+            return new ResolvedDefinition(entityType, entityType.getName(), tableRule);
+        }
+        String tableName = definition.getTableName();
+        EncryptTableRule tableRule = metadataRegistry.findByTable(tableName)
+                .orElseThrow(() -> new MigrationException("Missing registered table encryption rule: " + tableName));
+        return new ResolvedDefinition(null, tableRule.getTableName(), tableRule);
+    }
+
+    private static final class ResolvedDefinition {
+
+        private final Class<?> entityType;
+        private final String entityName;
+        private final EncryptTableRule tableRule;
+
+        private ResolvedDefinition(Class<?> entityType, String entityName, EncryptTableRule tableRule) {
+            this.entityType = entityType;
+            this.entityName = entityName;
+            this.tableRule = tableRule;
+        }
+
+        private Class<?> entityType() {
+            return entityType;
+        }
+
+        private String entityName() {
+            return entityName;
+        }
+
+        private EncryptTableRule tableRule() {
+            return tableRule;
+        }
     }
 }

@@ -37,13 +37,16 @@ public class FileMigrationStateStore implements MigrationStateStore {
             MigrationState state = new MigrationState();
             state.setEntityName(properties.getProperty("entityName"));
             state.setTableName(properties.getProperty("tableName"));
-            state.setIdColumn(properties.getProperty("idColumn"));
-            state.setIdJavaType(properties.getProperty("idJavaType"));
+            state.setCursorColumns(readIndexedList(properties, "cursorColumns",
+                    firstNonBlank(properties.getProperty("cursorColumn"), properties.getProperty("idColumn"))));
+            state.setCursorJavaTypes(readIndexedList(properties, "cursorJavaTypes",
+                    firstNonBlank(properties.getProperty("cursorJavaType"), properties.getProperty("idJavaType"))));
             state.setStatus(MigrationStatus.valueOf(properties.getProperty("status", MigrationStatus.READY.name())));
             state.setTotalRows(parseLong(properties.getProperty("totalRows")));
-            state.setRangeStart(properties.getProperty("rangeStart"));
-            state.setRangeEnd(properties.getProperty("rangeEnd"));
-            state.setLastProcessedId(properties.getProperty("lastProcessedId"));
+            state.setRangeStartValues(readIndexedList(properties, "rangeStartValues", properties.getProperty("rangeStart")));
+            state.setRangeEndValues(readIndexedList(properties, "rangeEndValues", properties.getProperty("rangeEnd")));
+            state.setLastProcessedCursorValues(readIndexedList(properties, "lastProcessedCursorValues",
+                    firstNonBlank(properties.getProperty("lastProcessedCursor"), properties.getProperty("lastProcessedId"))));
             state.setScannedRows(parseLong(properties.getProperty("scannedRows")));
             state.setMigratedRows(parseLong(properties.getProperty("migratedRows")));
             state.setSkippedRows(parseLong(properties.getProperty("skippedRows")));
@@ -66,13 +69,31 @@ public class FileMigrationStateStore implements MigrationStateStore {
         Properties properties = new Properties();
         writeIfPresent(properties, "entityName", state.getEntityName());
         writeIfPresent(properties, "tableName", state.getTableName());
-        writeIfPresent(properties, "idColumn", state.getIdColumn());
-        writeIfPresent(properties, "idJavaType", state.getIdJavaType());
+        writeIndexedList(properties, "cursorColumns", state.getCursorColumns());
+        writeIndexedList(properties, "cursorJavaTypes", state.getCursorJavaTypes());
+        if (state.getCursorColumns().size() == 1) {
+            writeIfPresent(properties, "cursorColumn", state.getCursorColumn());
+            writeIfPresent(properties, "idColumn", state.getCursorColumn());
+        }
+        if (state.getCursorJavaTypes().size() == 1) {
+            writeIfPresent(properties, "cursorJavaType", state.getCursorJavaType());
+            writeIfPresent(properties, "idJavaType", state.getCursorJavaType());
+        }
         properties.setProperty("status", state.getStatus().name());
         properties.setProperty("totalRows", Long.toString(state.getTotalRows()));
-        writeIfPresent(properties, "rangeStart", state.getRangeStart());
-        writeIfPresent(properties, "rangeEnd", state.getRangeEnd());
-        writeIfPresent(properties, "lastProcessedId", state.getLastProcessedId());
+        writeIndexedList(properties, "rangeStartValues", state.getRangeStartValues());
+        writeIndexedList(properties, "rangeEndValues", state.getRangeEndValues());
+        writeIndexedList(properties, "lastProcessedCursorValues", state.getLastProcessedCursorValues());
+        if (state.getRangeStartValues().size() == 1) {
+            writeIfPresent(properties, "rangeStart", state.getRangeStart());
+        }
+        if (state.getRangeEndValues().size() == 1) {
+            writeIfPresent(properties, "rangeEnd", state.getRangeEnd());
+        }
+        if (state.getLastProcessedCursorValues().size() == 1) {
+            writeIfPresent(properties, "lastProcessedCursor", state.getLastProcessedCursor());
+            writeIfPresent(properties, "lastProcessedId", state.getLastProcessedCursor());
+        }
         properties.setProperty("scannedRows", Long.toString(state.getScannedRows()));
         properties.setProperty("migratedRows", Long.toString(state.getMigratedRows()));
         properties.setProperty("skippedRows", Long.toString(state.getSkippedRows()));
@@ -87,7 +108,7 @@ public class FileMigrationStateStore implements MigrationStateStore {
     }
 
     private Path fileOf(EntityMigrationPlan plan) {
-        String name = sanitize(plan.getEntityType().getName()) + "__" + sanitize(plan.getTableName()) + ".properties";
+        String name = sanitize(plan.getEntityName()) + "__" + sanitize(plan.getTableName()) + ".properties";
         return directory.resolve(name);
     }
 
@@ -95,9 +116,44 @@ public class FileMigrationStateStore implements MigrationStateStore {
         return value.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
+    private String firstNonBlank(String first, String second) {
+        return StringUtils.isNotBlank(first) ? first : second;
+    }
+
     private void writeIfPresent(Properties properties, String key, String value) {
         if (StringUtils.isNotBlank(value)) {
             properties.setProperty(key, value);
+        }
+    }
+
+    private java.util.List<String> readIndexedList(Properties properties, String prefix, String fallbackValue) {
+        java.util.List<String> values = new java.util.ArrayList<String>();
+        for (int index = 0; ; index++) {
+            String value = properties.getProperty(prefix + "." + index);
+            if (value == null && !properties.containsKey(prefix + "." + index)) {
+                break;
+            }
+            values.add(value);
+        }
+        if (!values.isEmpty()) {
+            return values;
+        }
+        if (fallbackValue == null) {
+            return java.util.Collections.emptyList();
+        }
+        values.add(fallbackValue);
+        return values;
+    }
+
+    private void writeIndexedList(Properties properties, String prefix, java.util.List<String> values) {
+        if (values == null) {
+            return;
+        }
+        for (int index = 0; index < values.size(); index++) {
+            String value = values.get(index);
+            if (value != null) {
+                properties.setProperty(prefix + "." + index, value);
+            }
         }
     }
 

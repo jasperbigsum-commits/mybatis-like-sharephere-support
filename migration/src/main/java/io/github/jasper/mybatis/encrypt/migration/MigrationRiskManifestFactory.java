@@ -22,6 +22,9 @@ public class MigrationRiskManifestFactory {
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             if (columnPlan.isStoredInSeparateTable()) {
                 entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getSourceColumn()));
+                if (columnPlan.shouldWriteBackup()) {
+                    entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getBackupColumn()));
+                }
                 entries.add(new MigrationRiskEntry("INSERT", columnPlan.getStorageTable(), columnPlan.getStorageIdColumn()));
                 entries.add(new MigrationRiskEntry("INSERT", columnPlan.getStorageTable(), columnPlan.getStorageColumn()));
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
@@ -34,6 +37,9 @@ public class MigrationRiskManifestFactory {
                 }
                 continue;
             }
+            if (columnPlan.shouldWriteBackup()) {
+                entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getBackupColumn()));
+            }
             entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getStorageColumn()));
             if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
                 entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getAssistedQueryColumn()));
@@ -42,7 +48,7 @@ public class MigrationRiskManifestFactory {
                 entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getLikeQueryColumn()));
             }
         }
-        return new MigrationRiskManifest(plan.getEntityType().getName(), plan.getTableName(),
+        return new MigrationRiskManifest(plan.getEntityName(), plan.getTableName(), plan.getCursorColumns(),
                 new ArrayList<>(entries));
     }
 }

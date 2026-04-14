@@ -472,9 +472,10 @@ public class SqlRewriteEngine {
                     "LIKE query requires likeQueryColumn for encrypted field: " + rule.property());
         }
         expression.setLeftExpression(buildColumn(resolution.column(), rule.likeQueryColumn()));
-        rewriteOperand(expression.getRightExpression(), context,
-                valueTransformer.transformLike(rule, readOperandValue(expression.getRightExpression(), context)),
-                MaskingMode.MASKED);
+        QueryOperand queryOperand = readComposableQueryOperand(expression.getRightExpression(), context,
+                "Encrypted LIKE condition must use prepared parameter, string literal, or CONCAT of them.");
+        expression.setRightExpression(buildComposableQueryExpression(queryOperand, context,
+                valueTransformer.transformLike(rule, queryOperand.value()), MaskingMode.MASKED));
         context.markChanged();
         return expression;
     }
@@ -575,11 +576,14 @@ public class SqlRewriteEngine {
             throw new UnsupportedEncryptedOperationException(
                     "Separate-table encrypted field requires query column: " + rule.property());
         }
+        QueryOperand queryOperand = readComposableQueryOperand(operand, context,
+                "Separate-table encrypted query must use prepared parameter, string literal, or CONCAT of them.");
         String transformed = assisted
-                ? valueTransformer.transformAssisted(rule, readOperandValue(operand, context))
-                : valueTransformer.transformLike(rule, readOperandValue(operand, context));
-        replaceOperandBinding(operand, context, transformed, assisted ? MaskingMode.HASH : MaskingMode.MASKED);
-        return buildExistsSubQuery(resolution.column(), rule, targetColumn, buildQueryValueExpression(operand, transformed), assisted);
+                ? valueTransformer.transformAssisted(rule, queryOperand.value())
+                : valueTransformer.transformLike(rule, queryOperand.value());
+        return buildExistsSubQuery(resolution.column(), rule, targetColumn,
+                buildComposableQueryExpression(queryOperand, context, transformed,
+                        assisted ? MaskingMode.HASH : MaskingMode.MASKED), assisted);
     }
 
     private void replaceOperandBinding(Expression operand, SqlRewriteContext context, String transformed, MaskingMode maskingMode) {
@@ -747,6 +751,59 @@ public class SqlRewriteEngine {
             return new NullValue();
         }
         throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
+    }
+
+    private QueryOperand readComposableQueryOperand(Expression expression,
+                                                    SqlRewriteContext context,
+                                                    String unsupportedMessage) {
+        if (expression instanceof JdbcParameter) {
+            int parameterIndex = context.consumeOriginal();
+            return QueryOperand.parameter(context.originalValue(parameterIndex), parameterIndex);
+        }
+        if (expression instanceof StringValue) {
+            return QueryOperand.literal(((StringValue) expression).getValue());
+        }
+        if (expression instanceof LongValue) {
+            return QueryOperand.literal(((LongValue) expression).getStringValue());
+        }
+        if (expression instanceof NullValue) {
+            return QueryOperand.literal(null);
+        }
+        if (expression instanceof Parenthesis) {
+            return readComposableQueryOperand(((Parenthesis) expression).getExpression(), context, unsupportedMessage);
+        }
+        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
+            Function function = (Function) expression;
+            if (!"concat".equalsIgnoreCase(function.getName())) {
+                throw new UnsupportedEncryptedOperationException(unsupportedMessage);
+            }
+            StringBuilder builder = new StringBuilder();
+            List<Integer> parameterIndexes = new ArrayList<>();
+            for (Expression item : function.getParameters()) {
+                QueryOperand part = readComposableQueryOperand(item, context, unsupportedMessage);
+                parameterIndexes.addAll(part.parameterIndexes());
+                if (part.value() == null) {
+                    return new QueryOperand(null, parameterIndexes);
+                }
+                builder.append(part.value());
+            }
+            return new QueryOperand(builder.toString(), parameterIndexes);
+        }
+        throw new UnsupportedEncryptedOperationException(unsupportedMessage);
+    }
+
+    private Expression buildComposableQueryExpression(QueryOperand operand,
+                                                      SqlRewriteContext context,
+                                                      String transformed,
+                                                      MaskingMode maskingMode) {
+        if (!operand.parameterized()) {
+            return transformed == null ? new NullValue() : new StringValue(transformed);
+        }
+        List<Integer> parameterIndexes = operand.parameterIndexes();
+        for (int i = parameterIndexes.size() - 1; i >= 0; i--) {
+            context.removeParameter(parameterIndexes.get(i));
+        }
+        return context.insertSynthetic(transformed, maskingMode);
     }
 
     /**
@@ -1328,6 +1385,39 @@ public class SqlRewriteEngine {
 
         private boolean parameterized() {
             return parameterized;
+        }
+    }
+
+    private static final class QueryOperand {
+
+        private final Object value;
+        private final List<Integer> parameterIndexes;
+
+        private QueryOperand(Object value, List<Integer> parameterIndexes) {
+            this.value = value;
+            this.parameterIndexes = parameterIndexes;
+        }
+
+        private static QueryOperand parameter(Object value, int parameterIndex) {
+            List<Integer> parameterIndexes = new ArrayList<>(1);
+            parameterIndexes.add(parameterIndex);
+            return new QueryOperand(value, parameterIndexes);
+        }
+
+        private static QueryOperand literal(Object value) {
+            return new QueryOperand(value, new ArrayList<>());
+        }
+
+        private Object value() {
+            return value;
+        }
+
+        private List<Integer> parameterIndexes() {
+            return parameterIndexes;
+        }
+
+        private boolean parameterized() {
+            return !parameterIndexes.isEmpty();
         }
     }
 

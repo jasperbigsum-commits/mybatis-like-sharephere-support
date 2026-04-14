@@ -16,6 +16,7 @@ public final class EntityMigrationColumnPlan {
     private final boolean storedInSeparateTable;
     private final String storageTable;
     private final String storageIdColumn;
+    private final String backupColumn;
 
     /**
      * Create one immutable column migration plan.
@@ -31,6 +32,7 @@ public final class EntityMigrationColumnPlan {
      * @param storedInSeparateTable whether the field uses separate-table storage
      * @param storageTable separate-table name when enabled
      * @param storageIdColumn physical primary key column in the separate table
+     * @param backupColumn optional plaintext backup column in the main table
      */
     public EntityMigrationColumnPlan(String property,
                                      String sourceColumn,
@@ -42,7 +44,8 @@ public final class EntityMigrationColumnPlan {
                                      String likeQueryAlgorithm,
                                      boolean storedInSeparateTable,
                                      String storageTable,
-                                     String storageIdColumn) {
+                                     String storageIdColumn,
+                                     String backupColumn) {
         this.property = property;
         this.sourceColumn = sourceColumn;
         this.storageColumn = storageColumn;
@@ -54,6 +57,7 @@ public final class EntityMigrationColumnPlan {
         this.storedInSeparateTable = storedInSeparateTable;
         this.storageTable = storageTable;
         this.storageIdColumn = storageIdColumn;
+        this.backupColumn = backupColumn;
     }
 
     /**
@@ -149,9 +153,36 @@ public final class EntityMigrationColumnPlan {
     /**
      * Return the physical primary key column in the separate table.
      *
-     * @return separate-table id column
+     * @return separate-table primary key column
      */
     public String getStorageIdColumn() {
         return storageIdColumn;
+    }
+
+    /**
+     * Return the optional plaintext backup column in the main table.
+     *
+     * @return backup column, or {@code null}
+     */
+    public String getBackupColumn() {
+        return backupColumn;
+    }
+
+    /**
+     * Return whether migration overwrites the plaintext source column.
+     *
+     * @return {@code true} when source plaintext will be replaced
+     */
+    public boolean overwritesSourceColumn() {
+        return storedInSeparateTable || sourceColumn.equals(storageColumn);
+    }
+
+    /**
+     * Return whether migration should write a plaintext backup column.
+     *
+     * @return {@code true} when backup is configured and source is overwritten
+     */
+    public boolean shouldWriteBackup() {
+        return backupColumn != null && !backupColumn.trim().isEmpty() && overwritesSourceColumn();
     }
 }

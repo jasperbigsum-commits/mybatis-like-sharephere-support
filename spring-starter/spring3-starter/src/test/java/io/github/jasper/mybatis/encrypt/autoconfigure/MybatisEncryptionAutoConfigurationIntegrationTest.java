@@ -1,6 +1,8 @@
 package io.github.jasper.mybatis.encrypt.autoconfigure;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.migration.MigrationReport;
+import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 import jakarta.annotation.Resource;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -48,6 +50,9 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
     @Resource
     private SqlSessionFactory sqlSessionFactory;
 
+    @Resource
+    private MigrationTaskFactory migrationTaskFactory;
+
     @BeforeEach
     void setUp() throws Exception {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
@@ -57,10 +62,13 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
                     create table user_account (
                         id bigint primary key,
                         name varchar(64),
+                        phone varchar(64),
+                        phone_backup varchar(64),
                         phone_cipher varchar(512),
                         phone_hash varchar(128),
                         phone_like varchar(255),
-                        id_card varchar(128)
+                        id_card varchar(128),
+                        id_card_backup varchar(128)
                     )
                     """);
             statement.execute("""
@@ -77,10 +85,44 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
     @Test
     void shouldAutoConfigurePluginBeansAndEntityScanning() {
         assertNotNull(interceptor);
+        assertNotNull(migrationTaskFactory);
         assertTrue(metadataRegistry.findByEntity(AutoConfiguredUserRecord.class).isPresent());
         assertEquals(1, sqlSessionFactory.getConfiguration().getInterceptors().stream()
                 .filter(DatabaseEncryptionInterceptor.class::isInstance)
                 .count());
+    }
+
+    @Test
+    void shouldExecuteMigrationThroughAutoConfiguredTaskFactory() throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute(
+                    "insert into user_account (id, name, phone, id_card) values (21, 'Bob', '13900139000', '320101199001011235')");
+        }
+
+        MigrationReport report = migrationTaskFactory.executeForEntity(
+                AutoConfiguredUserRecord.class,
+                "id",
+                builder -> builder.backupColumn("idCard", "id_card_backup"));
+
+        assertEquals(1L, report.getMigratedRows());
+        assertEquals("21", report.getLastProcessedCursor());
+
+        AutoConfiguredUserRecord byPhone = mapper.selectByPhone("13900139000");
+        assertNotNull(byPhone);
+        assertEquals("Bob", byPhone.getName());
+        assertEquals("13900139000", byPhone.getPhone());
+        assertEquals("320101199001011235", byPhone.getIdCard());
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select id_card, id_card_backup, phone_cipher, phone_hash from user_account where id = 21")) {
+            assertTrue(resultSet.next());
+            assertNotEquals("320101199001011235", resultSet.getString("id_card"));
+            assertEquals("320101199001011235", resultSet.getString("id_card_backup"));
+            assertNotEquals("13900139000", resultSet.getString("phone_cipher"));
+            assertNotNull(resultSet.getString("phone_hash"));
+        }
     }
 
     @Test

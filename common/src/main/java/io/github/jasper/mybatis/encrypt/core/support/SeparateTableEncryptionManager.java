@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.support;
 
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
@@ -89,6 +90,23 @@ public class SeparateTableEncryptionManager {
             return;
         }
         hydrateCollection(collectHydrationCandidates(resultObject));
+    }
+
+    /**
+     * 对查询结果执行独立表字段回填与解密，并优先使用本次查询的结果计划。
+     *
+     * @param resultObject 查询结果对象或集合
+     * @param queryResultPlan 当前查询结果计划
+     */
+    public void hydrateResults(Object resultObject, QueryResultPlan queryResultPlan) {
+        if (resultObject == null) {
+            return;
+        }
+        if (queryResultPlan == null) {
+            hydrateResults(resultObject);
+            return;
+        }
+        hydrateWithPlan(resultObject, queryResultPlan);
     }
 
     /**
@@ -354,6 +372,56 @@ public class SeparateTableEncryptionManager {
         });
     }
 
+    private boolean hydrateWithPlan(Object resultObject, QueryResultPlan queryResultPlan) {
+        boolean handled = false;
+        Map<HydrationKey, Map<Object, List<MetaObject>>> grouped = new LinkedHashMap<>();
+        for (Object candidate : topLevelResults(resultObject)) {
+            if (candidate == null || candidate instanceof Map<?, ?> || isSimpleValueType(candidate.getClass())) {
+                continue;
+            }
+            QueryResultPlan.TypePlan typePlan = queryResultPlan.findPlan(candidate.getClass());
+            if (typePlan == null) {
+                continue;
+            }
+            handled = true;
+            MetaObject metaObject = SystemMetaObject.forObject(candidate);
+            for (QueryResultPlan.PropertyPlan propertyPlan : typePlan.getPropertyPlans()) {
+                EncryptColumnRule rule = propertyPlan.getRule();
+                if (!rule.isStoredInSeparateTable()) {
+                    continue;
+                }
+                String propertyPath = propertyPlan.getPropertyPath();
+                if (!metaObject.hasGetter(propertyPath) || !metaObject.hasSetter(propertyPath)) {
+                    continue;
+                }
+                Object referenceId = metaObject.getValue(propertyPath);
+                if (referenceId == null) {
+                    continue;
+                }
+                grouped.computeIfAbsent(new HydrationKey(rule, propertyPath), ignored -> new LinkedHashMap<>())
+                        .computeIfAbsent(normalizeReferenceId(referenceId), ignored -> new ArrayList<>())
+                        .add(metaObject);
+            }
+        }
+        grouped.forEach((hydrationKey, metaById) -> hydratePlannedRule(hydrationKey, metaById));
+        return handled;
+    }
+
+    private void hydratePlannedRule(HydrationKey hydrationKey, Map<Object, List<MetaObject>> metaById) {
+        if (metaById.isEmpty()) {
+            return;
+        }
+        Map<Object, String> cipherById = loadCipherValues(hydrationKey.rule(), new ArrayList<>(metaById.keySet()));
+        cipherById.forEach((referenceId, cipherText) -> {
+            List<MetaObject> metaObjects = metaById.get(referenceId);
+            if (metaObjects == null || cipherText == null) {
+                return;
+            }
+            String plainText = algorithmRegistry.cipher(hydrationKey.rule().cipherAlgorithm()).decrypt(cipherText);
+            metaObjects.forEach(metaObject -> metaObject.setValue(hydrationKey.propertyPath(), plainText));
+        });
+    }
+
     private Map<Object, String> loadCipherValues(EncryptColumnRule rule, List<Object> ids) {
         String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(", "));
         String sql = "select " + quote(rule.assistedQueryColumn()) + ", " + quote(rule.storageColumn())
@@ -541,6 +609,24 @@ public class SeparateTableEncryptionManager {
         return toReferenceId(referenceId);
     }
 
+    private Collection<?> topLevelResults(Object resultObject) {
+        if (resultObject == null) {
+            return Collections.emptyList();
+        }
+        if (resultObject instanceof Collection<?>) {
+            return (Collection<?>) resultObject;
+        }
+        if (resultObject.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(resultObject);
+            List<Object> results = new ArrayList<>(length);
+            for (int index = 0; index < length; index++) {
+                results.add(java.lang.reflect.Array.get(resultObject, index));
+            }
+            return results;
+        }
+        return Collections.singletonList(resultObject);
+    }
+
     private String assignHash(EncryptColumnRule rule, Object plainValue) {
         return algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue));
     }
@@ -573,6 +659,42 @@ public class SeparateTableEncryptionManager {
         private int decrementDepth() {
             depth--;
             return depth;
+        }
+    }
+
+    private static final class HydrationKey {
+
+        private final EncryptColumnRule rule;
+        private final String propertyPath;
+
+        private HydrationKey(EncryptColumnRule rule, String propertyPath) {
+            this.rule = rule;
+            this.propertyPath = propertyPath;
+        }
+
+        private EncryptColumnRule rule() {
+            return rule;
+        }
+
+        private String propertyPath() {
+            return propertyPath;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof HydrationKey)) {
+                return false;
+            }
+            HydrationKey that = (HydrationKey) other;
+            return Objects.equals(rule, that.rule) && Objects.equals(propertyPath, that.propertyPath);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(rule, propertyPath);
         }
     }
 

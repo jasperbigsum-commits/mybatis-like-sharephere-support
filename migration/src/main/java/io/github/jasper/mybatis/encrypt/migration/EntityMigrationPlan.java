@@ -1,5 +1,6 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -9,8 +10,9 @@ import java.util.List;
 public final class EntityMigrationPlan {
 
     private final Class<?> entityType;
+    private final String entityName;
     private final String tableName;
-    private final String idColumn;
+    private final List<String> cursorColumns;
     private final int batchSize;
     private final boolean verifyAfterWrite;
     private final List<EntityMigrationColumnPlan> columnPlans;
@@ -18,22 +20,25 @@ public final class EntityMigrationPlan {
     /**
      * Create one immutable entity migration plan.
      *
-     * @param entityType registered entity type
+     * @param entityType registered entity type, or {@code null} for table-driven tasks
+     * @param entityName entity or task display name
      * @param tableName normalized main-table name
-     * @param idColumn primary key column in the main table
+     * @param cursorColumns ordered stable cursor columns in the main table
      * @param batchSize migration batch size
      * @param verifyAfterWrite whether write-after verification is enabled
      * @param columnPlans immutable column migration plans
      */
     public EntityMigrationPlan(Class<?> entityType,
+                               String entityName,
                                String tableName,
-                               String idColumn,
+                               List<String> cursorColumns,
                                int batchSize,
                                boolean verifyAfterWrite,
                                List<EntityMigrationColumnPlan> columnPlans) {
         this.entityType = entityType;
+        this.entityName = entityName;
         this.tableName = tableName;
-        this.idColumn = idColumn;
+        this.cursorColumns = Collections.unmodifiableList(new ArrayList<String>(cursorColumns));
         this.batchSize = batchSize;
         this.verifyAfterWrite = verifyAfterWrite;
         this.columnPlans = Collections.unmodifiableList(columnPlans);
@@ -49,6 +54,15 @@ public final class EntityMigrationPlan {
     }
 
     /**
+     * Return the entity or task display name used in reports and state files.
+     *
+     * @return entity or task display name
+     */
+    public String getEntityName() {
+        return entityName;
+    }
+
+    /**
      * Return the normalized main-table name.
      *
      * @return main-table name
@@ -58,12 +72,32 @@ public final class EntityMigrationPlan {
     }
 
     /**
-     * Return the primary key column in the main table.
+     * Return ordered stable cursor columns in the main table.
      *
-     * @return id column name
+     * @return immutable ordered cursor columns
      */
+    public List<String> getCursorColumns() {
+        return cursorColumns;
+    }
+
+    /**
+     * Return the first stable cursor column in the main table.
+     *
+     * @return first cursor column name
+     */
+    public String getCursorColumn() {
+        return cursorColumns.get(0);
+    }
+
+    /**
+     * Return the first stable cursor column in the main table.
+     *
+     * @return first cursor column name
+     * @deprecated use {@link #getCursorColumns()}
+     */
+    @Deprecated
     public String getIdColumn() {
-        return idColumn;
+        return getCursorColumn();
     }
 
     /**

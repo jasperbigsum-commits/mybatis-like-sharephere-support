@@ -35,12 +35,15 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
 
     @Override
     public void verify(Connection connection, EntityMigrationPlan plan, MigrationRecord record) throws SQLException {
-        Map<String, Object> mainRow = loadMainRow(connection, plan, record.getId());
+        Map<String, Object> mainRow = loadMainRow(connection, plan, record.getCursor());
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             Object plainValue = record.getColumnValue(columnPlan.getSourceColumn());
             MigrationValueResolver.DerivedFieldValues expected = valueResolver.resolve(columnPlan, plainValue);
             if (expected.isEmpty()) {
                 continue;
+            }
+            if (columnPlan.shouldWriteBackup()) {
+                assertMatches(columnPlan.getProperty(), "backup", plainValue, mainRow.get(columnPlan.getBackupColumn()));
             }
             if (columnPlan.isStoredInSeparateTable()) {
                 Object referenceId = mainRow.get(columnPlan.getSourceColumn());
@@ -86,7 +89,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         }
     }
 
-    private Map<String, Object> loadMainRow(Connection connection, EntityMigrationPlan plan, Object rowId)
+    private Map<String, Object> loadMainRow(Connection connection, EntityMigrationPlan plan, MigrationCursor rowCursor)
             throws SQLException {
         Set<String> columns = new LinkedHashSet<String>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
@@ -100,6 +103,9 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                     columns.add(columnPlan.getLikeQueryColumn());
                 }
             }
+            if (columnPlan.shouldWriteBackup()) {
+                columns.add(columnPlan.getBackupColumn());
+            }
         }
         StringBuilder sql = new StringBuilder("select ");
         int index = 0;
@@ -110,12 +116,16 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             sql.append(quote(column));
         }
         sql.append(" from ").append(quote(plan.getTableName()))
-                .append(" where ").append(quote(plan.getIdColumn())).append(" = ?");
+                .append(" where ");
+        appendCursorEqualityPredicate(sql, plan.getCursorColumns());
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            statement.setObject(1, rowId);
+            int parameterIndex = 1;
+            for (Object cursorValue : rowCursor.getValues().values()) {
+                statement.setObject(parameterIndex++, cursorValue);
+            }
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
-                    throw new MigrationVerificationException("Missing migrated row in main table: " + rowId);
+                    throw new MigrationVerificationException("Missing migrated row in main table: " + rowCursor);
                 }
                 Map<String, Object> row = new LinkedHashMap<String, Object>();
                 for (String column : columns) {
@@ -162,6 +172,15 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         String actualText = actual == null ? null : String.valueOf(actual);
         if (expectedText == null ? actualText != null : !expectedText.equals(actualText)) {
             throw new MigrationVerificationException("Verification failed for property " + property + " aspect " + aspect);
+        }
+    }
+
+    private void appendCursorEqualityPredicate(StringBuilder sql, java.util.List<String> cursorColumns) {
+        for (int index = 0; index < cursorColumns.size(); index++) {
+            if (index > 0) {
+                sql.append(" and ");
+            }
+            sql.append(quote(cursorColumns.get(index))).append(" = ?");
         }
     }
 

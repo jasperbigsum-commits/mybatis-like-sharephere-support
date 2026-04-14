@@ -3,9 +3,7 @@ package io.github.jasper.mybatis.encrypt.config;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 数据库加密插件的外部配置。
@@ -56,9 +54,9 @@ public class DatabaseEncryptionProperties {
     private SqlDialect sqlDialect = SqlDialect.MYSQL;
 
     /**
-     * 配置中显式声明的按表加密规则，键可以是逻辑名或表别名。
+     * 配置中显式声明的按表加密规则列表。
      */
-    private Map<String, TableRuleProperties> tables = new LinkedHashMap<>();
+    private List<TableRuleProperties> tables = new ArrayList<>();
 
     /**
      * 返回插件总开关。
@@ -144,7 +142,9 @@ public class DatabaseEncryptionProperties {
      * 设置 默认盐
      * @param defaultHexSlat 默认盐
      */
-    public void setDefaultHexSlat(String defaultHexSlat) {}
+    public void setDefaultHexSlat(String defaultHexSlat) {
+        this.defaultHexSlat = defaultHexSlat;
+    }
 
     /**
      * 返回是否启用实体注解扫描。
@@ -205,7 +205,7 @@ public class DatabaseEncryptionProperties {
      *
      * @return 表规则配置
      */
-    public Map<String, TableRuleProperties> getTables() {
+    public List<TableRuleProperties> getTables() {
         return tables;
     }
 
@@ -214,7 +214,7 @@ public class DatabaseEncryptionProperties {
      *
      * @param tables 表规则配置
      */
-    public void setTables(Map<String, TableRuleProperties> tables) {
+    public void setTables(List<TableRuleProperties> tables) {
         this.tables = tables;
     }
 
@@ -224,14 +224,14 @@ public class DatabaseEncryptionProperties {
     public static class TableRuleProperties {
 
         /**
-         * 物理表名；省略时外层 map 的键会作为默认表名。
+         * 物理表名。
          */
         private String table;
 
         /**
-         * 以实体属性名为键的字段规则集合。
+         * 字段规则集合。
          */
-        private Map<String, FieldRuleProperties> fields = new LinkedHashMap<>();
+        private List<FieldRuleProperties> fields = new ArrayList<>();
 
         /**
          * 返回物理表名。
@@ -256,7 +256,7 @@ public class DatabaseEncryptionProperties {
          *
          * @return 字段规则映射
          */
-        public Map<String, FieldRuleProperties> getFields() {
+        public List<FieldRuleProperties> getFields() {
             return fields;
         }
 
@@ -265,7 +265,7 @@ public class DatabaseEncryptionProperties {
          *
          * @param fields 字段规则映射
          */
-        public void setFields(Map<String, FieldRuleProperties> fields) {
+        public void setFields(List<FieldRuleProperties> fields) {
             this.fields = fields;
         }
     }
@@ -274,6 +274,11 @@ public class DatabaseEncryptionProperties {
      * 字段级加密规则定义。
      */
     public static class FieldRuleProperties {
+
+        /**
+         * 实体属性名；省略时优先按 {@link #column} 推断驼峰属性名。
+         */
+        private String property;
 
         /**
          * 应用 SQL 使用的原始业务列名；配置省略时使用属性名的 snake_case。
@@ -296,7 +301,7 @@ public class DatabaseEncryptionProperties {
         private String storageColumn;
 
         /**
-         * 外部存储表中的标识列。
+         * 外部存储表中的物理主键列。
          */
         private String storageIdColumn;
 
@@ -324,6 +329,24 @@ public class DatabaseEncryptionProperties {
          * LIKE 查询算法 bean 名称。
          */
         private String likeQueryAlgorithm = "normalizedLike";
+
+        /**
+         * 返回实体属性名。
+         *
+         * @return 实体属性名
+         */
+        public String getProperty() {
+            return property;
+        }
+
+        /**
+         * 设置实体属性名。
+         *
+         * @param property 实体属性名
+         */
+        public void setProperty(String property) {
+            this.property = property;
+        }
 
         /**
          * 返回原始业务列名。
@@ -398,18 +421,18 @@ public class DatabaseEncryptionProperties {
         }
 
         /**
-         * 返回独立表 id 列。
+         * 返回独立表物理主键列。
          *
-         * @return 独立表 id 列名
+         * @return 独立表物理主键列名
          */
         public String getStorageIdColumn() {
             return storageIdColumn;
         }
 
         /**
-         * 设置独立表 id 列。
+         * 设置独立表物理主键列。
          *
-         * @param storageIdColumn 独立表 id 列名
+         * @param storageIdColumn 独立表物理主键列名
          */
         public void setStorageIdColumn(String storageIdColumn) {
             this.storageIdColumn = storageIdColumn;
@@ -506,4 +529,3 @@ public class DatabaseEncryptionProperties {
         }
     }
 }
-

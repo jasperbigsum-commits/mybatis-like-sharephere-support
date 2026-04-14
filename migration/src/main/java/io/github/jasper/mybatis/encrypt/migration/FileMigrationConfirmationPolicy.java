@@ -48,7 +48,8 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
                 configuredEntries.add(properties.getProperty(name));
             }
         }
-        if (!expectedEntries.equals(configuredEntries)) {
+        if (!manifest.getCursorColumns().equals(readIndexedValues(properties, "cursorColumns."))
+                || !expectedEntries.equals(configuredEntries)) {
             writeTemplate(file, manifest, Boolean.parseBoolean(properties.getProperty("approved", "false")));
             throw new MigrationException("Migration confirmation file does not match actual mutation scope: " + file);
         }
@@ -67,6 +68,9 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         properties.setProperty("approved", Boolean.toString(approved));
         properties.setProperty("entityName", manifest.getEntityName());
         properties.setProperty("tableName", manifest.getTableName());
+        for (int index = 0; index < manifest.getCursorColumns().size(); index++) {
+            properties.setProperty("cursorColumns." + index, manifest.getCursorColumns().get(index));
+        }
         int index = 1;
         for (MigrationRiskEntry entry : manifest.getEntries()) {
             properties.setProperty("entry." + index++, entry.asToken());
@@ -79,9 +83,21 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
     }
 
     private Path confirmationFile(EntityMigrationPlan plan) {
-        String fileName = plan.getEntityType().getName().replaceAll("[^a-zA-Z0-9._-]", "_")
+        String fileName = plan.getEntityName().replaceAll("[^a-zA-Z0-9._-]", "_")
                 + "__" + plan.getTableName().replaceAll("[^a-zA-Z0-9._-]", "_")
                 + ".confirm.properties";
         return directory.resolve(fileName);
+    }
+
+    private java.util.List<String> readIndexedValues(Properties properties, String prefix) {
+        java.util.List<String> values = new java.util.ArrayList<String>();
+        for (int index = 0; ; index++) {
+            String value = properties.getProperty(prefix + index);
+            if (value == null) {
+                break;
+            }
+            values.add(value);
+        }
+        return values;
     }
 }

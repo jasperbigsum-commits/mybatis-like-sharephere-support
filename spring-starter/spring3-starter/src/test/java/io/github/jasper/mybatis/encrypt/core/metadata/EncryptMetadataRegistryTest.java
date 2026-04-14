@@ -20,13 +20,13 @@ class EncryptMetadataRegistryTest {
         fieldRule.setStorageTable("user_phone_encrypt_store");
         fieldRule.setStorageIdColumn("encrypt_id");
         fieldRule.setAssistedQueryColumn("phone_hash");
-        tableRule.getFields().put("phone", fieldRule);
-        properties.getTables().put("userPhoneEncrypt", tableRule);
+        tableRule.getFields().add(fieldRule);
+        properties.getTables().add(tableRule);
 
         EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
         EncryptColumnRule rule = registry.findByTable("user_phone_encrypt")
                 .orElseThrow()
-                .findByProperty("phone")
+                .findByColumn("phone_ref")
                 .orElseThrow();
 
         assertEquals("encrypt_id", rule.storageIdColumn());
@@ -43,16 +43,43 @@ class EncryptMetadataRegistryTest {
         fieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
         fieldRule.setStorageTable("user_phone_encrypt_store");
         fieldRule.setAssistedQueryColumn("phone_hash");
-        tableRule.getFields().put("phone", fieldRule);
-        properties.getTables().put("userPhoneEncrypt", tableRule);
+        tableRule.getFields().add(fieldRule);
+        properties.getTables().add(tableRule);
 
         EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
         EncryptColumnRule rule = registry.findByTable("user_phone_encrypt")
                 .orElseThrow()
-                .findByProperty("phone")
+                .findByColumn("phone_ref")
                 .orElseThrow();
 
         assertEquals("id", rule.storageIdColumn());
+    }
+
+    @Test
+    void shouldInferConfiguredPropertyFromColumnAndResolveConfigOnlyEntityRule() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("user_account");
+
+        DatabaseEncryptionProperties.FieldRuleProperties fieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        fieldRule.setColumn("id_card");
+        fieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
+        fieldRule.setStorageTable("user_id_card_encrypt");
+        fieldRule.setStorageColumn("id_card_cipher");
+        fieldRule.setAssistedQueryColumn("id_card_hash");
+        tableRule.getFields().add(fieldRule);
+        properties.getTables().add(tableRule);
+
+        EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
+
+        assertTrue(registry.findByTable("user_account")
+                .orElseThrow()
+                .findByProperty("idCard")
+                .isPresent());
+        assertTrue(registry.findByEntity(UserAccount.class)
+                .orElseThrow()
+                .findByProperty("idCard")
+                .isPresent());
     }
 
     @Test
@@ -84,6 +111,11 @@ class EncryptMetadataRegistryTest {
 
     static class PlainEntity {
         private Long id;
+    }
+
+    static class UserAccount {
+        private Long id;
+        private String idCard;
     }
 
     static class MultiTableDto {

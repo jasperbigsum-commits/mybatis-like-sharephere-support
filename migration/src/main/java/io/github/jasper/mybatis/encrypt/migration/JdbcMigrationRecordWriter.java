@@ -45,6 +45,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
             if (derivedFieldValues.isEmpty()) {
                 continue;
             }
+            if (columnPlan.shouldWriteBackup()) {
+                mainTableUpdates.put(columnPlan.getBackupColumn(), plainValue);
+            }
             if (columnPlan.isStoredInSeparateTable()) {
                 String referenceHash = derivedFieldValues.getHashValue();
                 if (!existsSeparateReference(connection, columnPlan, referenceHash)) {
@@ -65,11 +68,14 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         if (mainTableUpdates.isEmpty()) {
             return false;
         }
-        updateMainTable(connection, plan, record.getId(), mainTableUpdates);
+        updateMainTable(connection, plan, record.getCursor(), mainTableUpdates);
         return true;
     }
 
-    private void updateMainTable(Connection connection, EntityMigrationPlan plan, Object rowId, Map<String, Object> updates)
+    private void updateMainTable(Connection connection,
+                                 EntityMigrationPlan plan,
+                                 MigrationCursor rowCursor,
+                                 Map<String, Object> updates)
             throws SQLException {
         StringBuilder sql = new StringBuilder("update ").append(quote(plan.getTableName())).append(" set ");
         int index = 0;
@@ -79,14 +85,26 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
             }
             sql.append(quote(column)).append(" = ?");
         }
-        sql.append(" where ").append(quote(plan.getIdColumn())).append(" = ?");
+        sql.append(" where ");
+        appendCursorEqualityPredicate(sql, plan.getCursorColumns());
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             int parameterIndex = 1;
             for (Object value : updates.values()) {
                 statement.setObject(parameterIndex++, value);
             }
-            statement.setObject(parameterIndex, rowId);
+            for (Object cursorValue : rowCursor.getValues().values()) {
+                statement.setObject(parameterIndex++, cursorValue);
+            }
             statement.executeUpdate();
+        }
+    }
+
+    private void appendCursorEqualityPredicate(StringBuilder sql, List<String> cursorColumns) {
+        for (int index = 0; index < cursorColumns.size(); index++) {
+            if (index > 0) {
+                sql.append(" and ");
+            }
+            sql.append(quote(cursorColumns.get(index))).append(" = ?");
         }
     }
 

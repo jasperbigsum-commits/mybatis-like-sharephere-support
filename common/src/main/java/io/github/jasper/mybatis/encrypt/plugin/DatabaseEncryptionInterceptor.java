@@ -80,7 +80,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
             return interceptExecutor(invocation);
         }
         if (target instanceof ResultSetHandler) {
-            return resultDecryptor.decrypt(invocation.proceed());
+            return interceptResultSet(invocation);
         }
         return invocation.proceed();
     }
@@ -104,7 +104,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         MappedStatement mappedStatement = (MappedStatement) args[0];
         boolean queryScopeOpened = false;
         if ("query".equals(invocation.getMethod().getName())) {
-            resultDecryptor.beginQueryScope();
+            resultDecryptor.beginQueryScope(mappedStatement);
             if (separateTableEncryptionManager != null) {
                 separateTableEncryptionManager.beginQueryScope();
             }
@@ -131,6 +131,22 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         }
     }
 
+    private Object interceptResultSet(Invocation invocation) throws Throwable {
+        MappedStatement mappedStatement = resolveResultSetMappedStatement(invocation.getTarget());
+        boolean queryScopeOpened = false;
+        if (mappedStatement != null) {
+            resultDecryptor.beginQueryScope(mappedStatement);
+            queryScopeOpened = true;
+        }
+        try {
+            return resultDecryptor.decrypt(invocation.proceed());
+        } finally {
+            if (queryScopeOpened) {
+                resultDecryptor.endQueryScope();
+            }
+        }
+    }
+
     /**
      * 解析当前执行链应使用的 BoundSql。
      *
@@ -147,6 +163,26 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
             return (BoundSql) args[5];
         }
         return mappedStatement.getBoundSql(parameterObject);
+    }
+
+    private MappedStatement resolveResultSetMappedStatement(Object target) {
+        if (target == null) {
+            return null;
+        }
+        MetaObject metaObject = SystemMetaObject.forObject(target);
+        if (metaObject.hasGetter("mappedStatement")) {
+            Object mappedStatement = metaObject.getValue("mappedStatement");
+            if (mappedStatement instanceof MappedStatement) {
+                return (MappedStatement) mappedStatement;
+            }
+        }
+        if (metaObject.hasGetter("delegate.mappedStatement")) {
+            Object mappedStatement = metaObject.getValue("delegate.mappedStatement");
+            if (mappedStatement instanceof MappedStatement) {
+                return (MappedStatement) mappedStatement;
+            }
+        }
+        return null;
     }
 
     /**

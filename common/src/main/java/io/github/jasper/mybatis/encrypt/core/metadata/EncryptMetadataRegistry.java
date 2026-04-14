@@ -115,30 +115,25 @@ public class EncryptMetadataRegistry {
         }
     }
 
-    private EncryptTableRule loadEntityRule(Class<?> entityType) {
-        EncryptTableRule annotationRule = annotationLoader.load(entityType);
-        if (annotationRule == null) {
-            return null;
-        }
-        annotationRule.getColumnRules().forEach(this::validateRule);
-        for (EncryptColumnRule columnRule : annotationRule.getColumnRules()) {
-            registerAnnotationColumnRule(annotationRule, columnRule);
-        }
-        return annotationRule;
-    }
-
     private void registerConfiguredRules(DatabaseEncryptionProperties properties) {
-        properties.getTables().forEach((name, tableProperties) -> {
-            String tableName = tableProperties.getTable() != null ? tableProperties.getTable() : name;
+        properties.getTables().forEach(tableProperties -> {
+            String tableName = tableProperties.getTable();
+            if (StringUtils.isBlank(tableName)) {
+                throw new IllegalArgumentException("Configured table rule must define table name.");
+            }
             EncryptTableRule tableRule = new EncryptTableRule(tableName);
-            tableProperties.getFields().forEach((property, fieldProperties) ->
-                    tableRule.addColumnRule(toColumnRule(property, fieldProperties)));
+            tableProperties.getFields().forEach(fieldProperties ->
+                    tableRule.addColumnRule(toColumnRule(fieldProperties)));
             tableRules.put(tableRule.getTableName(), tableRule);
         });
     }
 
-    private EncryptColumnRule toColumnRule(String property, DatabaseEncryptionProperties.FieldRuleProperties properties) {
+    private EncryptColumnRule toColumnRule(DatabaseEncryptionProperties.FieldRuleProperties properties) {
+        String property = resolveConfiguredProperty(properties);
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
+        if (StringUtils.isBlank(column)) {
+            throw new IllegalArgumentException("Configured field rule must define column or property name.");
+        }
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
                 null,
@@ -155,6 +150,16 @@ public class EncryptMetadataRegistry {
         );
         validateRule(rule);
         return rule;
+    }
+
+    private String resolveConfiguredProperty(DatabaseEncryptionProperties.FieldRuleProperties properties) {
+        if (StringUtils.isNotBlank(properties.getProperty())) {
+            return properties.getProperty();
+        }
+        if (StringUtils.isNotBlank(properties.getColumn())) {
+            return NameUtils.columnToProperty(properties.getColumn());
+        }
+        return null;
     }
 
     private void registerAnnotationColumnRule(EncryptTableRule entityRule, EncryptColumnRule columnRule) {
@@ -195,5 +200,105 @@ public class EncryptMetadataRegistry {
                 && !type.isPrimitive()
                 && !type.getName().startsWith("java.")
                 && !type.isEnum();
+    }
+
+    private EncryptTableRule loadEntityRule(Class<?> entityType) {
+        EncryptTableRule annotationRule = annotationLoader.load(entityType);
+        if (annotationRule != null) {
+            annotationRule.getColumnRules().forEach(this::validateRule);
+            for (EncryptColumnRule columnRule : annotationRule.getColumnRules()) {
+                registerAnnotationColumnRule(annotationRule, columnRule);
+            }
+            return annotationRule;
+        }
+        return loadConfiguredEntityRule(entityType);
+    }
+
+    private EncryptTableRule loadConfiguredEntityRule(Class<?> entityType) {
+        String tableName = resolveEntityTableName(entityType);
+        EncryptTableRule configuredTableRule = tableRules.get(NameUtils.normalizeIdentifier(tableName));
+        if (configuredTableRule == null) {
+            return null;
+        }
+        EncryptTableRule entityRule = new EncryptTableRule(tableName);
+        for (EncryptColumnRule columnRule : configuredTableRule.getColumnRules()) {
+            entityRule.addColumnRule(new EncryptColumnRule(
+                    resolveEntityProperty(entityType, columnRule),
+                    columnRule.table(),
+                    columnRule.column(),
+                    columnRule.cipherAlgorithm(),
+                    columnRule.assistedQueryColumn(),
+                    columnRule.assistedQueryAlgorithm(),
+                    columnRule.likeQueryColumn(),
+                    columnRule.likeQueryAlgorithm(),
+                    columnRule.storageMode(),
+                    columnRule.storageTable(),
+                    columnRule.storageColumn(),
+                    columnRule.storageIdColumn()
+            ));
+        }
+        return entityRule;
+    }
+
+    private String resolveEntityTableName(Class<?> entityType) {
+        String explicit = annotationValue(entityType,
+                "com.baomidou.mybatisplus.annotation.TableName", "value",
+                "jakarta.persistence.Table", "name",
+                "javax.persistence.Table", "name");
+        return StringUtils.isNotBlank(explicit) ? explicit : NameUtils.camelToSnake(entityType.getSimpleName());
+    }
+
+    private String resolveEntityProperty(Class<?> entityType, EncryptColumnRule columnRule) {
+        java.lang.reflect.Field matchedField = findFieldByColumn(entityType, columnRule.column());
+        return matchedField != null ? matchedField.getName() : columnRule.property();
+    }
+
+    private java.lang.reflect.Field findFieldByColumn(Class<?> entityType, String column) {
+        String normalizedColumn = NameUtils.normalizeIdentifier(column);
+        Class<?> current = entityType;
+        while (current != null && current != Object.class) {
+            for (java.lang.reflect.Field field : current.getDeclaredFields()) {
+                if (normalizedColumn.equals(NameUtils.normalizeIdentifier(resolveFieldColumn(field)))) {
+                    return field;
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return null;
+    }
+
+    private String resolveFieldColumn(java.lang.reflect.Field field) {
+        String explicit = annotationValue(field,
+                "com.baomidou.mybatisplus.annotation.TableField", "value",
+                "jakarta.persistence.Column", "name",
+                "javax.persistence.Column", "name");
+        return StringUtils.isNotBlank(explicit) ? explicit : NameUtils.camelToSnake(field.getName());
+    }
+
+    private String annotationValue(java.lang.reflect.AnnotatedElement element, String... annotationSpecs) {
+        for (int index = 0; index + 1 < annotationSpecs.length; index += 2) {
+            String value = annotationAttributeValue(element, annotationSpecs[index], annotationSpecs[index + 1]);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String annotationAttributeValue(java.lang.reflect.AnnotatedElement element,
+                                            String annotationClassName,
+                                            String attributeName) {
+        for (java.lang.annotation.Annotation annotation : element.getAnnotations()) {
+            if (!annotation.annotationType().getName().equals(annotationClassName)) {
+                continue;
+            }
+            try {
+                Object value = annotation.annotationType().getMethod(attributeName).invoke(annotation);
+                return value == null ? null : String.valueOf(value);
+            } catch (ReflectiveOperationException ex) {
+                return null;
+            }
+        }
+        return null;
     }
 }

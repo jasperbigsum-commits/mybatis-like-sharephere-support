@@ -1,10 +1,9 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
 import javax.sql.DataSource;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -69,7 +68,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
         state.setStatus(MigrationStatus.RUNNING);
         state.setLastError(null);
         stateStore.save(plan, state);
-        Object lastProcessedId = decodeId(state.getLastProcessedId(), state.getIdJavaType());
+        MigrationCursor lastProcessedCursor = MigrationCursorCodec.decode(
+                plan.getCursorColumns(), state.getLastProcessedCursorValues(), state.getCursorJavaTypes());
         try {
             while (true) {
                 List<MigrationRecord> batch;
@@ -77,7 +77,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                     boolean previousAutoCommit = connection.getAutoCommit();
                     connection.setAutoCommit(false);
                     try {
-                        batch = recordReader.readBatch(connection, plan, lastProcessedId);
+                        batch = recordReader.readBatch(connection, plan, lastProcessedCursor);
                         if (batch.isEmpty()) {
                             connection.commit();
                             state.setStatus(MigrationStatus.COMPLETED);
@@ -89,7 +89,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                         long batchMigrated = 0L;
                         long batchSkipped = 0L;
                         long batchVerified = 0L;
-                        Object batchLastProcessedId = lastProcessedId;
+                        MigrationCursor batchLastProcessedCursor = lastProcessedCursor;
                         for (MigrationRecord record : batch) {
                             batchScanned++;
                             boolean changed = recordWriter.write(connection, plan, record);
@@ -102,15 +102,15 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                             } else {
                                 batchSkipped++;
                             }
-                            batchLastProcessedId = record.getId();
+                            batchLastProcessedCursor = record.getCursor();
                         }
                         connection.commit();
                         state.setScannedRows(state.getScannedRows() + batchScanned);
                         state.setMigratedRows(state.getMigratedRows() + batchMigrated);
                         state.setSkippedRows(state.getSkippedRows() + batchSkipped);
                         state.setVerifiedRows(state.getVerifiedRows() + batchVerified);
-                        lastProcessedId = batchLastProcessedId;
-                        state.setLastProcessedId(stringifyId(lastProcessedId));
+                        lastProcessedCursor = batchLastProcessedCursor;
+                        state.setLastProcessedCursorValues(MigrationCursorCodec.stringify(lastProcessedCursor));
                         state.setLastError(null);
                         stateStore.save(plan, state);
                     } catch (RuntimeException | SQLException ex) {
@@ -123,22 +123,22 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             }
         } catch (RuntimeException | SQLException ex) {
             state.setStatus(MigrationStatus.FAILED);
-            state.setLastProcessedId(stringifyId(lastProcessedId));
+            state.setLastProcessedCursorValues(MigrationCursorCodec.stringify(lastProcessedCursor));
             state.setLastError(ex.getMessage());
             stateStore.save(plan, state);
             if (ex instanceof RuntimeException) {
                 throw (RuntimeException) ex;
             }
             throw new MigrationException("Failed to execute migration task for entity: "
-                    + plan.getEntityType().getName(), ex);
+                    + plan.getEntityName(), ex);
         }
     }
 
     private MigrationState newState() {
         MigrationState state = new MigrationState();
-        state.setEntityName(plan.getEntityType().getName());
+        state.setEntityName(plan.getEntityName());
         state.setTableName(plan.getTableName());
-        state.setIdColumn(plan.getIdColumn());
+        state.setCursorColumns(plan.getCursorColumns());
         state.setVerificationEnabled(plan.isVerifyAfterWrite());
         return state;
     }
@@ -146,54 +146,26 @@ public class JdbcEntityMigrationTask implements MigrationTask {
     private void refreshRange(MigrationState state) {
         try (Connection connection = dataSource.getConnection()) {
             MigrationRange range = rangeReader.readRange(connection, plan);
-            state.setEntityName(plan.getEntityType().getName());
+            state.setEntityName(plan.getEntityName());
             state.setTableName(plan.getTableName());
-            state.setIdColumn(plan.getIdColumn());
-            state.setIdJavaType(range.getIdJavaType() != null ? range.getIdJavaType() : state.getIdJavaType());
+            state.setCursorColumns(plan.getCursorColumns());
+            state.setCursorJavaTypes(!range.getCursorJavaTypes().isEmpty()
+                    ? range.getCursorJavaTypes() : state.getCursorJavaTypes());
             state.setVerificationEnabled(plan.isVerifyAfterWrite());
             state.setTotalRows(range.getTotalRows());
-            state.setRangeStart(stringifyId(range.getRangeStart()));
-            state.setRangeEnd(stringifyId(range.getRangeEnd()));
+            state.setRangeStartValues(MigrationCursorCodec.stringify(range.getRangeStartCursor()));
+            state.setRangeEndValues(MigrationCursorCodec.stringify(range.getRangeEndCursor()));
         } catch (SQLException ex) {
             throw new MigrationException("Failed to read migration range for entity: "
-                    + plan.getEntityType().getName(), ex);
+                    + plan.getEntityName(), ex);
         }
     }
 
     private boolean isCompletedForCurrentRange(MigrationState state) {
-        String currentEnd = state.getRangeEnd();
-        return currentEnd == null ? state.getLastProcessedId() == null : currentEnd.equals(state.getLastProcessedId());
-    }
-
-    private String stringifyId(Object value) {
-        return value == null ? null : String.valueOf(value);
-    }
-
-    private Object decodeId(String value, String typeName) {
-        if (value == null || typeName == null) {
-            return value;
-        }
-        if (Long.class.getName().equals(typeName) || "long".equals(typeName)) {
-            return Long.valueOf(value);
-        }
-        if (Integer.class.getName().equals(typeName) || "int".equals(typeName)) {
-            return Integer.valueOf(value);
-        }
-        if (Short.class.getName().equals(typeName) || "short".equals(typeName)) {
-            return Short.valueOf(value);
-        }
-        if (Double.class.getName().equals(typeName) || "double".equals(typeName)) {
-            return Double.valueOf(value);
-        }
-        if (Float.class.getName().equals(typeName) || "float".equals(typeName)) {
-            return Float.valueOf(value);
-        }
-        if (BigInteger.class.getName().equals(typeName)) {
-            return new BigInteger(value);
-        }
-        if (BigDecimal.class.getName().equals(typeName)) {
-            return new BigDecimal(value);
-        }
-        return value;
+        List<String> currentEnd = state.getRangeEndValues();
+        List<String> lastProcessed = state.getLastProcessedCursorValues();
+        return currentEnd == null || currentEnd.isEmpty()
+                ? lastProcessed == null || lastProcessed.isEmpty()
+                : currentEnd.equals(lastProcessed == null ? Collections.<String>emptyList() : lastProcessed);
     }
 }

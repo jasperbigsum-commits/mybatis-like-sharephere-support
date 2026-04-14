@@ -1,5 +1,9 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Persisted resumable state for one entity migration task.
  */
@@ -7,13 +11,13 @@ public class MigrationState {
 
     private String entityName;
     private String tableName;
-    private String idColumn;
-    private String idJavaType;
+    private List<String> cursorColumns = Collections.emptyList();
+    private List<String> cursorJavaTypes = Collections.emptyList();
     private MigrationStatus status = MigrationStatus.READY;
     private long totalRows;
-    private String rangeStart;
-    private String rangeEnd;
-    private String lastProcessedId;
+    private List<String> rangeStartValues = Collections.emptyList();
+    private List<String> rangeEndValues = Collections.emptyList();
+    private List<String> lastProcessedCursorValues = Collections.emptyList();
     private long scannedRows;
     private long migratedRows;
     private long skippedRows;
@@ -58,39 +62,75 @@ public class MigrationState {
     }
 
     /**
-     * Return the id column name.
+     * Return ordered cursor column names.
      *
-     * @return id column name
+     * @return immutable cursor columns
      */
-    public String getIdColumn() {
-        return idColumn;
+    public List<String> getCursorColumns() {
+        return cursorColumns;
     }
 
     /**
-     * Set the id column name.
+     * Set ordered cursor column names.
      *
-     * @param idColumn id column name
+     * @param cursorColumns ordered cursor columns
      */
-    public void setIdColumn(String idColumn) {
-        this.idColumn = idColumn;
+    public void setCursorColumns(List<String> cursorColumns) {
+        this.cursorColumns = immutableCopy(cursorColumns);
     }
 
     /**
-     * Return the Java type name of the id column.
+     * Return the first cursor column name.
      *
-     * @return id Java type name
+     * @return first cursor column name
      */
-    public String getIdJavaType() {
-        return idJavaType;
+    public String getCursorColumn() {
+        return cursorColumns.isEmpty() ? null : cursorColumns.get(0);
     }
 
     /**
-     * Set the Java type name of the id column.
+     * Set one single cursor column name.
      *
-     * @param idJavaType id Java type name
+     * @param cursorColumn cursor column name
      */
-    public void setIdJavaType(String idJavaType) {
-        this.idJavaType = idJavaType;
+    public void setCursorColumn(String cursorColumn) {
+        this.cursorColumns = singletonOrEmpty(cursorColumn);
+    }
+
+    /**
+     * Return Java type names of ordered cursor columns.
+     *
+     * @return immutable cursor Java type names
+     */
+    public List<String> getCursorJavaTypes() {
+        return cursorJavaTypes;
+    }
+
+    /**
+     * Set Java type names of ordered cursor columns.
+     *
+     * @param cursorJavaTypes ordered cursor Java type names
+     */
+    public void setCursorJavaTypes(List<String> cursorJavaTypes) {
+        this.cursorJavaTypes = immutableCopy(cursorJavaTypes);
+    }
+
+    /**
+     * Return the Java type name of the first cursor column.
+     *
+     * @return first cursor Java type name
+     */
+    public String getCursorJavaType() {
+        return cursorJavaTypes.isEmpty() ? null : cursorJavaTypes.get(0);
+    }
+
+    /**
+     * Set the Java type name of one single cursor column.
+     *
+     * @param cursorJavaType cursor Java type name
+     */
+    public void setCursorJavaType(String cursorJavaType) {
+        this.cursorJavaTypes = singletonOrEmpty(cursorJavaType);
     }
 
     /**
@@ -130,57 +170,177 @@ public class MigrationState {
     }
 
     /**
-     * Return the smallest id in the task range.
+     * Return serialized range-start cursor values.
      *
-     * @return range start value
+     * @return immutable range-start cursor values
+     */
+    public List<String> getRangeStartValues() {
+        return rangeStartValues;
+    }
+
+    /**
+     * Set serialized range-start cursor values.
+     *
+     * @param rangeStartValues range-start cursor values
+     */
+    public void setRangeStartValues(List<String> rangeStartValues) {
+        this.rangeStartValues = immutableCopy(rangeStartValues);
+    }
+
+    /**
+     * Return serialized range-end cursor values.
+     *
+     * @return immutable range-end cursor values
+     */
+    public List<String> getRangeEndValues() {
+        return rangeEndValues;
+    }
+
+    /**
+     * Set serialized range-end cursor values.
+     *
+     * @param rangeEndValues range-end cursor values
+     */
+    public void setRangeEndValues(List<String> rangeEndValues) {
+        this.rangeEndValues = immutableCopy(rangeEndValues);
+    }
+
+    /**
+     * Return serialized last-processed cursor checkpoint values.
+     *
+     * @return immutable last-processed cursor values
+     */
+    public List<String> getLastProcessedCursorValues() {
+        return lastProcessedCursorValues;
+    }
+
+    /**
+     * Set serialized last-processed cursor checkpoint values.
+     *
+     * @param lastProcessedCursorValues last-processed cursor values
+     */
+    public void setLastProcessedCursorValues(List<String> lastProcessedCursorValues) {
+        this.lastProcessedCursorValues = immutableCopy(lastProcessedCursorValues);
+    }
+
+    /**
+     * Return the smallest cursor in the task range.
+     *
+     * @return range-start display value
      */
     public String getRangeStart() {
-        return rangeStart;
+        return display(rangeStartValues);
     }
 
     /**
-     * Set the smallest id in the task range.
+     * Set the smallest cursor in the task range for one single cursor column.
      *
-     * @param rangeStart range start value
+     * @param rangeStart range-start display value
      */
     public void setRangeStart(String rangeStart) {
-        this.rangeStart = rangeStart;
+        this.rangeStartValues = singletonOrEmpty(rangeStart);
     }
 
     /**
-     * Return the greatest id in the task range.
+     * Return the greatest cursor in the task range.
      *
-     * @return range end value
+     * @return range-end display value
      */
     public String getRangeEnd() {
-        return rangeEnd;
+        return display(rangeEndValues);
     }
 
     /**
-     * Set the greatest id in the task range.
+     * Set the greatest cursor in the task range for one single cursor column.
      *
-     * @param rangeEnd range end value
+     * @param rangeEnd range-end display value
      */
     public void setRangeEnd(String rangeEnd) {
-        this.rangeEnd = rangeEnd;
+        this.rangeEndValues = singletonOrEmpty(rangeEnd);
     }
 
     /**
-     * Return the latest committed id checkpoint.
+     * Return the latest committed cursor checkpoint.
      *
-     * @return last processed id
+     * @return last processed cursor display value
      */
+    public String getLastProcessedCursor() {
+        return display(lastProcessedCursorValues);
+    }
+
+    /**
+     * Set the latest committed cursor checkpoint for one single cursor column.
+     *
+     * @param lastProcessedCursor last processed cursor display value
+     */
+    public void setLastProcessedCursor(String lastProcessedCursor) {
+        this.lastProcessedCursorValues = singletonOrEmpty(lastProcessedCursor);
+    }
+
+    /**
+     * Return the first cursor column name.
+     *
+     * @return cursor column name
+     * @deprecated use {@link #getCursorColumns()}
+     */
+    @Deprecated
+    public String getIdColumn() {
+        return getCursorColumn();
+    }
+
+    /**
+     * Set one single cursor column name.
+     *
+     * @param idColumn cursor column name
+     * @deprecated use {@link #setCursorColumns(List)}
+     */
+    @Deprecated
+    public void setIdColumn(String idColumn) {
+        setCursorColumn(idColumn);
+    }
+
+    /**
+     * Return the Java type name of the first cursor column.
+     *
+     * @return first cursor Java type name
+     * @deprecated use {@link #getCursorJavaTypes()}
+     */
+    @Deprecated
+    public String getIdJavaType() {
+        return getCursorJavaType();
+    }
+
+    /**
+     * Set the Java type name of one single cursor column.
+     *
+     * @param idJavaType cursor Java type name
+     * @deprecated use {@link #setCursorJavaTypes(List)}
+     */
+    @Deprecated
+    public void setIdJavaType(String idJavaType) {
+        setCursorJavaType(idJavaType);
+    }
+
+    /**
+     * Return the latest committed cursor checkpoint.
+     *
+     * @return last processed cursor display value
+     * @deprecated use {@link #getLastProcessedCursorValues()}
+     */
+    @Deprecated
     public String getLastProcessedId() {
-        return lastProcessedId;
+        return getLastProcessedCursor();
     }
 
     /**
-     * Set the latest committed id checkpoint.
+     * Set the latest committed cursor checkpoint for one single cursor column.
      *
-     * @param lastProcessedId last processed id
+     * @param lastProcessedId last processed cursor display value
+     * @deprecated use {@link #setLastProcessedCursorValues(List)}
      */
+    @Deprecated
     public void setLastProcessedId(String lastProcessedId) {
-        this.lastProcessedId = lastProcessedId;
+        setLastProcessedCursor(lastProcessedId);
     }
 
     /**
@@ -256,7 +416,7 @@ public class MigrationState {
     }
 
     /**
-     * Return whether write-after verification is enabled.
+     * Return whether verification is enabled.
      *
      * @return {@code true} when verification is enabled
      */
@@ -265,39 +425,70 @@ public class MigrationState {
     }
 
     /**
-     * Set whether write-after verification is enabled.
+     * Set whether verification is enabled.
      *
-     * @param verificationEnabled whether verification is enabled
+     * @param verificationEnabled verification flag
      */
     public void setVerificationEnabled(boolean verificationEnabled) {
         this.verificationEnabled = verificationEnabled;
     }
 
     /**
-     * Return the latest terminal error message.
+     * Return the latest error message.
      *
-     * @return last error message, or {@code null}
+     * @return latest error message
      */
     public String getLastError() {
         return lastError;
     }
 
     /**
-     * Set the latest terminal error message.
+     * Set the latest error message.
      *
-     * @param lastError last error message
+     * @param lastError latest error message
      */
     public void setLastError(String lastError) {
         this.lastError = lastError;
     }
 
     /**
-     * Convert the mutable state snapshot to an immutable report view.
+     * Convert the persisted state to one report snapshot.
      *
-     * @return immutable migration report
+     * @return migration report
      */
     public MigrationReport toReport() {
-        return new MigrationReport(entityName, tableName, status, totalRows, rangeStart, rangeEnd,
-                lastProcessedId, scannedRows, migratedRows, skippedRows, verifiedRows);
+        return new MigrationReport(entityName, tableName, status, totalRows, cursorColumns, rangeStartValues,
+                rangeEndValues, lastProcessedCursorValues, getRangeStart(), getRangeEnd(), getLastProcessedCursor(),
+                scannedRows, migratedRows, skippedRows, verifiedRows);
+    }
+
+    private List<String> immutableCopy(List<String> values) {
+        return values == null ? Collections.<String>emptyList() : Collections.unmodifiableList(new ArrayList<String>(values));
+    }
+
+    private List<String> singletonOrEmpty(String value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        List<String> values = new ArrayList<String>(1);
+        values.add(value);
+        return Collections.unmodifiableList(values);
+    }
+
+    private String display(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        if (values.size() == 1) {
+            return values.get(0);
+        }
+        if (cursorColumns.size() == values.size()) {
+            java.util.Map<String, String> mappedValues = new java.util.LinkedHashMap<String, String>();
+            for (int index = 0; index < values.size(); index++) {
+                mappedValues.put(cursorColumns.get(index), values.get(index));
+            }
+            return mappedValues.toString();
+        }
+        return values.toString();
     }
 }

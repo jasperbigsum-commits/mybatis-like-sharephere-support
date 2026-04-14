@@ -10,6 +10,12 @@ import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataL
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
+import io.github.jasper.mybatis.encrypt.migration.AllowAllMigrationConfirmationPolicy;
+import io.github.jasper.mybatis.encrypt.migration.DefaultMigrationTaskFactory;
+import io.github.jasper.mybatis.encrypt.migration.InMemoryMigrationStateStore;
+import io.github.jasper.mybatis.encrypt.migration.MigrationConfirmationPolicy;
+import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
+import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 import org.apache.ibatis.plugin.Interceptor;
 import org.springframework.beans.BeanUtils;
@@ -232,6 +238,52 @@ public class MybatisEncryptionAutoConfiguration {
                                                                          AlgorithmRegistry algorithmRegistry,
                                                                          DatabaseEncryptionProperties properties) {
         return new SeparateTableEncryptionManager(dataSource, metadataRegistry, algorithmRegistry, properties);
+    }
+
+    /**
+     * 创建默认迁移状态存储器。
+     *
+     * @return 默认内存状态存储器
+     */
+    @Bean
+    @ConditionalOnMissingBean(MigrationStateStore.class)
+    public MigrationStateStore migrationStateStore() {
+        return new InMemoryMigrationStateStore();
+    }
+
+    /**
+     * 创建默认迁移确认策略。
+     *
+     * @return 默认放行确认策略
+     */
+    @Bean
+    @ConditionalOnMissingBean(MigrationConfirmationPolicy.class)
+    public MigrationConfirmationPolicy migrationConfirmationPolicy() {
+        return AllowAllMigrationConfirmationPolicy.INSTANCE;
+    }
+
+    /**
+     * 创建迁移任务工厂，简化 Spring 场景下的任务构建。
+     *
+     * @param dataSource 数据源
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param properties 插件配置属性
+     * @param stateStore 状态存储器
+     * @param confirmationPolicy 确认策略
+     * @return 迁移任务工厂
+     */
+    @Bean
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnMissingBean(MigrationTaskFactory.class)
+    public MigrationTaskFactory migrationTaskFactory(DataSource dataSource,
+                                                     EncryptMetadataRegistry metadataRegistry,
+                                                     AlgorithmRegistry algorithmRegistry,
+                                                     DatabaseEncryptionProperties properties,
+                                                     MigrationStateStore stateStore,
+                                                     MigrationConfirmationPolicy confirmationPolicy) {
+        return new DefaultMigrationTaskFactory(dataSource, metadataRegistry, algorithmRegistry, properties,
+                stateStore, confirmationPolicy);
     }
 
 }

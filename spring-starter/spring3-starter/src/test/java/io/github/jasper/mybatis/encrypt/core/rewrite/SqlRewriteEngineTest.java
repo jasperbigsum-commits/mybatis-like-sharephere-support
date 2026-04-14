@@ -179,6 +179,39 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteSameTableLikeConcatPattern() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.status = ? AND u.phone LIKE CONCAT('%', ?, '%')",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "status", Integer.class).build(),
+                        new ParameterMapping.Builder(configuration, "phoneSegment", String.class).build()
+                ),
+                Map.of("status", 1, "phoneSegment", "AbC")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_like` LIKE ?") || result.sql().contains("u.phone_like LIKE ?"));
+        assertFalse(result.sql().contains("CONCAT("));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertEquals("status", boundSql.getParameterMappings().get(0).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals("%abc%", boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
     void shouldRewriteEncryptedProjectionInComplexDerivedJoinQuery() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -327,12 +360,13 @@ class SqlRewriteEngineTest {
 
         DatabaseEncryptionProperties.FieldRuleProperties urlFieldRule =
                 new DatabaseEncryptionProperties.FieldRuleProperties();
+        urlFieldRule.setProperty("url");
         urlFieldRule.setColumn("url");
         urlFieldRule.setStorageColumn("url_cipher");
         urlFieldRule.setAssistedQueryColumn("url_hash");
         urlFieldRule.setLikeQueryColumn("url_like");
-        permissionTableRule.getFields().put("url", urlFieldRule);
-        properties.getTables().put("sysPermission", permissionTableRule);
+        permissionTableRule.getFields().add(urlFieldRule);
+        properties.getTables().add(permissionTableRule);
 
         SqlRewriteEngine engine = new SqlRewriteEngine(
                 new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
@@ -600,6 +634,40 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteSeparateTableLikeConcatPatternUsingReferencedStorageId() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.status = ? AND u.id_card LIKE CONCAT('%', ?, '%')",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "status", Integer.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCardSegment", String.class).build()
+                ),
+                Map.of("status", 1, "idCardSegment", "320101")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertFalse(result.sql().contains("CONCAT("));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertEquals("status", boundSql.getParameterMappings().get(0).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals("%320101%", boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
         assertEquals(1, result.maskedParameters().size());
     }
 
@@ -984,12 +1052,13 @@ class SqlRewriteEngineTest {
         contactTableRule.setTable("crm_external_contact");
         DatabaseEncryptionProperties.FieldRuleProperties nameFieldRule =
                 new DatabaseEncryptionProperties.FieldRuleProperties();
+        nameFieldRule.setProperty("name");
         nameFieldRule.setColumn("name");
         nameFieldRule.setStorageColumn("name_cipher");
         nameFieldRule.setAssistedQueryColumn("name_hash");
         nameFieldRule.setLikeQueryColumn("name_like");
-        contactTableRule.getFields().put("name", nameFieldRule);
-        properties.getTables().put("crmExternalContact", contactTableRule);
+        contactTableRule.getFields().add(nameFieldRule);
+        properties.getTables().add(contactTableRule);
 
         AlgorithmRegistry algorithmRegistry = sampleAlgorithms();
         SqlRewriteEngine engine = new SqlRewriteEngine(
@@ -1414,13 +1483,15 @@ class SqlRewriteEngineTest {
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
         tableRule.setTable("user_account");
         DatabaseEncryptionProperties.FieldRuleProperties fieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        fieldRule.setProperty("phone");
         fieldRule.setColumn("phone");
         fieldRule.setStorageColumn("phone_cipher");
         fieldRule.setAssistedQueryColumn("phone_hash");
         fieldRule.setLikeQueryColumn("phone_like");
-        tableRule.getFields().put("phone", fieldRule);
+        tableRule.getFields().add(fieldRule);
 
         DatabaseEncryptionProperties.FieldRuleProperties separateFieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        separateFieldRule.setProperty("idCard");
         separateFieldRule.setColumn("id_card");
         separateFieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
         separateFieldRule.setStorageTable("user_id_card_encrypt");
@@ -1428,18 +1499,19 @@ class SqlRewriteEngineTest {
         separateFieldRule.setStorageIdColumn("id");
         separateFieldRule.setAssistedQueryColumn("id_card_hash");
         separateFieldRule.setLikeQueryColumn("id_card_like");
-        tableRule.getFields().put("idCard", separateFieldRule);
-        properties.getTables().put("userAccount", tableRule);
+        tableRule.getFields().add(separateFieldRule);
+        properties.getTables().add(tableRule);
 
         DatabaseEncryptionProperties.TableRuleProperties archiveTableRule = new DatabaseEncryptionProperties.TableRuleProperties();
         archiveTableRule.setTable("user_archive");
         DatabaseEncryptionProperties.FieldRuleProperties archiveFieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        archiveFieldRule.setProperty("phone");
         archiveFieldRule.setColumn("phone");
         archiveFieldRule.setStorageColumn("archive_phone_cipher");
         archiveFieldRule.setAssistedQueryColumn("archive_phone_hash");
         archiveFieldRule.setLikeQueryColumn("archive_phone_like");
-        archiveTableRule.getFields().put("phone", archiveFieldRule);
-        properties.getTables().put("userArchive", archiveTableRule);
+        archiveTableRule.getFields().add(archiveFieldRule);
+        properties.getTables().add(archiveTableRule);
 
         properties.setDefaultCipherKey("unit-test-key");
         return properties;

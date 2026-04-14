@@ -9,27 +9,49 @@ import java.util.Map;
  */
 public final class MigrationRecord {
 
-    private final Object id;
+    private final MigrationCursor cursor;
     private final Map<String, Object> columnValues;
 
     /**
      * Create one immutable source-row snapshot.
      *
-     * @param id row primary key value
+     * @param cursor row cursor snapshot
      * @param columnValues plaintext source column values
      */
-    public MigrationRecord(Object id, Map<String, Object> columnValues) {
-        this.id = id;
+    public MigrationRecord(MigrationCursor cursor, Map<String, Object> columnValues) {
+        this.cursor = cursor;
         this.columnValues = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(columnValues));
     }
 
     /**
-     * Return the source row primary key value.
+     * Return the row cursor snapshot.
      *
-     * @return row id
+     * @return row cursor snapshot
      */
+    public MigrationCursor getCursor() {
+        return cursor;
+    }
+
+    /**
+     * Return the primary cursor value when one single cursor column is used.
+     * Multi-column cursor records return the full {@link MigrationCursor} snapshot.
+     *
+     * @return row cursor value or cursor snapshot
+     */
+    public Object getCursorValue() {
+        return cursor == null ? null : (cursor.isSingleColumn() ? cursor.getPrimaryValue() : cursor);
+    }
+
+    /**
+     * Return the primary cursor value when one single cursor column is used.
+     * Multi-column cursor records return the full {@link MigrationCursor} snapshot.
+     *
+     * @return row cursor value or cursor snapshot
+     * @deprecated use {@link #getCursor()} or {@link #getCursorValue()}
+     */
+    @Deprecated
     public Object getId() {
-        return id;
+        return getCursorValue();
     }
 
     /**

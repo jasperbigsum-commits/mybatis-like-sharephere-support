@@ -38,11 +38,11 @@ public final class EntityMigrationDefinition {
         }
         this.entityType = builder.entityType;
         this.tableName = builder.tableName;
-        this.cursorColumns = Collections.unmodifiableList(new ArrayList<String>(builder.cursorColumns));
+        this.cursorColumns = Collections.unmodifiableList(new ArrayList<>(builder.cursorColumns));
         this.batchSize = builder.batchSize;
         this.verifyAfterWrite = builder.verifyAfterWrite;
-        this.includedProperties = Collections.unmodifiableSet(new LinkedHashSet<String>(builder.includedProperties));
-        this.backupColumns = Collections.unmodifiableMap(new LinkedHashMap<String, String>(builder.backupColumns));
+        this.includedProperties = Collections.unmodifiableSet(new LinkedHashSet<>(builder.includedProperties));
+        this.backupColumns = Collections.unmodifiableMap(new LinkedHashMap<>(builder.backupColumns));
     }
 
     /**
@@ -171,13 +171,13 @@ public final class EntityMigrationDefinition {
         private final List<String> cursorColumns;
         private int batchSize = 200;
         private boolean verifyAfterWrite = true;
-        private final Set<String> includedProperties = new LinkedHashSet<String>();
-        private final Map<String, String> backupColumns = new LinkedHashMap<String, String>();
+        private final Set<String> includedProperties = new LinkedHashSet<>();
+        private final Map<String, String> backupColumns = new LinkedHashMap<>();
 
         private Builder(Class<?> entityType, String tableName, List<String> cursorColumns) {
             this.entityType = entityType;
             this.tableName = tableName;
-            this.cursorColumns = new ArrayList<String>(cursorColumns);
+            this.cursorColumns = new ArrayList<>(cursorColumns);
         }
 
         /**

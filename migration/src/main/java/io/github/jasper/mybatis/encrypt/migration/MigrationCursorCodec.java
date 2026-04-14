@@ -23,7 +23,7 @@ final class MigrationCursorCodec {
     }
 
     static List<String> stringify(MigrationCursor cursor) {
-        List<String> values = new ArrayList<String>();
+        List<String> values = new ArrayList<>();
         if (cursor == null) {
             return values;
         }
@@ -40,7 +40,7 @@ final class MigrationCursorCodec {
         if (columns.size() != rawValues.size()) {
             throw new MigrationException("Cursor checkpoint shape does not match cursor columns: " + columns);
         }
-        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        Map<String, Object> values = new LinkedHashMap<>();
         for (int index = 0; index < columns.size(); index++) {
             String typeName = typeNames != null && index < typeNames.size() ? typeNames.get(index) : null;
             values.put(columns.get(index), decodeScalar(rawValues.get(index), typeName));

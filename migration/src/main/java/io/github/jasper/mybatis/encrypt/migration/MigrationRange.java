@@ -30,8 +30,8 @@ public final class MigrationRange {
         this.rangeStart = rangeStart;
         this.rangeEnd = rangeEnd;
         this.cursorJavaTypes = cursorJavaTypes == null
-                ? Collections.<String>emptyList()
-                : Collections.unmodifiableList(new ArrayList<String>(cursorJavaTypes));
+                ? Collections.emptyList()
+                : Collections.unmodifiableList(new ArrayList<>(cursorJavaTypes));
     }
 
     /**

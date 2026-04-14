@@ -33,7 +33,7 @@ public class EntityMigrationPlanFactory {
         ResolvedDefinition resolved = resolveDefinition(definition);
         EncryptTableRule tableRule = resolved.tableRule();
         String normalizedTable = tableRule.getTableName();
-        List<EntityMigrationColumnPlan> columnPlans = new ArrayList<EntityMigrationColumnPlan>();
+        List<EntityMigrationColumnPlan> columnPlans = new ArrayList<>();
         for (EncryptColumnRule columnRule : tableRule.getColumnRules()) {
             if (resolved.entityType() != null
                     && StringUtils.isNotBlank(columnRule.table())

@@ -9,12 +9,12 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class InMemoryMigrationStateStore implements MigrationStateStore {
 
-    private final ConcurrentMap<String, MigrationState> states = new ConcurrentHashMap<String, MigrationState>();
+    private final ConcurrentMap<String, MigrationState> states = new ConcurrentHashMap<>();
 
     @Override
     public Optional<MigrationState> load(EntityMigrationPlan plan) {
         MigrationState state = states.get(keyOf(plan));
-        return state == null ? Optional.<MigrationState>empty() : Optional.of(copyOf(state));
+        return state == null ? Optional.empty() : Optional.of(copyOf(state));
     }
 
     @Override

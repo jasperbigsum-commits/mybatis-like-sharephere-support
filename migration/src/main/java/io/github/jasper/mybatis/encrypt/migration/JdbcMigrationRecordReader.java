@@ -46,8 +46,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
                                            EntityMigrationPlan plan,
                                            MigrationCursor lastProcessedCursor)
             throws SQLException {
-        Set<String> selectColumns = new LinkedHashSet<String>();
-        selectColumns.addAll(plan.getCursorColumns());
+        Set<String> selectColumns = new LinkedHashSet<>(plan.getCursorColumns());
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             selectColumns.add(columnPlan.getSourceColumn());
         }
@@ -56,9 +55,9 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
             int parameterIndex = bindCheckpoint(statement, lastProcessedCursor);
             statement.setInt(parameterIndex, plan.getBatchSize());
             try (ResultSet resultSet = statement.executeQuery()) {
-                List<MigrationRecord> records = new ArrayList<MigrationRecord>();
+                List<MigrationRecord> records = new ArrayList<>();
                 while (resultSet.next()) {
-                    Map<String, Object> cursorValues = new LinkedHashMap<String, Object>();
+                    Map<String, Object> cursorValues = new LinkedHashMap<>();
                     for (String cursorColumn : plan.getCursorColumns()) {
                         Object cursorValue = resultSet.getObject(cursorColumn);
                         if (cursorValue == null) {
@@ -66,7 +65,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
                         }
                         cursorValues.put(cursorColumn, cursorValue);
                     }
-                    Map<String, Object> values = new LinkedHashMap<String, Object>();
+                    Map<String, Object> values = new LinkedHashMap<>();
                     for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
                         values.put(columnPlan.getSourceColumn(), resultSet.getObject(columnPlan.getSourceColumn()));
                     }
@@ -115,7 +114,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
                 if (!resultSet.next()) {
                     return null;
                 }
-                Map<String, Object> values = new LinkedHashMap<String, Object>();
+                Map<String, Object> values = new LinkedHashMap<>();
                 for (String cursorColumn : plan.getCursorColumns()) {
                     values.put(cursorColumn, resultSet.getObject(cursorColumn));
                 }
@@ -126,7 +125,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
 
     private List<String> resolveCursorJavaTypes(MigrationCursor rangeStart, MigrationCursor rangeEnd) {
         MigrationCursor typeSource = rangeEnd != null ? rangeEnd : rangeStart;
-        List<String> types = new ArrayList<String>();
+        List<String> types = new ArrayList<>();
         if (typeSource == null) {
             return types;
         }
@@ -144,7 +143,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
             return (MigrationCursor) rawCursor;
         }
         if (plan.getCursorColumns().size() == 1) {
-            Map<String, Object> values = new LinkedHashMap<String, Object>();
+            Map<String, Object> values = new LinkedHashMap<>();
             values.put(plan.getCursorColumn(), rawCursor);
             return new MigrationCursor(values);
         }
@@ -191,7 +190,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
         if (checkpoint == null) {
             return parameterIndex;
         }
-        List<Object> values = new ArrayList<Object>(checkpoint.getValues().values());
+        List<Object> values = new ArrayList<>(checkpoint.getValues().values());
         for (int index = 0; index < values.size(); index++) {
             for (int equalIndex = 0; equalIndex < index; equalIndex++) {
                 statement.setObject(parameterIndex++, values.get(equalIndex));

@@ -38,7 +38,7 @@ public final class EntityMigrationPlan {
         this.entityType = entityType;
         this.entityName = entityName;
         this.tableName = tableName;
-        this.cursorColumns = Collections.unmodifiableList(new ArrayList<String>(cursorColumns));
+        this.cursorColumns = Collections.unmodifiableList(new ArrayList<>(cursorColumns));
         this.batchSize = batchSize;
         this.verifyAfterWrite = verifyAfterWrite;
         this.columnPlans = Collections.unmodifiableList(columnPlans);

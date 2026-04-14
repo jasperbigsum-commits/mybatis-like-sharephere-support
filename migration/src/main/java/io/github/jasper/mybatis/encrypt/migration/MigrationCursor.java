@@ -21,7 +21,7 @@ public final class MigrationCursor {
         if (values == null || values.isEmpty()) {
             throw new IllegalArgumentException("cursor values must not be empty");
         }
-        this.values = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(values));
+        this.values = Collections.unmodifiableMap(new LinkedHashMap<>(values));
     }
 
     /**

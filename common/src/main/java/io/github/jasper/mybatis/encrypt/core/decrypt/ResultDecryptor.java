@@ -149,7 +149,7 @@ public class ResultDecryptor {
             }
             Map<String, QueryResultPlan.PropertyPlan> propertyPlans = plansByType.computeIfAbsent(
                     resultType, ignored -> new LinkedHashMap<>());
-            collectPropertyPlans(configuration, resultType, resultMap, null, propertyPlans, new java.util.HashSet<String>());
+            collectPropertyPlans(configuration, resultType, resultMap, null, propertyPlans, new java.util.HashSet<>());
         }
         List<QueryResultPlan.TypePlan> typePlans = new ArrayList<>();
         plansByType.forEach((resultType, propertyPlans) -> {

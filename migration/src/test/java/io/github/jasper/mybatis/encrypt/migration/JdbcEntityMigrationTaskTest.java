@@ -25,10 +25,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class JdbcEntityMigrationTaskTest {
 
@@ -128,9 +125,9 @@ class JdbcEntityMigrationTaskTest {
                     "select id_card_cipher, id_card_hash, id_card_like from user_id_card_encrypt where id_card_hash = '"
                             + migratedReferenceId + "'")) {
                 assertTrue(externalResult.next());
-                assertTrue(externalResult.getString("id_card_cipher") != null);
+                assertNotNull(externalResult.getString("id_card_cipher"));
                 assertEquals(migratedReferenceId, externalResult.getString("id_card_hash"));
-                assertTrue(externalResult.getString("id_card_like") != null);
+                assertNotNull(externalResult.getString("id_card_like"));
             }
         }
     }
@@ -433,13 +430,13 @@ class JdbcEntityMigrationTaskTest {
         assertEquals(3L, report.getVerifiedRows());
         assertEquals(Arrays.asList("tenant_id", "record_no"), report.getCursorColumns());
         assertEquals(Arrays.asList("tenantB", "1"), report.getLastProcessedCursorValues());
-        Map<String, String> expectedRangeStart = new LinkedHashMap<String, String>();
+        Map<String, String> expectedRangeStart = new LinkedHashMap<>();
         expectedRangeStart.put("tenant_id", "tenantA");
         expectedRangeStart.put("record_no", "1");
-        Map<String, String> expectedRangeEnd = new LinkedHashMap<String, String>();
+        Map<String, String> expectedRangeEnd = new LinkedHashMap<>();
         expectedRangeEnd.put("tenant_id", "tenantB");
         expectedRangeEnd.put("record_no", "1");
-        Map<String, String> expectedLastProcessed = new LinkedHashMap<String, String>();
+        Map<String, String> expectedLastProcessed = new LinkedHashMap<>();
         expectedLastProcessed.put("tenant_id", "tenantB");
         expectedLastProcessed.put("record_no", "1");
         assertEquals(expectedRangeStart, report.getRangeStartCursorMap());
@@ -654,13 +651,13 @@ class JdbcEntityMigrationTaskTest {
 
     private AlgorithmRegistry algorithmRegistry() {
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm> cipherAlgorithms =
-                new LinkedHashMap<String, io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm>();
+                new LinkedHashMap<>();
         cipherAlgorithms.put("sm4", new Sm4CipherAlgorithm("unit-test-key-123"));
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm> assistedAlgorithms =
-                new LinkedHashMap<String, io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm>();
+                new LinkedHashMap<>();
         assistedAlgorithms.put("sm3", new Sm3AssistedQueryAlgorithm());
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm> likeAlgorithms =
-                new LinkedHashMap<String, io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm>();
+                new LinkedHashMap<>();
         likeAlgorithms.put("normalizedLike", new NormalizedLikeQueryAlgorithm());
         return new AlgorithmRegistry(cipherAlgorithms, assistedAlgorithms, likeAlgorithms);
     }

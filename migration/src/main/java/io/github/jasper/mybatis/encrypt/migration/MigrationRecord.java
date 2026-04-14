@@ -20,7 +20,7 @@ public final class MigrationRecord {
      */
     public MigrationRecord(MigrationCursor cursor, Map<String, Object> columnValues) {
         this.cursor = cursor;
-        this.columnValues = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(columnValues));
+        this.columnValues = Collections.unmodifiableMap(new LinkedHashMap<>(columnValues));
     }
 
     /**

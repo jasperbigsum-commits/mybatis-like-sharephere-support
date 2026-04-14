@@ -1283,8 +1283,8 @@ public class SqlRewriteEngine {
         }
         if (expression instanceof ParenthesedExpressionList) {
             ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
-            for (Object item : parenthesis) {
-                if (item instanceof Expression && containsUnsupportedAggregate((Expression) item, tableContext)) {
+            for (Expression item : parenthesis) {
+                if (containsUnsupportedAggregate(item, tableContext)) {
                     return true;
                 }
             }

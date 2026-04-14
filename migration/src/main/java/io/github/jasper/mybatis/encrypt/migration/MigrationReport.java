@@ -53,8 +53,8 @@ public final class MigrationReport {
                            long migratedRows,
                            long skippedRows,
                            long verifiedRows) {
-        this(entityName, tableName, status, totalRows, Collections.<String>emptyList(), Collections.<String>emptyList(),
-                Collections.<String>emptyList(), Collections.<String>emptyList(), rangeStart, rangeEnd,
+        this(entityName, tableName, status, totalRows, Collections.emptyList(), Collections.emptyList(),
+                Collections.emptyList(), Collections.emptyList(), rangeStart, rangeEnd,
                 lastProcessedCursor, scannedRows, migratedRows, skippedRows, verifiedRows);
     }
 
@@ -283,14 +283,14 @@ public final class MigrationReport {
     }
 
     private List<String> immutableCopy(List<String> values) {
-        return values == null ? Collections.<String>emptyList() : Collections.unmodifiableList(new ArrayList<String>(values));
+        return values == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<String>(values));
     }
 
     private Map<String, String> toCursorMap(List<String> values) {
         if (cursorColumns.isEmpty() || values.isEmpty() || cursorColumns.size() != values.size()) {
             return Collections.emptyMap();
         }
-        Map<String, String> mappedValues = new LinkedHashMap<String, String>();
+        Map<String, String> mappedValues = new LinkedHashMap<>();
         for (int index = 0; index < values.size(); index++) {
             mappedValues.put(cursorColumns.get(index), values.get(index));
         }

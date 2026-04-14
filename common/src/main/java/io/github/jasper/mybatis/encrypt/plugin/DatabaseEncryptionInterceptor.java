@@ -203,7 +203,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     private MappedStatement rewriteMappedStatement(Executor executor, MappedStatement mappedStatement, BoundSql boundSql) {
         prepareSeparateTableReferences(executor, mappedStatement, boundSql);
         String originalSql = boundSql.getSql();
-        List<ParameterMapping> originalParameterMappings = new ArrayList<ParameterMapping>(boundSql.getParameterMappings());
+        List<ParameterMapping> originalParameterMappings = new ArrayList<>(boundSql.getParameterMappings());
         RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
         if (!rewriteResult.changed()
                 && !boundSql.hasAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER)) {

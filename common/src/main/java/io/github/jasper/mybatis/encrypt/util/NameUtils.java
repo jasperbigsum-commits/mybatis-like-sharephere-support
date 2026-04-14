@@ -67,8 +67,7 @@ public final class NameUtils {
         if (cleaned.indexOf('_') >= 0) {
             String[] parts = cleaned.split("_+");
             StringBuilder builder = new StringBuilder(cleaned.length());
-            for (int index = 0; index < parts.length; index++) {
-                String part = parts[index];
+            for (String part : parts) {
                 if (part.isEmpty()) {
                     continue;
                 }

@@ -38,7 +38,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
 
     @Override
     public boolean write(Connection connection, EntityMigrationPlan plan, MigrationRecord record) throws SQLException {
-        Map<String, Object> mainTableUpdates = new LinkedHashMap<String, Object>();
+        Map<String, Object> mainTableUpdates = new LinkedHashMap<>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             Object plainValue = record.getColumnValue(columnPlan.getSourceColumn());
             MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
@@ -127,8 +127,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
                                    EntityMigrationColumnPlan columnPlan,
                                    Object referenceId,
                                    MigrationValueResolver.DerivedFieldValues values) throws SQLException {
-        List<String> columns = new ArrayList<String>();
-        List<Object> bindValues = new ArrayList<Object>();
+        List<String> columns = new ArrayList<>();
+        List<Object> bindValues = new ArrayList<>();
         columns.add(columnPlan.getStorageIdColumn());
         bindValues.add(referenceId);
         columns.add(columnPlan.getStorageColumn());

@@ -25,7 +25,7 @@ public class ExpectedRiskConfirmationPolicy implements MigrationConfirmationPoli
      * @return 任务策略
      */
     public static ExpectedRiskConfirmationPolicy of(String... expectedEntries) {
-        return new ExpectedRiskConfirmationPolicy(new LinkedHashSet<String>(Arrays.asList(expectedEntries)));
+        return new ExpectedRiskConfirmationPolicy(new LinkedHashSet<>(Arrays.asList(expectedEntries)));
     }
 
     /**
@@ -35,7 +35,7 @@ public class ExpectedRiskConfirmationPolicy implements MigrationConfirmationPoli
      */
     @Override
     public void confirm(EntityMigrationPlan plan, MigrationRiskManifest manifest) {
-        Set<String> actualEntries = new LinkedHashSet<String>();
+        Set<String> actualEntries = new LinkedHashSet<>();
         for (MigrationRiskEntry entry : manifest.getEntries()) {
             actualEntries.add(entry.asToken());
         }

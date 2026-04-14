@@ -72,6 +72,56 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+If the project already uses the Spring Boot starter, prefer injecting `MigrationTaskFactory` directly instead of assembling all migration infrastructure dependencies in business code:
+
+```java
+@Service
+public class UserAccountMigrationRunner {
+
+    private final MigrationTaskFactory migrationTaskFactory;
+
+    public UserAccountMigrationRunner(MigrationTaskFactory migrationTaskFactory) {
+        this.migrationTaskFactory = migrationTaskFactory;
+    }
+
+    public MigrationReport migrate() {
+        return migrationTaskFactory.executeForEntity(
+                UserAccount.class,
+                "id",
+                builder -> builder
+                        .batchSize(500)
+                        .verifyAfterWrite(true)
+        );
+    }
+}
+```
+
+Auto-configuration provides these defaults:
+
+- `MigrationTaskFactory`
+- `MigrationStateStore`
+  default: `InMemoryMigrationStateStore`
+- `MigrationConfirmationPolicy`
+  default: `AllowAllMigrationConfirmationPolicy`
+
+If you want file-backed checkpoints or explicit operator confirmation, override those beans and `MigrationTaskFactory` will reuse them automatically:
+
+```java
+@Configuration
+public class MigrationSupportConfiguration {
+
+    @Bean
+    public MigrationStateStore migrationStateStore() {
+        return new FileMigrationStateStore(Paths.get("migration-state"));
+    }
+
+    @Bean
+    public MigrationConfirmationPolicy migrationConfirmationPolicy() {
+        return new FileMigrationConfirmationPolicy(Paths.get("migration-confirmation"));
+    }
+}
+```
+
 ## Confirmation before mutation
 
 Use `FileMigrationConfirmationPolicy` when you want operators to review the exact mutation scope before execution:

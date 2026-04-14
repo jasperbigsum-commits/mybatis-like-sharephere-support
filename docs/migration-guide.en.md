@@ -57,6 +57,82 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+## Spring auto-injection
+
+If you already use `spring2-starter` or `spring3-starter`, prefer injecting
+`MigrationTaskFactory` directly instead of repeatedly calling `JdbcMigrationTasks.create(...)`
+and assembling the migration infrastructure in business code.
+
+Auto-configuration provides these beans by default:
+
+- `MigrationTaskFactory`
+- `MigrationStateStore`
+  default implementation: `InMemoryMigrationStateStore`
+- `MigrationConfirmationPolicy`
+  default implementation: `AllowAllMigrationConfirmationPolicy`
+
+Minimal example:
+
+```java
+@Service
+public class UserAccountMigrationRunner {
+
+    private final MigrationTaskFactory migrationTaskFactory;
+
+    public UserAccountMigrationRunner(MigrationTaskFactory migrationTaskFactory) {
+        this.migrationTaskFactory = migrationTaskFactory;
+    }
+
+    public MigrationReport migrate() {
+        return migrationTaskFactory.executeForEntity(
+                UserAccount.class,
+                "id",
+                builder -> builder
+                        .batchSize(500)
+                        .verifyAfterWrite(true)
+        );
+    }
+}
+```
+
+If you want to build the task first and execute it later:
+
+```java
+MigrationTask task = migrationTaskFactory.createForTable(
+        "user_account",
+        "id",
+        builder -> builder.batchSize(1000)
+);
+
+MigrationReport report = task.execute();
+```
+
+Notes:
+
+- Prefer `MigrationTaskFactory` inside Spring applications
+- Use `JdbcMigrationTasks.create(...)` in standalone scripts, non-Spring programs, or focused tests
+- If a table has no single `id`, pass an ordered stable cursor set such as `List.of("tenant_id", "created_at", "biz_no")`
+
+If you want file-backed checkpoints or mandatory operator confirmation, override the corresponding beans:
+
+```java
+@Configuration
+public class MigrationSupportConfiguration {
+
+    @Bean
+    public MigrationStateStore migrationStateStore() {
+        return new FileMigrationStateStore(Paths.get("migration-state"));
+    }
+
+    @Bean
+    public MigrationConfirmationPolicy migrationConfirmationPolicy() {
+        return new FileMigrationConfirmationPolicy(Paths.get("migration-confirmation"));
+    }
+}
+```
+
+Then the auto-injected `MigrationTaskFactory` will reuse those beans automatically and business code does not need to pass them again.
+
 ## Risk confirmation
 
 To reduce the chance of mutating unintended business fields, the task supports an explicit second confirmation step.

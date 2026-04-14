@@ -178,11 +178,16 @@ public class EncryptMetadataRegistry {
         }
         if (StringUtils.isBlank(rule.storageTable())) {
             throw new IllegalArgumentException(
-                    "Separate-table encrypted field must define storageTable: " + rule.property());
+                    "Separate-table encrypted field must define storageTable. property=" + rule.property()
+                            + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                            + ", column=" + rule.column());
         }
         if (!rule.hasAssistedQueryColumn()) {
             throw new IllegalArgumentException(
-                    "Separate-table encrypted field must define assistedQueryColumn: " + rule.property());
+                    "Separate-table encrypted field must define assistedQueryColumn. property=" + rule.property()
+                            + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                            + ", column=" + rule.column()
+                            + ", storageTable=" + rule.storageTable());
         }
     }
 

@@ -57,6 +57,82 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+## Spring 自动注入用法
+
+如果已经接入 `spring2-starter` 或 `spring3-starter`，更推荐直接注入
+`MigrationTaskFactory`，而不是在业务代码里重复调用 `JdbcMigrationTasks.create(...)`
+手动拼装迁移所需的基础依赖。
+
+自动装配默认会提供：
+
+- `MigrationTaskFactory`
+- `MigrationStateStore`
+  默认实现是 `InMemoryMigrationStateStore`
+- `MigrationConfirmationPolicy`
+  默认实现是 `AllowAllMigrationConfirmationPolicy`
+
+最小使用示例：
+
+```java
+@Service
+public class UserAccountMigrationRunner {
+
+    private final MigrationTaskFactory migrationTaskFactory;
+
+    public UserAccountMigrationRunner(MigrationTaskFactory migrationTaskFactory) {
+        this.migrationTaskFactory = migrationTaskFactory;
+    }
+
+    public MigrationReport migrate() {
+        return migrationTaskFactory.executeForEntity(
+                UserAccount.class,
+                "id",
+                builder -> builder
+                        .batchSize(500)
+                        .verifyAfterWrite(true)
+        );
+    }
+}
+```
+
+如果你希望先构建任务，再决定执行时机：
+
+```java
+MigrationTask task = migrationTaskFactory.createForTable(
+        "user_account",
+        "id",
+        builder -> builder.batchSize(1000)
+);
+
+MigrationReport report = task.execute();
+```
+
+补充说明：
+
+- Spring 应用内优先使用 `MigrationTaskFactory`
+- 非 Spring 场景、独立脚本或测试桩场景再使用 `JdbcMigrationTasks.create(...)`
+- 如果表没有单一 `id`，可以传入稳定有序的游标列组合，例如 `List.of("tenant_id", "created_at", "biz_no")`
+
+如果你希望把默认内存状态改成文件持久化，或者要求上线前必须确认风险范围，只需覆写对应 Bean：
+
+```java
+@Configuration
+public class MigrationSupportConfiguration {
+
+    @Bean
+    public MigrationStateStore migrationStateStore() {
+        return new FileMigrationStateStore(Paths.get("migration-state"));
+    }
+
+    @Bean
+    public MigrationConfirmationPolicy migrationConfirmationPolicy() {
+        return new FileMigrationConfirmationPolicy(Paths.get("migration-confirmation"));
+    }
+}
+```
+
+这样自动注入的 `MigrationTaskFactory` 会自动复用这些 Bean，业务代码无需重复传参。
+
 ## 风险确认机制
 
 为了避免误改未预期字段，迁移任务支持二次确认。

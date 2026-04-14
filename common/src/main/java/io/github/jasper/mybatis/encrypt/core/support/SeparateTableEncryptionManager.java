@@ -313,6 +313,7 @@ public class SeparateTableEncryptionManager {
      * <p>独立表不执行更新和删除时，相同明文应尽量复用同一条外表记录，避免重复插入。</p>
      */
     private String findReferenceIdByAssignedHash(EncryptColumnRule rule, String assignedHash) {
+        requireAssistedReferenceRule(rule, "find separate-table reference");
         String sql = "select " + quote(rule.assistedQueryColumn())
                 + " from " + quote(rule.storageTable())
                 + " where " + quote(rule.assistedQueryColumn()) + " = ?";
@@ -476,6 +477,7 @@ public class SeparateTableEncryptionManager {
     }
 
     private Map<Object, String> loadCipherValues(EncryptColumnRule rule, List<Object> ids) {
+        requireAssistedReferenceRule(rule, "load separate-table encrypted values");
         String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(", "));
         String sql = "select " + quote(rule.assistedQueryColumn()) + ", " + quote(rule.storageColumn())
                 + " from " + quote(rule.storageTable())
@@ -523,6 +525,7 @@ public class SeparateTableEncryptionManager {
      * <p>独立表当前采用增量追加模式，相同明文依赖 hash 复用，未命中时再插入一条新记录。</p>
      */
     private ExternalRowValues buildExternalRowValues(EncryptColumnRule rule, Object plainValue, String assignedHash) {
+        requireAssistedReferenceRule(rule, "build separate-table row");
         // 独立表只做增量插入，因此这里统一生成插入所需的密文列、辅助列和 like 列。
         List<String> columns = new ArrayList<>();
         List<Object> values = new ArrayList<>();
@@ -674,7 +677,27 @@ public class SeparateTableEncryptionManager {
     }
 
     private String assignHash(EncryptColumnRule rule, Object plainValue) {
+        requireAssistedReferenceRule(rule, "prepare separate-table hash reference");
         return algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(String.valueOf(plainValue));
+    }
+
+    private void requireAssistedReferenceRule(EncryptColumnRule rule, String action) {
+        if (!rule.hasAssistedQueryColumn()) {
+            throw new EncryptionConfigurationException(
+                    "Separate-table encrypted field requires assistedQueryColumn to " + action
+                            + ". property=" + rule.property()
+                            + ", table=" + rule.table()
+                            + ", column=" + rule.column()
+                            + ", storageTable=" + rule.storageTable());
+        }
+        if (StringUtils.isBlank(rule.assistedQueryAlgorithm())) {
+            throw new EncryptionConfigurationException(
+                    "Separate-table encrypted field requires assistedQueryAlgorithm to " + action
+                            + ". property=" + rule.property()
+                            + ", table=" + rule.table()
+                            + ", column=" + rule.column()
+                            + ", storageTable=" + rule.storageTable());
+        }
     }
 
     private boolean isSimpleValueType(Class<?> type) {

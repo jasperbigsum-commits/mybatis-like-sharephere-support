@@ -427,23 +427,19 @@ public class SqlRewriteEngine {
         EncryptColumnRule rule = resolution.rule();
         if (rule.isStoredInSeparateTable()) {
             return rewriteSeparateTableCondition(resolution, expression.getRightExpression(), context,
-                    rule.assistedQueryColumn(), true);
+                    requireAssistedQueryColumn(rule, "equality query"), true);
         }
-        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
+        String targetColumn = requireAssistedQueryColumn(rule, "equality query");
         if (resolution.leftColumn()) {
             expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
             rewriteOperand(expression.getRightExpression(), context,
-                    rule.hasAssistedQueryColumn()
-                            ? valueTransformer.transformAssisted(rule, readOperandValue(expression.getRightExpression(), context))
-                            : valueTransformer.transformCipher(rule, readOperandValue(expression.getRightExpression(), context)),
-                    rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
+                    valueTransformer.transformAssisted(rule, readOperandValue(expression.getRightExpression(), context)),
+                    MaskingMode.HASH);
         } else {
             expression.setRightExpression(buildColumn(resolution.column(), targetColumn));
             rewriteOperand(expression.getLeftExpression(), context,
-                    rule.hasAssistedQueryColumn()
-                            ? valueTransformer.transformAssisted(rule, readOperandValue(expression.getLeftExpression(), context))
-                            : valueTransformer.transformCipher(rule, readOperandValue(expression.getLeftExpression(), context)),
-                    rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
+                    valueTransformer.transformAssisted(rule, readOperandValue(expression.getLeftExpression(), context)),
+                    MaskingMode.HASH);
         }
         context.markChanged();
         return expression;
@@ -465,13 +461,9 @@ public class SqlRewriteEngine {
         EncryptColumnRule rule = resolution.rule();
         if (rule.isStoredInSeparateTable()) {
             return rewriteSeparateTableCondition(resolution, expression.getRightExpression(), context,
-                    rule.likeQueryColumn(), false);
+                    requireLikeQueryColumn(rule, "LIKE query"), false);
         }
-        if (!rule.hasLikeQueryColumn()) {
-            throw new UnsupportedEncryptedOperationException(
-                    "LIKE query requires likeQueryColumn for encrypted field: " + rule.property());
-        }
-        expression.setLeftExpression(buildColumn(resolution.column(), rule.likeQueryColumn()));
+        expression.setLeftExpression(buildColumn(resolution.column(), requireLikeQueryColumn(rule, "LIKE query")));
         QueryOperand queryOperand = readComposableQueryOperand(expression.getRightExpression(), context,
                 "Encrypted LIKE condition must use prepared parameter, string literal, or CONCAT of them.");
         expression.setRightExpression(buildComposableQueryExpression(queryOperand, context,
@@ -501,7 +493,7 @@ public class SqlRewriteEngine {
                     + rule.property());
         }
         // IN 查询与等值查询使用同一套目标列选择策略。
-        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
+        String targetColumn = requireAssistedQueryColumn(rule, "IN query");
         expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
         if (expression.getRightExpression() instanceof Select) {
             rewriteSelect((Select) expression.getRightExpression(), context, ProjectionMode.COMPARISON);
@@ -514,9 +506,8 @@ public class SqlRewriteEngine {
         ExpressionList<?> expressionList = (ExpressionList<?>) expression.getRightExpression();
         for (Expression item : expressionList) {
             rewriteOperand(item, context,
-                    rule.hasAssistedQueryColumn() ? valueTransformer.transformAssisted(rule, readOperandValue(item, context))
-                            : valueTransformer.transformCipher(rule, readOperandValue(item, context)),
-                    rule.hasAssistedQueryColumn() ? MaskingMode.HASH : MaskingMode.MASKED);
+                    valueTransformer.transformAssisted(rule, readOperandValue(item, context)),
+                    MaskingMode.HASH);
         }
         context.markChanged();
         return expression;
@@ -574,7 +565,10 @@ public class SqlRewriteEngine {
         EncryptColumnRule rule = resolution.rule();
         if (StringUtils.isBlank(targetColumn)) {
             throw new UnsupportedEncryptedOperationException(
-                    "Separate-table encrypted field requires query column: " + rule.property());
+                    "Separate-table encrypted " + (assisted ? "equality" : "LIKE")
+                            + " query requires "
+                            + (assisted ? "assistedQueryColumn" : "likeQueryColumn")
+                            + ". " + describeRule(rule));
         }
         QueryOperand queryOperand = readComposableQueryOperand(operand, context,
                 "Separate-table encrypted query must use prepared parameter, string literal, or CONCAT of them.");
@@ -936,11 +930,40 @@ public class SqlRewriteEngine {
 
     private SelectItem<?> buildComparisonSelectItem(SelectItem<?> originalItem, ColumnResolution resolution) {
         EncryptColumnRule rule = resolution.rule();
-        String targetColumn = rule.hasAssistedQueryColumn() ? rule.assistedQueryColumn() : rule.storageColumn();
+        String targetColumn = requireAssistedQueryColumn(rule, "comparison subquery");
         Alias alias = originalItem.getAlias() != null
                 ? originalItem.getAlias()
                 : new Alias(resolution.column().getColumnName(), false);
         return SelectItem.from(buildColumn(resolution.column(), targetColumn), alias);
+    }
+
+    private String requireAssistedQueryColumn(EncryptColumnRule rule, String scenario) {
+        if (!rule.hasAssistedQueryColumn()) {
+            throw new UnsupportedEncryptedOperationException(
+                    "Encrypted " + scenario + " requires assistedQueryColumn. " + describeRule(rule));
+        }
+        return rule.assistedQueryColumn();
+    }
+
+    private String requireLikeQueryColumn(EncryptColumnRule rule, String scenario) {
+        if (!rule.hasLikeQueryColumn()) {
+            throw new UnsupportedEncryptedOperationException(
+                    "Encrypted " + scenario + " requires likeQueryColumn. " + describeRule(rule));
+        }
+        return rule.likeQueryColumn();
+    }
+
+    private String describeRule(EncryptColumnRule rule) {
+        String table = StringUtils.isNotBlank(rule.table()) ? rule.table() : "<entity-default-table>";
+        if (rule.isStoredInSeparateTable()) {
+            return "property=" + rule.property()
+                    + ", table=" + table
+                    + ", column=" + rule.column()
+                    + ", storageTable=" + rule.storageTable();
+        }
+        return "property=" + rule.property()
+                + ", table=" + table
+                + ", column=" + rule.column();
     }
 
     private String selectAliasName(SelectItem<?> item, ColumnResolution resolution) {

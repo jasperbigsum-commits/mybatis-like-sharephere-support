@@ -516,6 +516,56 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+如果项目已经接入 Spring Boot starter，更推荐直接注入 `MigrationTaskFactory`，避免业务代码重复组装迁移基础设施依赖：
+
+```java
+@Service
+public class UserAccountMigrationRunner {
+
+    private final MigrationTaskFactory migrationTaskFactory;
+
+    public UserAccountMigrationRunner(MigrationTaskFactory migrationTaskFactory) {
+        this.migrationTaskFactory = migrationTaskFactory;
+    }
+
+    public MigrationReport migrate() {
+        return migrationTaskFactory.executeForEntity(
+                UserAccount.class,
+                "id",
+                builder -> builder
+                        .batchSize(500)
+                        .verifyAfterWrite(true)
+        );
+    }
+}
+```
+
+自动装配默认会提供：
+
+- `MigrationTaskFactory`
+- `MigrationStateStore`
+  默认是 `InMemoryMigrationStateStore`
+- `MigrationConfirmationPolicy`
+  默认是 `AllowAllMigrationConfirmationPolicy`
+
+如果你希望断点状态改为文件持久化，或要求上线前必须确认风险范围，只需覆写对应 Bean，`MigrationTaskFactory` 会自动复用：
+
+```java
+@Configuration
+public class MigrationSupportConfiguration {
+
+    @Bean
+    public MigrationStateStore migrationStateStore() {
+        return new FileMigrationStateStore(Paths.get("migration-state"));
+    }
+
+    @Bean
+    public MigrationConfirmationPolicy migrationConfirmationPolicy() {
+        return new FileMigrationConfirmationPolicy(Paths.get("migration-confirmation"));
+    }
+}
+```
+
 状态文件包含：
 
 - `status`

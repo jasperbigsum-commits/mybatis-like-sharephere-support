@@ -212,6 +212,77 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldFailEqualityQueryWithoutAssistedQueryColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithoutPhoneAssistedQueryColumn();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id, phone FROM user_account WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException ex = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(
+                "Encrypted equality query requires assistedQueryColumn. property=phone, table=<entity-default-table>, column=phone",
+                ex.getMessage()
+        );
+    }
+
+    @Test
+    void shouldFailLikeQueryWithoutLikeQueryColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithoutPhoneLikeQueryColumn();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id, phone FROM user_account WHERE phone LIKE ?",
+                List.of(new ParameterMapping.Builder(configuration, "phoneLike", String.class).build()),
+                Map.of("phoneLike", "%1380%")
+        );
+
+        UnsupportedEncryptedOperationException ex = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(
+                "Encrypted LIKE query requires likeQueryColumn. property=phone, table=<entity-default-table>, column=phone",
+                ex.getMessage()
+        );
+    }
+
+    @Test
+    void shouldFailSeparateTableEqualityQueryWithoutAssistedQueryColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithoutSeparateTableAssistedQueryColumn();
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader())
+        );
+
+        assertEquals(
+                "Separate-table encrypted field must define assistedQueryColumn. property=idCard, table=<entity-default-table>, column=id_card, storageTable=user_id_card_encrypt",
+                ex.getMessage()
+        );
+    }
+
+    @Test
     void shouldRewriteEncryptedProjectionInComplexDerivedJoinQuery() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -1520,6 +1591,24 @@ class SqlRewriteEngineTest {
     private DatabaseEncryptionProperties sampleProperties(SqlDialect sqlDialect) {
         DatabaseEncryptionProperties properties = sampleProperties();
         properties.setSqlDialect(sqlDialect);
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesWithoutPhoneAssistedQueryColumn() {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        properties.getTables().get(0).getFields().get(0).setAssistedQueryColumn(null);
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesWithoutPhoneLikeQueryColumn() {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        properties.getTables().get(0).getFields().get(0).setLikeQueryColumn(null);
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesWithoutSeparateTableAssistedQueryColumn() {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        properties.getTables().get(0).getFields().get(1).setAssistedQueryColumn(null);
         return properties;
     }
 

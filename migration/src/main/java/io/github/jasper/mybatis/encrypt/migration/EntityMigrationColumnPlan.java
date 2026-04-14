@@ -174,7 +174,14 @@ public final class EntityMigrationColumnPlan {
      * @return {@code true} when source plaintext will be replaced
      */
     public boolean overwritesSourceColumn() {
-        return storedInSeparateTable || sourceColumn.equals(storageColumn);
+        return storedInSeparateTable
+                || matchesSourceColumn(storageColumn)
+                || matchesSourceColumn(assistedQueryColumn)
+                || matchesSourceColumn(likeQueryColumn);
+    }
+
+    private boolean matchesSourceColumn(String targetColumn) {
+        return sourceColumn.equals(targetColumn);
     }
 
     /**

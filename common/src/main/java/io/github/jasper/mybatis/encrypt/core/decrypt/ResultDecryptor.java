@@ -29,6 +29,12 @@ public class ResultDecryptor {
     private final QueryResultPlanFactory queryResultPlanFactory;
     private final ThreadLocal<QueryScope> queryScope = new ThreadLocal<>();
 
+    /**
+     * 结果解密器
+     * @param metadataRegistry 元数据注册
+     * @param algorithmRegistry 算法注册
+     * @param separateTableEncryptionManager 独立表加密管理器
+     */
     public ResultDecryptor(EncryptMetadataRegistry metadataRegistry,
                            AlgorithmRegistry algorithmRegistry,
                            SeparateTableEncryptionManager separateTableEncryptionManager) {

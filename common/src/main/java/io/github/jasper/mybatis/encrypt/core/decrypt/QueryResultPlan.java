@@ -18,6 +18,10 @@ public final class QueryResultPlan {
 
     private final List<TypePlan> typePlans;
 
+    /**
+     * 空的计划
+     * @return 空计划
+     */
     public static QueryResultPlan empty() {
         return EMPTY;
     }

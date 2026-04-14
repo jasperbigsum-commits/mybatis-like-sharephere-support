@@ -55,6 +55,10 @@ public final class QueryResultPlanFactory {
     private final ReflectorFactory reflectorFactory = new DefaultReflectorFactory();
     private final Map<String, QueryResultPlan> queryPlans = new ConcurrentHashMap<>();
 
+    /**
+     * 查询结果计划生成工厂
+     * @param metadataRegistry 原数据注册
+     */
     public QueryResultPlanFactory(EncryptMetadataRegistry metadataRegistry) {
         this.metadataRegistry = metadataRegistry;
     }

@@ -172,6 +172,86 @@ class JdbcEntityMigrationTaskTest {
     }
 
     @Test
+    void shouldBackupPlaintextBeforeReplacingSourceColumnWithHashValue() throws Exception {
+        DataSource dataSource = newDataSource("same_table_hash_overwrite_backup");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(128), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_like varchar(255), " +
+                        "phone_backup varchar(128))",
+                "insert into user_account (id, phone) values (1, '13800138000')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(HashOverwriteUserEntity.class, "id")
+                        .backupColumn("phone", "phone_backup")
+                        .build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(Files.createTempDirectory("migration-state-hash-overwrite-backup"))
+        );
+
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone, phone_cipher, phone_like, phone_backup from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            String hashValue = resultSet.getString("phone");
+            assertNotNull(hashValue);
+            assertNotEquals("13800138000", hashValue);
+            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
+            assertTrue(resultSet.getString("phone_like") != null && !resultSet.getString("phone_like").isEmpty());
+            assertEquals("13800138000", resultSet.getString("phone_backup"));
+        }
+    }
+
+    @Test
+    void shouldBackupPlaintextBeforeReplacingSourceColumnWithLikeValue() throws Exception {
+        DataSource dataSource = newDataSource("same_table_like_overwrite_backup");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(255), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_backup varchar(128))",
+                "insert into user_account (id, phone) values (1, ' AbC-123 ')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(LikeOverwriteUserEntity.class, "id")
+                        .backupColumn("phone", "phone_backup")
+                        .build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(Files.createTempDirectory("migration-state-like-overwrite-backup"))
+        );
+
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone, phone_cipher, phone_hash, phone_backup from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            String likeValue = resultSet.getString("phone");
+            assertNotNull(likeValue);
+            assertEquals("abc-123", likeValue);
+            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
+            assertTrue(resultSet.getString("phone_hash") != null && !resultSet.getString("phone_hash").isEmpty());
+            assertEquals(" AbC-123 ", resultSet.getString("phone_backup"));
+        }
+    }
+
+    @Test
     void shouldMigrateConfiguredTableRuleByTableName() throws Exception {
         DataSource dataSource = newDataSource("config_table_name");
         executeSql(dataSource,
@@ -691,6 +771,34 @@ class JdbcEntityMigrationTaskTest {
                 likeQueryColumn = "id_card_like"
         )
         private String idCard;
+    }
+
+    @EncryptTable("user_account")
+    static class HashOverwriteUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone",
+                likeQueryColumn = "phone_like"
+        )
+        private String phone;
+    }
+
+    @EncryptTable("user_account")
+    static class LikeOverwriteUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone"
+        )
+        private String phone;
     }
 
     static class MultiTableDto {

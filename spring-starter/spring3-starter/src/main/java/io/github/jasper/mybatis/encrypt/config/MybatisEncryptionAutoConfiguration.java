@@ -228,8 +228,6 @@ public class MybatisEncryptionAutoConfiguration {
      * 在存在数据源时创建独立表加密管理器。
      *
      * @param dataSource 数据源
-     * @param metadataRegistry 加密元数据注册中心
-     * @param algorithmRegistry 算法注册中心
      * @param properties 插件配置属性
      * @return 独立表加密管理器
      */

@@ -91,7 +91,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
 
     private Map<String, Object> loadMainRow(Connection connection, EntityMigrationPlan plan, MigrationCursor rowCursor)
             throws SQLException {
-        Set<String> columns = new LinkedHashSet<String>();
+        Set<String> columns = new LinkedHashSet<>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             columns.add(columnPlan.getSourceColumn());
             if (!columnPlan.isStoredInSeparateTable()) {
@@ -127,7 +127,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                 if (!resultSet.next()) {
                     throw new MigrationVerificationException("Missing migrated row in main table: " + rowCursor);
                 }
-                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                Map<String, Object> row = new LinkedHashMap<>();
                 for (String column : columns) {
                     row.put(column, resultSet.getObject(column));
                 }
@@ -153,7 +153,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                 if (!resultSet.next()) {
                     throw new MigrationVerificationException("Missing separate-table row for reference id: " + referenceId);
                 }
-                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                Map<String, Object> row = new LinkedHashMap<>();
                 row.put(columnPlan.getStorageColumn(), resultSet.getObject(columnPlan.getStorageColumn()));
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
                     row.put(columnPlan.getAssistedQueryColumn(),

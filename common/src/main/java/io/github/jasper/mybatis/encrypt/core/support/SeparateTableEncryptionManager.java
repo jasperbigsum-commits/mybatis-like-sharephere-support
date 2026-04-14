@@ -13,6 +13,7 @@ import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.mapping.SqlCommandType;
+import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
 import org.apache.ibatis.reflection.property.PropertyTokenizer;
@@ -38,6 +39,7 @@ public class SeparateTableEncryptionManager {
     private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
     private final SnowflakeIdGenerator idGenerator;
+    private final SeparateTableRowPersister rowPersister;
     private final ThreadLocal<HydrationScope> hydrationScope = new ThreadLocal<>();
 
     /**
@@ -52,11 +54,30 @@ public class SeparateTableEncryptionManager {
                                           EncryptMetadataRegistry metadataRegistry,
                                           AlgorithmRegistry algorithmRegistry,
                                           DatabaseEncryptionProperties properties) {
+        this(dataSource, metadataRegistry, algorithmRegistry, properties,
+                new DefaultSeparateTableRowPersister(dataSource, properties));
+    }
+
+    /**
+     * 创建独立表加密管理器。
+     *
+     * @param dataSource 数据源
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param properties 插件配置属性
+     * @param rowPersister 独立表写入执行器
+     */
+    public SeparateTableEncryptionManager(DataSource dataSource,
+                                          EncryptMetadataRegistry metadataRegistry,
+                                          AlgorithmRegistry algorithmRegistry,
+                                          DatabaseEncryptionProperties properties,
+                                          SeparateTableRowPersister rowPersister) {
         this.dataSource = dataSource;
         this.metadataRegistry = metadataRegistry;
         this.algorithmRegistry = algorithmRegistry;
         this.properties = properties;
         this.idGenerator = new SnowflakeIdGenerator();
+        this.rowPersister = rowPersister;
     }
 
     /**
@@ -66,6 +87,24 @@ public class SeparateTableEncryptionManager {
      * @param boundSql 当前 BoundSql
      */
     public void prepareWriteReferences(MappedStatement mappedStatement, BoundSql boundSql) {
+        prepareWriteReferences(mappedStatement, boundSql, null);
+    }
+
+    /**
+     * 为写操作预先准备独立表 hash 引用值。
+     *
+     * @param mappedStatement 当前 mapped statement
+     * @param boundSql 当前 BoundSql
+     * @param executor 当前业务 SQL 所使用的 executor
+     */
+    public void prepareWriteReferences(MappedStatement mappedStatement, BoundSql boundSql, Executor executor) {
+        if (usesLegacyPrepareOverride()) {
+            prepareWriteReferences(mappedStatement, boundSql);
+            return;
+        }
+        if (metadataRegistry == null || mappedStatement == null || boundSql == null) {
+            return;
+        }
         metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject());
         SqlCommandType commandType = mappedStatement.getSqlCommandType();
         if (commandType != SqlCommandType.INSERT && commandType != SqlCommandType.UPDATE) {
@@ -76,7 +115,17 @@ public class SeparateTableEncryptionManager {
             return;
         }
         for (Object candidate : unwrapCandidates(parameterObject)) {
-            prepareCandidateReferences(mappedStatement, boundSql, commandType, candidate);
+            prepareCandidateReferences(mappedStatement, boundSql, commandType, candidate, executor);
+        }
+    }
+
+    private boolean usesLegacyPrepareOverride() {
+        try {
+            return getClass()
+                    .getMethod("prepareWriteReferences", MappedStatement.class, BoundSql.class)
+                    .getDeclaringClass() != SeparateTableEncryptionManager.class;
+        } catch (NoSuchMethodException ex) {
+            return false;
         }
     }
 
@@ -146,7 +195,8 @@ public class SeparateTableEncryptionManager {
     private void prepareCandidateReferences(MappedStatement mappedStatement,
                                             BoundSql boundSql,
                                             SqlCommandType commandType,
-                                            Object candidate) {
+                                            Object candidate,
+                                            Executor executor) {
         if (candidate == null || candidate instanceof Map<?, ?>) {
             return;
         }
@@ -163,7 +213,8 @@ public class SeparateTableEncryptionManager {
             if (plainValue == null) {
                 continue;
             }
-            String referenceId = determineReferenceId(boundSql, commandType, tableRule, rule, metaObject, plainValue);
+            String referenceId = determineReferenceId(
+                    mappedStatement, boundSql, commandType, tableRule, rule, metaObject, plainValue, executor);
             registerPreparedReference(boundSql, candidate, rule.property(), referenceId);
         }
     }
@@ -175,12 +226,14 @@ public class SeparateTableEncryptionManager {
      * 就回主表查询已有引用；若已有引用对应的独立表记录与当前明文一致则直接复用，
      * 否则再按 assistedQueryColumn 对应的 hash 值查找可复用记录，仍然没有时新建独立表记录。</p>
      */
-    private String determineReferenceId(BoundSql boundSql,
+    private String determineReferenceId(MappedStatement mappedStatement,
+                                        BoundSql boundSql,
                                         SqlCommandType commandType,
                                         EncryptTableRule tableRule,
                                         EncryptColumnRule rule,
                                         MetaObject metaObject,
-                                        Object plainValue) {
+                                        Object plainValue,
+                                        Executor executor) {
         String referenceId = currentReferenceId(boundSql, rule.property());
         if (referenceId != null) {
             return referenceId;
@@ -193,11 +246,11 @@ public class SeparateTableEncryptionManager {
                     && matchesAssignedHash(currentStoredReferenceId, assignedHash)) {
                 // 同时更新判断是否独立表表是否存在，不匹配则创建记录
                 return Optional.ofNullable(findReferenceIdByAssignedHash(rule, assignedHash))
-                        .orElseGet(() -> insertExternalRow(rule, plainValue, assignedHash));
+                        .orElseGet(() -> insertExternalRow(mappedStatement, rule, plainValue, assignedHash, executor));
             }
         }
         return Optional.ofNullable(findReferenceIdByAssignedHash(rule, assignedHash))
-                .orElseGet(() -> insertExternalRow(rule, plainValue, assignedHash));
+                .orElseGet(() -> insertExternalRow(mappedStatement, rule, plainValue, assignedHash, executor));
     }
 
     /**
@@ -403,7 +456,7 @@ public class SeparateTableEncryptionManager {
                         .add(metaObject);
             }
         }
-        grouped.forEach((hydrationKey, metaById) -> hydratePlannedRule(hydrationKey, metaById));
+        grouped.forEach(this::hydratePlannedRule);
         return handled;
     }
 
@@ -448,27 +501,20 @@ public class SeparateTableEncryptionManager {
      * <p>独立表主键由框架内部使用雪花算法预生成，再与密文列一起写入外表；
      * 主表实际保存的是 assistedQueryColumn 对应的 hash 值，避免跨系统依赖独立表内部主键。</p>
      */
-    private String insertExternalRow(EncryptColumnRule rule, Object plainValue, String assignedHash) {
+    private String insertExternalRow(MappedStatement mappedStatement,
+                                     EncryptColumnRule rule,
+                                     Object plainValue,
+                                     String assignedHash,
+                                     Executor executor) {
         ExternalRowValues values = buildExternalRowValues(rule, plainValue, assignedHash);
         long generatedId = idGenerator.nextId();
-        List<String> insertColumns = new ArrayList<>();
-        insertColumns.add(rule.storageIdColumn());
-        insertColumns.addAll(values.columns());
-        List<Object> insertValues = new ArrayList<>();
-        insertValues.add(generatedId);
-        insertValues.addAll(values.values());
-        String placeholders = insertValues.stream().map(current -> "?").collect(Collectors.joining(", "));
-        String sql = "insert into " + quote(rule.storageTable()) + " ("
-                + insertColumns.stream().map(this::quote).collect(Collectors.joining(", "))
-                + ") values (" + placeholders + ")";
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            bind(statement, insertValues);
-            statement.executeUpdate();
-            return assignedHash;
-        } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to insert separate-table encrypted value.", ex);
+        LinkedHashMap<String, Object> columnValues = new LinkedHashMap<>();
+        columnValues.put(rule.storageIdColumn(), generatedId);
+        for (int index = 0; index < values.columns().size(); index++) {
+            columnValues.put(values.columns().get(index), values.values().get(index));
         }
+        rowPersister.insert(new SeparateTableInsertRequest(rule.storageTable(), columnValues), mappedStatement, executor);
+        return assignedHash;
     }
 
     /**

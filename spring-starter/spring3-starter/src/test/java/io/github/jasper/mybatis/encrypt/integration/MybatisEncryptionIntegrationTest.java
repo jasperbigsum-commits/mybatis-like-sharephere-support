@@ -9,6 +9,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -137,6 +138,24 @@ class MybatisEncryptionIntegrationTest {
         Object referenceValue = parameterCaptureInterceptor.lastIdCardAdditionalParameter;
         assertNotNull(referenceValue);
         assertInstanceOf(String.class, referenceValue);
+    }
+
+    @Test
+    void shouldInsertSeparateTableRowThroughMybatisExecutorChain() {
+        UserRecord user = user(12L, "Luna", "13600136012", "320101199001010212");
+        parameterCaptureInterceptor.reset();
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        StatementCapture separateInsert =
+                parameterCaptureInterceptor.findPreparedStatementContaining("insert into `user_id_card_encrypt`");
+        assertNotNull(separateInsert);
+        assertInstanceOf(Map.class, separateInsert.parameterObject);
+        assertEquals(4, separateInsert.parameters.size());
+        assertTrue(singleLine(separateInsert.sql).toLowerCase(Locale.ROOT).contains("values (?, ?, ?, ?)"));
     }
 
     @Test
@@ -426,7 +445,7 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
-    void shouldReadAnnotatedDtoAcrossStorageModes() throws Exception {
+    void shouldReadAnnotatedDtoAcrossStorageModes() {
         UserRecord user = user(51L, "Quinn", "13200132051", "320101199001010151");
         try (SqlSession session = sqlSessionFactory.openSession(true)) {
             UserMapper mapper = session.getMapper(UserMapper.class);
@@ -1938,9 +1957,23 @@ class MybatisEncryptionIntegrationTest {
 
         @Override
         public void prepareWriteReferences(org.apache.ibatis.mapping.MappedStatement mappedStatement,
-                                           BoundSql boundSql) {
+                                           BoundSql boundSql,
+                                           org.apache.ibatis.executor.Executor executor) {
             prepareWriteReferencesCalls++;
-            super.prepareWriteReferences(mappedStatement, boundSql);
+            super.prepareWriteReferences(mappedStatement, boundSql, executor);
+        }
+    }
+
+    static class StatementCapture {
+
+        private final String sql;
+        private final List<Object> parameters;
+        private final Object parameterObject;
+
+        StatementCapture(String sql, List<Object> parameters, Object parameterObject) {
+            this.sql = sql;
+            this.parameters = parameters;
+            this.parameterObject = parameterObject;
         }
     }
 
@@ -1953,6 +1986,7 @@ class MybatisEncryptionIntegrationTest {
         private Object lastIdCardAdditionalParameter;
         private String lastPreparedSql;
         private List<Object> lastResolvedParameters = List.of();
+        private final List<StatementCapture> preparedStatements = new ArrayList<>();
 
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
@@ -1961,6 +1995,11 @@ class MybatisEncryptionIntegrationTest {
                 BoundSql boundSql = statementHandler.getBoundSql();
                 lastPreparedSql = boundSql.getSql();
                 lastResolvedParameters = resolveParameterValues(statementHandler, boundSql);
+                preparedStatements.add(new StatementCapture(
+                        boundSql.getSql(),
+                        lastResolvedParameters,
+                        boundSql.getParameterObject()
+                ));
                 if (boundSql.hasAdditionalParameter("idCard")) {
                     lastIdCardAdditionalParameter = boundSql.getAdditionalParameter("idCard");
                 }
@@ -1997,10 +2036,24 @@ class MybatisEncryptionIntegrationTest {
             return java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
         }
 
+        private StatementCapture findPreparedStatementContaining(String sqlFragment) {
+            String normalizedFragment = sqlFragment.toLowerCase(Locale.ROOT);
+            for (StatementCapture statementCapture : preparedStatements) {
+                String normalizedSql = statementCapture.sql == null
+                        ? ""
+                        : statementCapture.sql.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+                if (normalizedSql.contains(normalizedFragment)) {
+                    return statementCapture;
+                }
+            }
+            return null;
+        }
+
         private void reset() {
             lastIdCardAdditionalParameter = null;
             lastPreparedSql = null;
             lastResolvedParameters = List.of();
+            preparedStatements.clear();
         }
     }
 }

@@ -394,7 +394,7 @@ class DatabaseEncryptionInterceptorTest {
 
         @Override
         public Transaction getTransaction() {
-            return new JdbcTransactionFactory().newTransaction((javax.sql.DataSource) null, null, false);
+            return new JdbcTransactionFactory().newTransaction(null, null, false);
         }
 
         @Override

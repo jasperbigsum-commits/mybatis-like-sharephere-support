@@ -463,14 +463,14 @@ public class MigrationState {
     }
 
     private List<String> immutableCopy(List<String> values) {
-        return values == null ? Collections.<String>emptyList() : Collections.unmodifiableList(new ArrayList<String>(values));
+        return values == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(values));
     }
 
     private List<String> singletonOrEmpty(String value) {
         if (value == null) {
             return Collections.emptyList();
         }
-        List<String> values = new ArrayList<String>(1);
+        List<String> values = new ArrayList<>(1);
         values.add(value);
         return Collections.unmodifiableList(values);
     }
@@ -483,7 +483,7 @@ public class MigrationState {
             return values.get(0);
         }
         if (cursorColumns.size() == values.size()) {
-            java.util.Map<String, String> mappedValues = new java.util.LinkedHashMap<String, String>();
+            java.util.Map<String, String> mappedValues = new java.util.LinkedHashMap<>();
             for (int index = 0; index < values.size(); index++) {
                 mappedValues.put(cursorColumns.get(index), values.get(index));
             }

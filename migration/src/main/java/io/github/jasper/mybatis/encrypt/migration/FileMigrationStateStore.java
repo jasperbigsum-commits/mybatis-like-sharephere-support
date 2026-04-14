@@ -127,7 +127,7 @@ public class FileMigrationStateStore implements MigrationStateStore {
     }
 
     private java.util.List<String> readIndexedList(Properties properties, String prefix, String fallbackValue) {
-        java.util.List<String> values = new java.util.ArrayList<String>();
+        java.util.List<String> values = new java.util.ArrayList<>();
         for (int index = 0; ; index++) {
             String value = properties.getProperty(prefix + "." + index);
             if (value == null && !properties.containsKey(prefix + "." + index)) {

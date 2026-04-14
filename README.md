@@ -231,11 +231,9 @@ public class CustomAssistAlgorithm implements AssistedQueryAlgorithm {
 mybatis:
   encrypt:
     tables:
-      userAccount:
-        table: user_account
+      - table: user_account
         fields:
-          phone:
-            column: phone
+          - column: phone
             cipher-algorithm: customCipher
             assisted-query-column: phone_hash
             assisted-query-algorithm: customAssist
@@ -270,11 +268,9 @@ mybatis:
     log-masked-sql: true
     default-cipher-key: change-me-before-production
     tables:
-      userAccount:
-        table: user_account
+      - table: user_account
         fields:
-          phone:
-            column: phone
+          - column: phone
             cipher-algorithm: sm4
             assisted-query-column: phone_hash
             assisted-query-algorithm: sm3
@@ -294,11 +290,9 @@ mybatis:
 mybatis:
   encrypt:
     tables:
-      userAccount:
-        table: user_account
+      - table: user_account
         fields:
-          phone:
-            column: phone
+          - column: phone
             cipher-algorithm: aes
             assisted-query-column: phone_hash
             assisted-query-algorithm: sha256
@@ -412,9 +406,7 @@ public class UserAccount {
             storageMode = FieldStorageMode.SEPARATE_TABLE,
             storageTable = "user_phone_encrypt",
             storageColumn = "phone_cipher",
-            sourceIdProperty = "id",
-            sourceIdColumn = "id",
-            storageIdColumn = "user_id",
+            storageIdColumn = "encrypt_id",
             assistedQueryColumn = "phone_hash",
             likeQueryColumn = "phone_like"
     )
@@ -426,7 +418,7 @@ public class UserAccount {
 
 ```sql
 create table user_phone_encrypt (
-    user_id bigint primary key,
+    encrypt_id bigint primary key,
     phone_cipher varchar(512) not null,
     phone_hash char(64) not null,
     phone_like varchar(255)
@@ -437,7 +429,9 @@ create table user_phone_encrypt (
 
 - 独立表模式下必须定义 `assistedQueryColumn`
 - 当前实现按“一个加密字段对应一张独立加密表”设计
-- 写入后会同步独立加密表，查询结果返回后会按主键回填并解密
+- 主表实际保存的是 `assistedQueryColumn` 对应的 hash 值，而不是独立表内部主键
+- 写入独立表时会优先复用当前 MyBatis Executor，使用 `Map` 参数执行外表 `INSERT`，这样可以复用同一事务并允许其他 MyBatis 拦截器继续扩展
+- 查询结果返回后会按主表中保存的 hash 引用值回填并解密
 - 如果使用 MyBatis-Plus 自动生成字段列表，建议让该字段不直接映射业务主表物理列
 
 ## 安全与合规说明
@@ -499,7 +493,7 @@ mybatis-like-sharephere-support
 
 - 仅基于已注册的 MyBatis 实体类生成迁移计划，拒绝 DTO 和多表拼装元数据
 - 同表模式下补齐 `storageColumn`、`assistedQueryColumn`、`likeQueryColumn`
-- 独立表模式下按 hash 复用或新建外表记录，并把主表原字段回填为引用 id
+- 独立表模式下按 `assistedQueryColumn` 的 hash 复用或新建外表记录，并把主表原字段回填为该 hash 引用值
 - 按主键分页批量执行，支持中断后按最后一次已提交批次继续
 - 通过文件状态记录迁移表范围、累计处理量、最后断点和完成状态
 - 可选开启写后校验，密文字段按“解密后等于原文”验证，hash/like 按确定性值验证

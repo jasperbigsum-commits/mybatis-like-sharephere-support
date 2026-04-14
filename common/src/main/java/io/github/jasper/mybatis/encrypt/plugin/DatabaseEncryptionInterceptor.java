@@ -8,6 +8,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.core.rewrite.RewriteResult;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
+import io.github.jasper.mybatis.encrypt.core.support.DefaultSeparateTableRowPersister;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import org.apache.ibatis.cache.CacheKey;
 import org.apache.ibatis.executor.Executor;
@@ -102,6 +103,10 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
             return invocation.proceed();
         }
         MappedStatement mappedStatement = (MappedStatement) args[0];
+        if (DefaultSeparateTableRowPersister.isManagedStatementId(mappedStatement.getId())) {
+            return invocation.proceed();
+        }
+        Executor executor = (Executor) invocation.getTarget();
         boolean queryScopeOpened = false;
         if ("query".equals(invocation.getMethod().getName())) {
             resultDecryptor.beginQueryScope(mappedStatement);
@@ -113,7 +118,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         Object parameterObject = args.length > 1 ? args[1] : null;
         try {
             BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
-            MappedStatement rewrittenStatement = rewriteMappedStatement(mappedStatement, boundSql);
+            MappedStatement rewrittenStatement = rewriteMappedStatement(executor, mappedStatement, boundSql);
             if (rewrittenStatement != mappedStatement) {
                 args[0] = rewrittenStatement;
                 if (args.length == 6) {
@@ -195,8 +200,8 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
      * @param boundSql 当前 BoundSql
      * @return 可直接继续执行的 mapped statement
      */
-    private MappedStatement rewriteMappedStatement(MappedStatement mappedStatement, BoundSql boundSql) {
-        prepareSeparateTableReferences(mappedStatement, boundSql);
+    private MappedStatement rewriteMappedStatement(Executor executor, MappedStatement mappedStatement, BoundSql boundSql) {
+        prepareSeparateTableReferences(executor, mappedStatement, boundSql);
         String originalSql = boundSql.getSql();
         List<ParameterMapping> originalParameterMappings = new ArrayList<ParameterMapping>(boundSql.getParameterMappings());
         RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
@@ -268,14 +273,14 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
      * @param mappedStatement 当前 mapped statement
      * @param boundSql 当前 BoundSql
      */
-    private void prepareSeparateTableReferences(MappedStatement mappedStatement, BoundSql boundSql) {
+    private void prepareSeparateTableReferences(Executor executor, MappedStatement mappedStatement, BoundSql boundSql) {
         if (separateTableEncryptionManager == null) {
             return;
         }
         if (!shouldPrepareSeparateTableReferences(mappedStatement, boundSql)) {
             return;
         }
-        separateTableEncryptionManager.prepareWriteReferences(mappedStatement, boundSql);
+        separateTableEncryptionManager.prepareWriteReferences(mappedStatement, boundSql, executor);
     }
 
     /**

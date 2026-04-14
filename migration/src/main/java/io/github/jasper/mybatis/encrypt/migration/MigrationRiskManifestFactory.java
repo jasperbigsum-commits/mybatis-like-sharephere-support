@@ -4,7 +4,6 @@ import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -18,7 +17,7 @@ public class MigrationRiskManifestFactory {
      * @return 迁移元数据
      */
     public MigrationRiskManifest create(EntityMigrationPlan plan) {
-        Set<MigrationRiskEntry> entries = new LinkedHashSet<MigrationRiskEntry>();
+        Set<MigrationRiskEntry> entries = new LinkedHashSet<>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             if (columnPlan.isStoredInSeparateTable()) {
                 entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getSourceColumn()));

@@ -49,7 +49,7 @@ Key behavior:
 - Migration plans are built only from registered MyBatis entity metadata
 - DTO-style multi-table field models are rejected
 - Same-table mode updates `storageColumn`, `assistedQueryColumn`, and `likeQueryColumn`
-- Separate-table mode inserts or reuses external encrypted rows and rewrites the main table source column to a reference id
+- Separate-table mode inserts or reuses external encrypted rows by `assistedQueryColumn` hash and rewrites the main-table source column to that hash reference
 - Tasks run in primary-key batches and resume from the last committed checkpoint
 - File-based progress stores persist table range, processed counts, and the last processed id
 - Optional confirmation policies force operators to confirm the exact tables and columns that will be changed

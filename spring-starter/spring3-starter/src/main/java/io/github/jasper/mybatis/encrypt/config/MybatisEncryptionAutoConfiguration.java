@@ -9,7 +9,9 @@ import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
+import io.github.jasper.mybatis.encrypt.core.support.DefaultSeparateTableRowPersister;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
+import io.github.jasper.mybatis.encrypt.core.support.SeparateTableRowPersister;
 import io.github.jasper.mybatis.encrypt.migration.AllowAllMigrationConfirmationPolicy;
 import io.github.jasper.mybatis.encrypt.migration.DefaultMigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.migration.InMemoryMigrationStateStore;
@@ -233,11 +235,31 @@ public class MybatisEncryptionAutoConfiguration {
      */
     @Bean
     @ConditionalOnBean(DataSource.class)
+    @ConditionalOnMissingBean(SeparateTableRowPersister.class)
+    public SeparateTableRowPersister separateTableRowPersister(DataSource dataSource,
+                                                               DatabaseEncryptionProperties properties) {
+        return new DefaultSeparateTableRowPersister(dataSource, properties);
+    }
+
+    /**
+     * 在存在数据源时创建独立表加密管理器。
+     *
+     * @param dataSource 数据源
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param properties 插件配置属性
+     * @param rowPersister 独立表写入执行器
+     * @return 独立表加密管理器
+     */
+    @Bean
+    @ConditionalOnBean(DataSource.class)
     public SeparateTableEncryptionManager separateTableEncryptionManager(DataSource dataSource,
                                                                          EncryptMetadataRegistry metadataRegistry,
                                                                          AlgorithmRegistry algorithmRegistry,
-                                                                         DatabaseEncryptionProperties properties) {
-        return new SeparateTableEncryptionManager(dataSource, metadataRegistry, algorithmRegistry, properties);
+                                                                         DatabaseEncryptionProperties properties,
+                                                                         SeparateTableRowPersister rowPersister) {
+        return new SeparateTableEncryptionManager(
+                dataSource, metadataRegistry, algorithmRegistry, properties, rowPersister);
     }
 
     /**

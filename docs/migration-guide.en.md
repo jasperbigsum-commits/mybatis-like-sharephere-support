@@ -198,31 +198,77 @@ This is useful when:
 - pipelines must statically validate the allowed change set
 - rule drift must not silently expand the affected columns
 
+## Error types and codes
+
+The migration module now exposes structured exception types so callers can classify failures reliably:
+
+- `MigrationDefinitionException`
+  the migration target, metadata, or requested field scope is invalid
+- `MigrationFieldSelectorException`
+  `includeField` or `backupColumn` did not match any registered encrypted field
+- `MigrationConfirmationException`
+  confirmation is missing, not approved, stale, or unreadable
+- `MigrationCursorException`
+  a cursor value is null or the stored checkpoint shape does not match cursor columns
+- `MigrationStateStoreException`
+  checkpoint state files cannot be loaded, saved, or parsed safely
+- `MigrationExecutionException`
+  JDBC range refresh or execution fails
+- `MigrationVerificationException`
+  post-write verification detects inconsistent main-table, external-table, or derived values
+
+All of them extend `MigrationException`, and callers can read `getErrorCode()` for a stable machine-friendly code such as:
+
+- `METADATA_RULE_MISSING`
+- `FIELD_SELECTOR_UNRESOLVED`
+- `CONFIRMATION_REQUIRED`
+- `CONFIRMATION_SCOPE_MISMATCH`
+- `CURSOR_CHECKPOINT_INVALID`
+- `STATE_STORE_DATA_INVALID`
+- `VERIFICATION_VALUE_MISMATCH`
+
 ## State files and resume behavior
 
 State files store:
 
+- `cursorColumns.*`
+- `cursorJavaTypes.*`
 - `status`
 - `totalRows`
-- `rangeStart`
-- `rangeEnd`
-- `lastProcessedId`
+- `rangeStartValues.*`
+- `rangeEndValues.*`
+- `lastProcessedCursorValues.*`
 - `scannedRows`
 - `migratedRows`
 - `skippedRows`
 - `verifiedRows`
+
+When the task uses a single cursor column, the state file also writes compatibility aliases for easier manual inspection and backward compatibility:
+
+- `cursorColumn` / `idColumn`
+- `cursorJavaType` / `idJavaType`
+- `rangeStart` / `rangeEnd`
+- `lastProcessedCursor` / `lastProcessedId`
 
 Sample:
 
 ```properties
 entityName=com.example.UserAccount
 tableName=user_account
+cursorColumns.0=id
+cursorJavaTypes.0=java.lang.Long
+cursorColumn=id
 idColumn=id
+cursorJavaType=java.lang.Long
 idJavaType=java.lang.Long
 status=RUNNING
 totalRows=200000
+rangeStartValues.0=1
+rangeEndValues.0=200000
+lastProcessedCursorValues.0=10500
 rangeStart=1
 rangeEnd=200000
+lastProcessedCursor=10500
 lastProcessedId=10500
 scannedRows=10500
 migratedRows=10480
@@ -235,7 +281,7 @@ Resume behavior:
 
 - checkpoints advance only after a batch commits successfully
 - failed in-flight batches are not marked as completed
-- rerunning the same task resumes from `lastProcessedId`
+- rerunning the same task resumes from the committed `lastProcessedCursorValues` checkpoint
 
 ## Recommended operator workflow
 
@@ -250,11 +296,13 @@ Resume behavior:
 
 The migration test suite currently covers:
 
-- same-table migration
-- separate-table migration
-- DTO metadata rejection
-- resume after interruption
-- confirmation file generation and blocking
-- execution after approval
-- failure on confirmation mismatch
-- failure on expected-scope mismatch
+- execution-flow tests
+  same-table migration, separate-table migration, table-name driven tasks, non-`id` cursors, and registry warm-up
+- backup-behavior tests
+  plaintext backup before source overwrite by hash, like, or separate-table references
+- resume-behavior tests
+  restart after failures with both single-column and composite cursors
+- plan-factory tests
+  DTO rejection, unresolved field selectors, backup conflicts, and missing metadata
+- focused unit tests
+  cursor codec invariants and state-file compatibility / malformed-state rejection

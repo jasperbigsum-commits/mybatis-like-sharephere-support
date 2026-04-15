@@ -1,7 +1,8 @@
 package io.github.jasper.mybatis.encrypt.migration.jdbc;
 
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
-import io.github.jasper.mybatis.encrypt.migration.MigrationException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursorException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -41,7 +42,8 @@ final class MigrationCursorCodec {
             return null;
         }
         if (columns.size() != rawValues.size()) {
-            throw new MigrationException("Cursor checkpoint shape does not match cursor columns: " + columns);
+            throw new MigrationCursorException(MigrationErrorCode.CURSOR_CHECKPOINT_INVALID,
+                    "Cursor checkpoint shape does not match cursor columns: " + columns);
         }
         Map<String, Object> values = new LinkedHashMap<>();
         for (int index = 0; index < columns.size(); index++) {

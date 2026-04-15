@@ -6,6 +6,7 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import org.bouncycastle.util.encoders.Hex;
 
 /**
@@ -22,7 +23,8 @@ public class Sm3AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
         try {
             return MessageDigest.getInstance("SM3", BouncyCastleProviderHolder.PROVIDER_NAME);
         } catch (GeneralSecurityException ex) {
-            throw new EncryptionConfigurationException("Failed to initialize SM3 digest.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.ASSISTED_QUERY_OPERATION_FAILED,
+                    "Failed to initialize SM3 digest.", ex);
         }
     });
 

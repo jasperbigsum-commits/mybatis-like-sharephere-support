@@ -8,6 +8,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -293,7 +294,8 @@ public class SeparateTableEncryptionManager {
                 return toReferenceId(resultSet.getObject(1));
             }
         } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to load existing separate-table reference id.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                    "Failed to load existing separate-table reference id.", ex);
         }
     }
 
@@ -327,7 +329,8 @@ public class SeparateTableEncryptionManager {
                 return null;
             }
         } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to find separate-table reference by assigned hash.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                    "Failed to find separate-table reference by assigned hash.", ex);
         }
     }
 
@@ -493,7 +496,8 @@ public class SeparateTableEncryptionManager {
             }
             return result;
         } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to load separate-table encrypted values.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                    "Failed to load separate-table encrypted values.", ex);
         }
     }
 
@@ -683,7 +687,7 @@ public class SeparateTableEncryptionManager {
 
     private void requireAssistedReferenceRule(EncryptColumnRule rule, String action) {
         if (!rule.hasAssistedQueryColumn()) {
-            throw new EncryptionConfigurationException(
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN,
                     "Separate-table encrypted field requires assistedQueryColumn to " + action
                             + ". property=" + rule.property()
                             + ", table=" + rule.table()
@@ -691,7 +695,7 @@ public class SeparateTableEncryptionManager {
                             + ", storageTable=" + rule.storageTable());
         }
         if (StringUtils.isBlank(rule.assistedQueryAlgorithm())) {
-            throw new EncryptionConfigurationException(
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_ASSISTED_QUERY_ALGORITHM,
                     "Separate-table encrypted field requires assistedQueryAlgorithm to " + action
                             + ". property=" + rule.property()
                             + ", table=" + rule.table()

@@ -5,6 +5,7 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 
 /**
  * 基于 SHA-256 的辅助等值查询算法实现。
@@ -27,7 +28,8 @@ public class Sha256AssistedQueryAlgorithm implements AssistedQueryAlgorithm {
             }
             return builder.toString();
         } catch (GeneralSecurityException ex) {
-            throw new EncryptionConfigurationException("Failed to hash assisted query value.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.ASSISTED_QUERY_OPERATION_FAILED,
+                    "Failed to hash assisted query value.", ex);
         }
     }
 }

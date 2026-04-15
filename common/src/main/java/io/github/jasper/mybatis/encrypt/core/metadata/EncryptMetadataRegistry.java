@@ -1,6 +1,8 @@
 package io.github.jasper.mybatis.encrypt.core.metadata;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -119,7 +121,8 @@ public class EncryptMetadataRegistry {
         properties.getTables().forEach(tableProperties -> {
             String tableName = tableProperties.getTable();
             if (StringUtils.isBlank(tableName)) {
-                throw new IllegalArgumentException("Configured table rule must define table name.");
+                throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_TABLE_RULE,
+                        "Configured table rule must define table name.");
             }
             EncryptTableRule tableRule = new EncryptTableRule(tableName);
             tableProperties.getFields().forEach(fieldProperties ->
@@ -132,7 +135,8 @@ public class EncryptMetadataRegistry {
         String property = resolveConfiguredProperty(properties);
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
         if (StringUtils.isBlank(column)) {
-            throw new IllegalArgumentException("Configured field rule must define column or property name.");
+            throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                    "Configured field rule must define column or property name.");
         }
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
@@ -177,13 +181,13 @@ public class EncryptMetadataRegistry {
             return;
         }
         if (StringUtils.isBlank(rule.storageTable())) {
-            throw new IllegalArgumentException(
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_STORAGE_TABLE,
                     "Separate-table encrypted field must define storageTable. property=" + rule.property()
                             + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
                             + ", column=" + rule.column());
         }
         if (!rule.hasAssistedQueryColumn()) {
-            throw new IllegalArgumentException(
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN,
                     "Separate-table encrypted field must define assistedQueryColumn. property=" + rule.property()
                             + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
                             + ", column=" + rule.column()

@@ -21,6 +21,8 @@ import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -260,6 +262,7 @@ class SqlRewriteEngineTest {
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
         );
 
+        assertEquals(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN, ex.getErrorCode());
         assertEquals(
                 "Encrypted equality query requires assistedQueryColumn. property=phone, table=<entity-default-table>, column=phone",
                 ex.getMessage()
@@ -288,6 +291,7 @@ class SqlRewriteEngineTest {
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
         );
 
+        assertEquals(EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN, ex.getErrorCode());
         assertEquals(
                 "Encrypted LIKE query requires likeQueryColumn. property=phone, table=<entity-default-table>, column=phone",
                 ex.getMessage()
@@ -295,18 +299,71 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldFailInsertSelectWithStructuredErrorCode() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "INSERT INTO user_account (phone) SELECT phone FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.INSERT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_INSERT, exception.getErrorCode());
+        assertEquals("Only VALUES inserts are supported for encrypted tables.", exception.getMessage());
+    }
+
+    @Test
     void shouldFailSeparateTableEqualityQueryWithoutAssistedQueryColumn() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = samplePropertiesWithoutSeparateTableAssistedQueryColumn();
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class,
+        EncryptionConfigurationException ex = assertThrows(
+                EncryptionConfigurationException.class,
                 () -> new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader())
         );
 
+        assertEquals(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN, ex.getErrorCode());
         assertEquals(
                 "Separate-table encrypted field must define assistedQueryColumn. property=idCard, table=<entity-default-table>, column=id_card, storageTable=user_id_card_encrypt",
                 ex.getMessage()
         );
+    }
+
+    @Test
+    void shouldExposeStructuredRewriteFailureWhenParserCannotHandleSql() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT FROM user_account WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        EncryptionConfigurationException exception = assertThrows(
+                EncryptionConfigurationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.SQL_REWRITE_FAILED, exception.getErrorCode());
+        assertTrue(exception.getMessage().startsWith("Failed to rewrite encrypted SQL:"));
     }
 
     @Test
@@ -1343,8 +1400,55 @@ class SqlRewriteEngineTest {
                 Map.of()
         );
 
-        assertThrows(UnsupportedEncryptedOperationException.class,
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_GROUP_BY, exception.getErrorCode());
+    }
+
+    @Test
+    void shouldFailFastForEncryptedOrderBy() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM user_account ORDER BY phone",
+                List.of(),
+                Map.of()
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY, exception.getErrorCode());
+        assertEquals("ORDER BY is not supported on encrypted field: phone", exception.getMessage());
+    }
+
+    @Test
+    void shouldFailFastForEncryptedRangePredicate() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM user_account WHERE phone > ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE, exception.getErrorCode());
+        assertEquals("Range comparison is not supported on encrypted fields.", exception.getMessage());
     }
 
     @Test
@@ -1410,8 +1514,9 @@ class SqlRewriteEngineTest {
                 Map.of()
         );
 
-        assertThrows(UnsupportedEncryptedOperationException.class,
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW, exception.getErrorCode());
     }
 
     @Test
@@ -1431,8 +1536,9 @@ class SqlRewriteEngineTest {
                 Map.of()
         );
 
-        assertThrows(UnsupportedEncryptedOperationException.class,
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_DISTINCT, exception.getErrorCode());
     }
 
     @Test
@@ -1473,8 +1579,9 @@ class SqlRewriteEngineTest {
                 Map.of()
         );
 
-        assertThrows(UnsupportedEncryptedOperationException.class,
+        UnsupportedEncryptedOperationException countException = assertThrows(UnsupportedEncryptedOperationException.class,
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), countSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION, countException.getErrorCode());
 
         BoundSql havingSql = new BoundSql(
                 configuration,
@@ -1483,8 +1590,57 @@ class SqlRewriteEngineTest {
                 Map.of()
         );
 
-        assertThrows(UnsupportedEncryptedOperationException.class,
+        UnsupportedEncryptedOperationException havingException = assertThrows(UnsupportedEncryptedOperationException.class,
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), havingSql));
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION, havingException.getErrorCode());
+    }
+
+    @Test
+    void shouldFailFastForAmbiguousEncryptedColumnReference() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM user_account u JOIN user_archive a ON u.id = a.id WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+
+        assertEquals(EncryptionErrorCode.AMBIGUOUS_ENCRYPTED_REFERENCE, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("Ambiguous encrypted column reference"));
+    }
+
+    @Test
+    void shouldFailFastForEncryptedQueryUsingNonLiteralOperand() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM user_account WHERE phone = name",
+                List.of(),
+                Map.of()
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
+
+        assertEquals(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND, exception.getErrorCode());
+        assertEquals("Encrypted query condition must use prepared parameter or string literal.", exception.getMessage());
     }
 
     @Test

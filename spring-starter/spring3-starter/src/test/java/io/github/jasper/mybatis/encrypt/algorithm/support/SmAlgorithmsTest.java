@@ -2,7 +2,10 @@ package io.github.jasper.mybatis.encrypt.algorithm.support;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import org.junit.jupiter.api.Test;
 
 class SmAlgorithmsTest {
@@ -29,5 +32,14 @@ class SmAlgorithmsTest {
         System.out.printf("明文：%s, 密文：%s%n", "13800138000", digest);
 
         assertEquals(digest, algorithm.transform("13800138000"));
+    }
+
+    @Test
+    void shouldExposeBlankSm4KeyErrorCode() {
+        EncryptionConfigurationException exception = assertThrows(EncryptionConfigurationException.class,
+                () -> new Sm4CipherAlgorithm(" "));
+
+        assertEquals(EncryptionErrorCode.INVALID_FIELD_RULE, exception.getErrorCode());
+        assertEquals("mybatis.encrypt.default-cipher-key must not be blank.", exception.getMessage());
     }
 }

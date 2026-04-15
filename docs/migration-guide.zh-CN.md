@@ -197,31 +197,77 @@ MigrationTask task = JdbcMigrationTasks.create(
 - 流水线执行前做静态变更范围校验
 - 禁止因实体规则变化而悄悄扩大变更面
 
+## 错误类型与错误码
+
+迁移模块现在提供结构化异常类型，便于业务侧按类别处理失败原因：
+
+- `MigrationDefinitionException`
+  迁移目标、元数据或字段范围定义本身无效
+- `MigrationFieldSelectorException`
+  `includeField` / `backupColumn` 传入的选择器没有命中任何已注册加密字段
+- `MigrationConfirmationException`
+  风险确认文件缺失、未批准、内容漂移或文件读写失败
+- `MigrationCursorException`
+  游标值为空、检查点形状与游标列不一致
+- `MigrationStateStoreException`
+  状态文件无法读写或内容损坏
+- `MigrationExecutionException`
+  JDBC 范围读取或执行链路失败
+- `MigrationVerificationException`
+  写后校验发现主表、外表或派生字段结果不一致
+
+所有上述异常都继承自 `MigrationException`，并可通过 `getErrorCode()` 获取结构化错误码，例如：
+
+- `METADATA_RULE_MISSING`
+- `FIELD_SELECTOR_UNRESOLVED`
+- `CONFIRMATION_REQUIRED`
+- `CONFIRMATION_SCOPE_MISMATCH`
+- `CURSOR_CHECKPOINT_INVALID`
+- `STATE_STORE_DATA_INVALID`
+- `VERIFICATION_VALUE_MISMATCH`
+
 ## 状态文件与断点恢复
 
 状态文件记录：
 
+- `cursorColumns.*`
+- `cursorJavaTypes.*`
 - `status`
 - `totalRows`
-- `rangeStart`
-- `rangeEnd`
-- `lastProcessedId`
+- `rangeStartValues.*`
+- `rangeEndValues.*`
+- `lastProcessedCursorValues.*`
 - `scannedRows`
 - `migratedRows`
 - `skippedRows`
 - `verifiedRows`
+
+当游标只有一列时，状态文件还会额外写入兼容别名，方便人工排查和兼容旧文件：
+
+- `cursorColumn` / `idColumn`
+- `cursorJavaType` / `idJavaType`
+- `rangeStart` / `rangeEnd`
+- `lastProcessedCursor` / `lastProcessedId`
 
 样例：
 
 ```properties
 entityName=com.example.UserAccount
 tableName=user_account
+cursorColumns.0=id
+cursorJavaTypes.0=java.lang.Long
+cursorColumn=id
 idColumn=id
+cursorJavaType=java.lang.Long
 idJavaType=java.lang.Long
 status=RUNNING
 totalRows=200000
+rangeStartValues.0=1
+rangeEndValues.0=200000
+lastProcessedCursorValues.0=10500
 rangeStart=1
 rangeEnd=200000
+lastProcessedCursor=10500
 lastProcessedId=10500
 scannedRows=10500
 migratedRows=10480
@@ -234,7 +280,7 @@ verificationEnabled=true
 
 - 只在批次提交成功后推进断点
 - 中途失败不会把未提交批次记为已完成
-- 修复问题后直接重跑即可从 `lastProcessedId` 之后继续
+- 修复问题后直接重跑即可从 `lastProcessedCursorValues` 对应的已提交断点继续
 
 ## 推荐操作流程
 
@@ -249,11 +295,13 @@ verificationEnabled=true
 
 当前迁移测试已覆盖：
 
-- 同表迁移
-- 独立表迁移
-- DTO 元数据拒绝
-- 中断后恢复
-- 确认文件生成与阻断
-- 确认文件批准后执行
-- 确认范围不一致时失败
-- 配置白名单范围不一致时失败
+- 执行链路测试
+  覆盖同表迁移、独立表迁移、按表名创建任务、非 `id` 游标和注解预热场景
+- 备份行为测试
+  覆盖原字段被 hash / like / 独立表引用覆盖时的备份写入
+- 恢复行为测试
+  覆盖单列游标与复合游标下的失败恢复
+- 计划工厂测试
+  覆盖 DTO 元数据拒绝、未知字段选择器、备份列冲突和缺失元数据
+- 底层单元测试
+  覆盖游标编解码约束与状态文件兼容性/脏数据拦截

@@ -29,14 +29,15 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         Path file = confirmationFile(plan);
         if (!Files.exists(file)) {
             writeTemplate(file, manifest, false);
-            throw new MigrationException("Migration confirmation file created. Review and set approved=true before retry: "
-                    + file);
+            throw new MigrationConfirmationException(MigrationErrorCode.CONFIRMATION_REQUIRED,
+                    "Migration confirmation file created. Review and set approved=true before retry: " + file);
         }
         Properties properties = new Properties();
         try (InputStream inputStream = Files.newInputStream(file)) {
             properties.load(inputStream);
         } catch (IOException ex) {
-            throw new MigrationException("Failed to read migration confirmation file: " + file, ex);
+            throw new MigrationConfirmationException(MigrationErrorCode.CONFIRMATION_IO_FAILED,
+                    "Failed to read migration confirmation file: " + file, ex);
         }
         Set<String> expectedEntries = new LinkedHashSet<>();
         for (MigrationRiskEntry entry : manifest.getEntries()) {
@@ -51,10 +52,12 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         if (!manifest.getCursorColumns().equals(readIndexedValues(properties, "cursorColumns."))
                 || !expectedEntries.equals(configuredEntries)) {
             writeTemplate(file, manifest, Boolean.parseBoolean(properties.getProperty("approved", "false")));
-            throw new MigrationException("Migration confirmation file does not match actual mutation scope: " + file);
+            throw new MigrationConfirmationException(MigrationErrorCode.CONFIRMATION_SCOPE_MISMATCH,
+                    "Migration confirmation file does not match actual mutation scope: " + file);
         }
         if (!Boolean.parseBoolean(properties.getProperty("approved", "false"))) {
-            throw new MigrationException("Migration confirmation file exists but approved=false: " + file);
+            throw new MigrationConfirmationException(MigrationErrorCode.CONFIRMATION_REQUIRED,
+                    "Migration confirmation file exists but approved=false: " + file);
         }
     }
 
@@ -62,7 +65,8 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         try {
             Files.createDirectories(directory);
         } catch (IOException ex) {
-            throw new MigrationException("Failed to create migration confirmation directory: " + directory, ex);
+            throw new MigrationConfirmationException(MigrationErrorCode.CONFIRMATION_IO_FAILED,
+                    "Failed to create migration confirmation directory: " + directory, ex);
         }
         Properties properties = new Properties();
         properties.setProperty("approved", Boolean.toString(approved));
@@ -78,7 +82,8 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         try (OutputStream outputStream = Files.newOutputStream(file)) {
             properties.store(outputStream, "Review mutation scope and set approved=true to continue");
         } catch (IOException ex) {
-            throw new MigrationException("Failed to write migration confirmation file: " + file, ex);
+            throw new MigrationConfirmationException(MigrationErrorCode.CONFIRMATION_IO_FAILED,
+                    "Failed to write migration confirmation file: " + file, ex);
         }
     }
 

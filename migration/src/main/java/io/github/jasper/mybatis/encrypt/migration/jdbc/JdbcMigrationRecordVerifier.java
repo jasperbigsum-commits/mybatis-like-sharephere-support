@@ -5,6 +5,7 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecordVerifier;
 import io.github.jasper.mybatis.encrypt.migration.MigrationVerificationException;
@@ -54,8 +55,8 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             if (columnPlan.isStoredInSeparateTable()) {
                 Object referenceId = mainRow.get(columnPlan.getSourceColumn());
                 if (referenceId == null) {
-                    throw new MigrationVerificationException("Missing separate-table reference id for field: "
-                            + columnPlan.getProperty());
+                    throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_REFERENCE_MISSING,
+                            "Missing separate-table reference id for field: " + columnPlan.getProperty());
                 }
                 assertMatches(columnPlan.getProperty(), "referenceHash", expected.getHashValue(), referenceId);
                 Map<String, Object> externalRow = loadExternalRow(connection, columnPlan, referenceId);
@@ -90,8 +91,8 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         String decrypted = actualCipher == null ? null
                 : algorithmRegistry.cipher(columnPlan.getCipherAlgorithm()).decrypt(actualCipher);
         if (plainText == null ? decrypted != null : !plainText.equals(decrypted)) {
-            throw new MigrationVerificationException("Verification failed for property "
-                    + columnPlan.getProperty() + " aspect cipher");
+            throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_VALUE_MISMATCH,
+                    "Verification failed for property " + columnPlan.getProperty() + " aspect cipher");
         }
     }
 
@@ -131,7 +132,8 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             }
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
-                    throw new MigrationVerificationException("Missing migrated row in main table: " + rowCursor);
+                    throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_MAIN_ROW_MISSING,
+                            "Missing migrated row in main table: " + rowCursor);
                 }
                 Map<String, Object> row = new LinkedHashMap<>();
                 for (String column : columns) {
@@ -157,7 +159,8 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             statement.setObject(1, referenceId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
-                    throw new MigrationVerificationException("Missing separate-table row for reference id: " + referenceId);
+                    throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_EXTERNAL_ROW_MISSING,
+                            "Missing separate-table row for reference id: " + referenceId);
                 }
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put(columnPlan.getStorageColumn(), resultSet.getObject(columnPlan.getStorageColumn()));
@@ -177,7 +180,8 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         String expectedText = expected == null ? null : String.valueOf(expected);
         String actualText = actual == null ? null : String.valueOf(actual);
         if (expectedText == null ? actualText != null : !expectedText.equals(actualText)) {
-            throw new MigrationVerificationException("Verification failed for property " + property + " aspect " + aspect);
+            throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_VALUE_MISMATCH,
+                    "Verification failed for property " + property + " aspect " + aspect);
         }
     }
 

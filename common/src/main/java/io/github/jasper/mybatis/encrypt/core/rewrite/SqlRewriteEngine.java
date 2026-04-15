@@ -7,6 +7,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import net.sf.jsqlparser.expression.*;
@@ -104,7 +105,8 @@ public class SqlRewriteEngine {
             throw ex;
         } catch (Exception ex) {
             if (properties.isFailOnMissingRule()) {
-                throw new EncryptionConfigurationException("Failed to rewrite encrypted SQL: " + boundSql.getSql(), ex);
+                throw new EncryptionConfigurationException(EncryptionErrorCode.SQL_REWRITE_FAILED,
+                        "Failed to rewrite encrypted SQL: " + boundSql.getSql(), ex);
             }
             if (log.isDebugEnabled()) {
                 log.debug("Encrypted SQL rewrite skipped for statement [{}] because failOnMissingRule=false: {}",
@@ -125,9 +127,15 @@ public class SqlRewriteEngine {
         if (tableRule == null) {
             return;
         }
-        Values values = insert.getValues();
+        Values values;
+        try {
+            values = insert.getValues();
+        } catch (ClassCastException ex) {
+            values = null;
+        }
         if (values == null || values.getExpressions() == null) {
-            throw new UnsupportedEncryptedOperationException("Only VALUES inserts are supported for encrypted tables.");
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_INSERT,
+                    "Only VALUES inserts are supported for encrypted tables.");
         }
         ExpressionList<?> originalExpressions = values.getExpressions();
         List<Column> originalColumns = new ArrayList<>(insert.getColumns());
@@ -262,7 +270,8 @@ public class SqlRewriteEngine {
             return;
         }
         if (!(select instanceof PlainSelect)) {
-            throw new UnsupportedEncryptedOperationException("Only plain select and set-operation select are supported for encrypted SQL rewrite.");
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT,
+                    "Only plain select and set-operation select are supported for encrypted SQL rewrite.");
         }
         PlainSelect plainSelect = (PlainSelect) select;
         SqlTableContext tableContext = new SqlTableContext();
@@ -379,6 +388,7 @@ public class SqlRewriteEngine {
         if (expression instanceof Between) {
             Between between = (Between) expression;
             validateNonRangeEncryptedColumn(between.getLeftExpression(), tableContext,
+                    EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE,
                     "BETWEEN is not supported on encrypted fields.");
             consumeExpression(between.getBetweenExpressionStart(), context);
             consumeExpression(between.getBetweenExpressionEnd(), context);
@@ -388,6 +398,7 @@ public class SqlRewriteEngine {
                 || expression instanceof MinorThan || expression instanceof MinorThanEquals) {
             BinaryExpression binaryExpression = (BinaryExpression) expression;
             validateNonRangeEncryptedColumn(binaryExpression.getLeftExpression(), tableContext,
+                    EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE,
                     "Range comparison is not supported on encrypted fields.");
             consumeExpression(binaryExpression.getRightExpression(), context);
             return expression;
@@ -465,6 +476,7 @@ public class SqlRewriteEngine {
         }
         expression.setLeftExpression(buildColumn(resolution.column(), requireLikeQueryColumn(rule, "LIKE query")));
         QueryOperand queryOperand = readComposableQueryOperand(expression.getRightExpression(), context,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
                 "Encrypted LIKE condition must use prepared parameter, string literal, or CONCAT of them.");
         expression.setRightExpression(buildComposableQueryExpression(queryOperand, context,
                 valueTransformer.transformLike(rule, queryOperand.value()), MaskingMode.MASKED));
@@ -489,8 +501,8 @@ public class SqlRewriteEngine {
         }
         EncryptColumnRule rule = resolution.rule();
         if (rule.isStoredInSeparateTable()) {
-            throw new UnsupportedEncryptedOperationException("IN query is not supported for separate-table encrypted field: "
-                    + rule.property());
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
+                    "IN query is not supported for separate-table encrypted field: " + rule.property());
         }
         // IN 查询与等值查询使用同一套目标列选择策略。
         String targetColumn = requireAssistedQueryColumn(rule, "IN query");
@@ -501,7 +513,8 @@ public class SqlRewriteEngine {
             return expression;
         }
         if (!(expression.getRightExpression() instanceof ExpressionList<?>)) {
-            throw new UnsupportedEncryptedOperationException("Unsupported IN operand for encrypted fields.");
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                    "Unsupported IN operand for encrypted fields.");
         }
         ExpressionList<?> expressionList = (ExpressionList<?>) expression.getRightExpression();
         for (Expression item : expressionList) {
@@ -548,7 +561,8 @@ public class SqlRewriteEngine {
         if (expression instanceof NullValue) {
             return;
         }
-        throw new UnsupportedEncryptedOperationException("Encrypted query condition must use prepared parameter or string literal.");
+        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                "Encrypted query condition must use prepared parameter or string literal.");
     }
 
     /**
@@ -565,12 +579,15 @@ public class SqlRewriteEngine {
         EncryptColumnRule rule = resolution.rule();
         if (StringUtils.isBlank(targetColumn)) {
             throw new UnsupportedEncryptedOperationException(
+                    assisted ? EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN
+                            : EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN,
                     "Separate-table encrypted " + (assisted ? "equality" : "LIKE")
                             + " query requires "
                             + (assisted ? "assistedQueryColumn" : "likeQueryColumn")
                             + ". " + describeRule(rule));
         }
         QueryOperand queryOperand = readComposableQueryOperand(operand, context,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
                 "Separate-table encrypted query must use prepared parameter, string literal, or CONCAT of them.");
         String transformed = assisted
                 ? valueTransformer.transformAssisted(rule, queryOperand.value())
@@ -588,7 +605,8 @@ public class SqlRewriteEngine {
         if (operand instanceof StringValue || operand instanceof LongValue || operand instanceof NullValue) {
             return;
         }
-        throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
+        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                "Separate-table encrypted query must use prepared parameter or literal.");
     }
 
     /**
@@ -618,7 +636,8 @@ public class SqlRewriteEngine {
         if (expression instanceof NullValue) {
             return new WriteValue(expression, null, false);
         }
-        throw new UnsupportedEncryptedOperationException("Encrypted write only supports prepared parameters or string literals.");
+        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_WRITE_OPERAND,
+                "Encrypted write only supports prepared parameters or string literals.");
     }
 
     private Expression passthroughWriteExpression(Expression expression, SqlRewriteContext context) {
@@ -744,11 +763,13 @@ public class SqlRewriteEngine {
         if (operand instanceof NullValue) {
             return new NullValue();
         }
-        throw new UnsupportedEncryptedOperationException("Separate-table encrypted query must use prepared parameter or literal.");
+        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                "Separate-table encrypted query must use prepared parameter or literal.");
     }
 
     private QueryOperand readComposableQueryOperand(Expression expression,
                                                     SqlRewriteContext context,
+                                                    EncryptionErrorCode errorCode,
                                                     String unsupportedMessage) {
         if (expression instanceof JdbcParameter) {
             int parameterIndex = context.consumeOriginal();
@@ -764,17 +785,17 @@ public class SqlRewriteEngine {
             return QueryOperand.literal(null);
         }
         if (expression instanceof Parenthesis) {
-            return readComposableQueryOperand(((Parenthesis) expression).getExpression(), context, unsupportedMessage);
+            return readComposableQueryOperand(((Parenthesis) expression).getExpression(), context, errorCode, unsupportedMessage);
         }
         if (expression instanceof Function && ((Function) expression).getParameters() != null) {
             Function function = (Function) expression;
             if (!"concat".equalsIgnoreCase(function.getName())) {
-                throw new UnsupportedEncryptedOperationException(unsupportedMessage);
+                throw new UnsupportedEncryptedOperationException(errorCode, unsupportedMessage);
             }
             StringBuilder builder = new StringBuilder();
             List<Integer> parameterIndexes = new ArrayList<>();
             for (Expression item : function.getParameters()) {
-                QueryOperand part = readComposableQueryOperand(item, context, unsupportedMessage);
+                QueryOperand part = readComposableQueryOperand(item, context, errorCode, unsupportedMessage);
                 parameterIndexes.addAll(part.parameterIndexes());
                 if (part.value() == null) {
                     return new QueryOperand(null, parameterIndexes);
@@ -783,7 +804,7 @@ public class SqlRewriteEngine {
             }
             return new QueryOperand(builder.toString(), parameterIndexes);
         }
-        throw new UnsupportedEncryptedOperationException(unsupportedMessage);
+        throw new UnsupportedEncryptedOperationException(errorCode, unsupportedMessage);
     }
 
     private Expression buildComposableQueryExpression(QueryOperand operand,
@@ -871,7 +892,8 @@ public class SqlRewriteEngine {
         for (SelectItem<?> item : plainSelect.getSelectItems()) {
             Expression expression = item.getExpression();
             if (expression instanceof AllColumns) {
-                throw new UnsupportedEncryptedOperationException("Wildcard select is not supported in encrypted IN subquery.");
+                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
+                            "Wildcard select is not supported in encrypted IN subquery.");
             }
             ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
             if (resolution == null) {
@@ -879,7 +901,8 @@ public class SqlRewriteEngine {
                 continue;
             }
             if (resolution.rule().isStoredInSeparateTable()) {
-                throw new UnsupportedEncryptedOperationException("Separate-table encrypted field is not supported in IN subquery.");
+                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
+                            "Separate-table encrypted field is not supported in IN subquery.");
             }
             rewritten.add(buildComparisonSelectItem(item, resolution));
         }
@@ -947,7 +970,7 @@ public class SqlRewriteEngine {
 
     private String requireAssistedQueryColumn(EncryptColumnRule rule, String scenario) {
         if (!rule.hasAssistedQueryColumn()) {
-            throw new UnsupportedEncryptedOperationException(
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN,
                     "Encrypted " + scenario + " requires assistedQueryColumn. " + describeRule(rule));
         }
         return rule.assistedQueryColumn();
@@ -955,7 +978,7 @@ public class SqlRewriteEngine {
 
     private String requireLikeQueryColumn(EncryptColumnRule rule, String scenario) {
         if (!rule.hasLikeQueryColumn()) {
-            throw new UnsupportedEncryptedOperationException(
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN,
                     "Encrypted " + scenario + " requires likeQueryColumn. " + describeRule(rule));
         }
         return rule.likeQueryColumn();
@@ -995,7 +1018,7 @@ public class SqlRewriteEngine {
         for (OrderByElement element : orderByElements) {
             ColumnResolution resolution = resolveEncryptedColumn(element.getExpression(), tableContext);
             if (resolution != null) {
-                throw new UnsupportedEncryptedOperationException(
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY,
                         "ORDER BY is not supported on encrypted field: " + resolution.rule().property());
             }
         }
@@ -1057,9 +1080,12 @@ public class SqlRewriteEngine {
         return existsExpression;
     }
 
-    private void validateNonRangeEncryptedColumn(Expression expression, SqlTableContext tableContext, String message) {
+    private void validateNonRangeEncryptedColumn(Expression expression,
+                                                 SqlTableContext tableContext,
+                                                 EncryptionErrorCode errorCode,
+                                                 String message) {
         if (resolveEncryptedColumn(expression, tableContext) != null) {
-            throw new UnsupportedEncryptedOperationException(message);
+            throw new UnsupportedEncryptedOperationException(errorCode, message);
         }
     }
 
@@ -1110,7 +1136,8 @@ public class SqlRewriteEngine {
         }
         for (SelectItem<?> item : selectItems) {
             if (containsEncryptedReference(item.getExpression(), tableContext)) {
-                throw new UnsupportedEncryptedOperationException("DISTINCT is not supported on encrypted fields.");
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_DISTINCT,
+                        "DISTINCT is not supported on encrypted fields.");
             }
         }
     }
@@ -1122,14 +1149,14 @@ public class SqlRewriteEngine {
         if (selectItems != null) {
             for (SelectItem<?> item : selectItems) {
                 if (containsUnsupportedAggregate(item.getExpression(), tableContext)) {
-                    throw new UnsupportedEncryptedOperationException(
+                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION,
                             "Aggregate function is not supported on encrypted fields.");
                 }
             }
         }
         if (containsUnsupportedAggregate(having, tableContext) ||
                 containsUnsupportedAggregate(qualify, tableContext)) {
-            throw new UnsupportedEncryptedOperationException(
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION,
                     "Aggregate function is not supported on encrypted fields.");
         }
     }
@@ -1142,7 +1169,7 @@ public class SqlRewriteEngine {
             Expression expression = item.getExpression();
             if (expression instanceof AnalyticExpression
                     && containsEncryptedReference(expression, tableContext)) {
-                throw new UnsupportedEncryptedOperationException(
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW,
                         "Window function is not supported on encrypted fields.");
             }
         }
@@ -1154,7 +1181,7 @@ public class SqlRewriteEngine {
         }
         for (WindowDefinition windowDefinition : windowDefinitions) {
             if (containsEncryptedReference(windowDefinition, tableContext)) {
-                throw new UnsupportedEncryptedOperationException(
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW,
                         "Named window definition is not supported on encrypted fields.");
             }
         }
@@ -1166,7 +1193,8 @@ public class SqlRewriteEngine {
         }
         for (Object item : groupByElement.getGroupByExpressionList()) {
             if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
-                throw new UnsupportedEncryptedOperationException("GROUP BY is not supported on encrypted fields.");
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_GROUP_BY,
+                        "GROUP BY is not supported on encrypted fields.");
             }
         }
     }

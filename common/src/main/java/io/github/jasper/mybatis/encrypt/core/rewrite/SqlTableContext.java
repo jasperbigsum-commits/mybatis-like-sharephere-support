@@ -12,6 +12,7 @@ import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
@@ -53,7 +54,7 @@ final class SqlTableContext {
                 continue;
             }
             if (candidate != null) {
-                throw new UnsupportedEncryptedOperationException(
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.AMBIGUOUS_ENCRYPTED_REFERENCE,
                         "Ambiguous encrypted column reference: " + column.getFullyQualifiedName());
             }
             candidate = rule;
@@ -87,7 +88,7 @@ final class SqlTableContext {
                 continue;
             }
             if (candidate != null) {
-                throw new UnsupportedEncryptedOperationException(
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.AMBIGUOUS_ENCRYPTED_REFERENCE,
                         "Ambiguous encrypted projection reference: " + column.getFullyQualifiedName());
             }
             candidate = rule;

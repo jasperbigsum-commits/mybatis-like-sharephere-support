@@ -62,6 +62,31 @@
 
 对上述不安全或语义不可靠的场景，当前实现倾向于直接失败，而不是“看起来执行成功但结果错误”。
 
+## 运行时错误类型
+
+运行时模块现在也提供统一异常体系，便于业务侧做精确分类：
+
+- `EncryptionConfigurationException`
+  用于算法缺失、规则配置无效、独立表依赖缺失、SQL 改写失败等配置/执行前置问题
+- `UnsupportedEncryptedOperationException`
+  用于已命中加密字段，但当前 SQL 语义明确不支持的场景
+
+两类异常都继承自 `EncryptionException`，并可通过 `getErrorCode()` 获取结构化错误码，例如：
+
+- `MISSING_CIPHER_ALGORITHM`
+- `MISSING_ASSISTED_QUERY_ALGORITHM`
+- `INVALID_TABLE_RULE`
+- `MISSING_ASSISTED_QUERY_COLUMN`
+- `MISSING_LIKE_QUERY_COLUMN`
+- `SQL_REWRITE_FAILED`
+- `AMBIGUOUS_ENCRYPTED_REFERENCE`
+- `INVALID_ENCRYPTED_QUERY_OPERAND`
+- `UNSUPPORTED_ENCRYPTED_INSERT`
+- `UNSUPPORTED_ENCRYPTED_ORDER_BY`
+- `UNSUPPORTED_ENCRYPTED_RANGE`
+- `UNSUPPORTED_ENCRYPTED_GROUP_BY`
+- `UNSUPPORTED_ENCRYPTED_OPERATION`
+
 ## 核心设计
 
 项目主要由 5 个部分组成：
@@ -497,6 +522,7 @@ mybatis-like-sharephere-support
 - 按主键分页批量执行，支持中断后按最后一次已提交批次继续
 - 通过文件状态记录迁移表范围、累计处理量、最后断点和完成状态
 - 可选开启写后校验，密文字段按“解密后等于原文”验证，hash/like 按确定性值验证
+- 统一使用 `MigrationException` 体系暴露结构化错误码，可通过 `getErrorCode()` 做自动分类处理
 
 最小示例：
 
@@ -571,11 +597,14 @@ public class MigrationSupportConfiguration {
 
 状态文件包含：
 
+- `cursorColumns.*` / `cursorJavaTypes.*`
 - `status`
 - `totalRows`
-- `rangeStart` / `rangeEnd`
-- `lastProcessedId`
+- `rangeStartValues.*` / `rangeEndValues.*`
+- `lastProcessedCursorValues.*`
 - `scannedRows` / `migratedRows` / `skippedRows` / `verifiedRows`
+
+单列游标场景下还会额外保留 `idColumn`、`lastProcessedId` 等兼容别名，方便旧任务平滑迁移。
 
 文件确认模式示例：
 
@@ -651,6 +680,8 @@ verificationEnabled=true
 4. 中断或失败后，不要删除状态文件，修复问题后直接重跑，任务会从 `lastProcessedId` 之后继续。
 5. 若字段范围发生变化，确认文件或配置白名单会与真实风险清单不一致并直接阻断，需要重新确认。
 
+迁移模块当前测试已按职责拆分为执行链路、备份行为、恢复行为、确认策略、计划工厂和底层编解码/状态文件单元测试，新增边界时建议按同样维度继续扩展。
+
 ## SQL Support Matrix
 
 详细 SQL 支持矩阵见 [docs/sql-support-matrix.md](docs/sql-support-matrix.md)。
@@ -672,4 +703,4 @@ verificationEnabled=true
 
 - 同表密文字段写入、条件查询与结果解密
 - 独立加密表同步、条件查询与回填解密
-- 自动装配下拦截器只注册一次，避免重复改写或重复解密
+- Spring Boot 2 / 3 自动装配下拦截器只注册一次，避免重复改写或重复解密

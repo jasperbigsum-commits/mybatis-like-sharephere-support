@@ -12,7 +12,7 @@
 ### 1. 元数据层
 
 - `@EncryptField` / `@EncryptTable`：实体注解声明加密规则。
-- `DatabaseEncryptionProperties`：支持 `mybatis.encrypt.tables.<table>.fields.<property>` 风格配置。
+- `DatabaseEncryptionProperties`：支持 `mybatis.encrypt.tables[]` / `fields[]` 列表式配置，并与注解规则统一收敛。
 - `EncryptMetadataRegistry`：合并注解规则和配置规则，按表名和实体类型缓存。
 - `EncryptEntityScanner`：可在启动期自动扫描带 `@EncryptField` 的实体，无需强制声明 `@EncryptTable`。
 
@@ -28,7 +28,7 @@
 - `SqlRewriteEngine` 基于 JSqlParser 解析 `INSERT/UPDATE/DELETE/SELECT`。
 - 对主加密列保持原列名，仅替换参数值为密文。
 - 对 `assistedQueryColumn` / `likeQueryColumn` 自动补充插入列、更新列并改写 WHERE 条件。
-- 对独立加密表字段，查询条件改写为 `EXISTS` 子查询，主表写入 SQL 中移除该字段。
+- 对独立加密表字段，查询条件改写为 `EXISTS` 子查询，主表逻辑列写入 `assistedQueryColumn` 对应的 hash 引用值。
 - 对插件内部新生成的标识符，按配置的 `sqlDialect` 输出对应转义风格，当前支持 MySQL、OceanBase、达梦、Oracle12、ClickHouse。
 - 对排序、范围比较等不可安全支持的操作主动失败，避免出现“看似成功但结果错误”的情况。
 
@@ -38,7 +38,7 @@
   - `StatementHandler.prepare`：执行 SQL 改写和参数替换。
   - `Executor.update`：同步独立加密表。
   - `ResultSetHandler.handleResultSets`：对结果实体进行字段解密。
-- `ResultDecryptor`：只处理声明过规则的对象，避免误解密。
+- `ResultDecryptor`：优先依据查询结果计划与元数据只处理命中的返回对象，避免对无关入参或未映射对象误解密。
 - `SeparateTableEncryptionManager`：处理独立加密表的回填和写后同步。
 
 ### 5. Spring Boot 自动配置
@@ -62,6 +62,7 @@
 2. 对加密字段的 `ORDER BY`、`BETWEEN`、`>`、`<` 等语义不可靠操作直接抛错。
 3. 插件调试日志仅输出脱敏值，不输出明文和真实密文。
 4. 辅助等值查询列如果本身为哈希值，允许在日志中输出哈希值以帮助定位问题，但仍不输出明文和真实密文。
+5. 运行时和迁移模块都提供结构化异常体系，可通过 `EncryptionException` / `MigrationException` 的 `getErrorCode()` 做稳定分类。
 
 ## 当前实现范围
 
@@ -94,6 +95,6 @@
 
 - 同表加密字段的真实写入和解密读取
 - 独立加密表的真实同步、查询改写与结果回填
-- Spring Boot 自动装配场景下拦截器单次注册与执行链路正确性
+- Spring Boot 2 / 3 自动装配场景下拦截器单次注册与执行链路正确性
 
 能力边界的细化说明见 [sql-support-matrix.md](sql-support-matrix.md)。

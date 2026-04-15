@@ -6,7 +6,8 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationDefinition;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
-import io.github.jasper.mybatis.encrypt.migration.MigrationException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationDefinitionException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
@@ -40,7 +41,8 @@ public class EntityMigrationPlanFactory {
         List<EntityMigrationColumnPlan> columnPlans = collectColumnPlans(resolved, normalizedTable, selectorResolver);
         selectorResolver.assertResolved();
         if (columnPlans.isEmpty()) {
-            throw new MigrationException("No encrypt fields available for migration target: "
+            throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
+                    "No encrypt fields available for migration target: "
                     + resolved.entityName());
         }
         return new EntityMigrationPlan(resolved.entityType(), resolved.entityName(), normalizedTable,
@@ -70,7 +72,8 @@ public class EntityMigrationPlanFactory {
         if (resolved.entityType() != null
                 && StringUtils.isNotBlank(columnRule.table())
                 && !normalizedTable.equals(NameUtils.normalizeIdentifier(columnRule.table()))) {
-            throw new MigrationException("Migration only supports registered entity rules and ignores DTO fields: "
+            throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
+                    "Migration only supports registered entity rules and ignores DTO fields: "
                     + resolved.entityName());
         }
     }
@@ -101,7 +104,8 @@ public class EntityMigrationPlanFactory {
                 || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.storageColumn()))
                 || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.assistedQueryColumn()))
                 || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.likeQueryColumn()))) {
-            throw new MigrationException("Backup column conflicts with migration target columns for property: "
+            throw new MigrationDefinitionException(MigrationErrorCode.BACKUP_COLUMN_CONFLICT,
+                    "Backup column conflicts with migration target columns for property: "
                     + columnRule.property());
         }
     }
@@ -110,13 +114,14 @@ public class EntityMigrationPlanFactory {
         if (definition.getEntityType() != null) {
             Class<?> entityType = definition.getEntityType();
             EncryptTableRule tableRule = metadataRegistry.findByEntity(entityType)
-                    .orElseThrow(() -> new MigrationException("Missing registered entity encryption rule: "
-                            + entityType.getName()));
+                    .orElseThrow(() -> new MigrationDefinitionException(MigrationErrorCode.METADATA_RULE_MISSING,
+                            "Missing registered entity encryption rule: " + entityType.getName()));
             return new ResolvedDefinition(entityType, entityType.getName(), tableRule);
         }
         String tableName = definition.getTableName();
         EncryptTableRule tableRule = metadataRegistry.findByTable(tableName)
-                .orElseThrow(() -> new MigrationException("Missing registered table encryption rule: " + tableName));
+                .orElseThrow(() -> new MigrationDefinitionException(MigrationErrorCode.METADATA_RULE_MISSING,
+                        "Missing registered table encryption rule: " + tableName));
         return new ResolvedDefinition(null, tableRule.getTableName(), tableRule);
     }
 

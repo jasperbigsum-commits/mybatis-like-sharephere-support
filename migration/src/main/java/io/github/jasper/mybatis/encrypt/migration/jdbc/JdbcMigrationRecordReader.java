@@ -4,7 +4,8 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
-import io.github.jasper.mybatis.encrypt.migration.MigrationException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursorException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRange;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRangeReader;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
@@ -69,7 +70,8 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
                     for (String cursorColumn : plan.getCursorColumns()) {
                         Object cursorValue = resultSet.getObject(cursorColumn);
                         if (cursorValue == null) {
-                            throw new MigrationException("Cursor column must not be null during migration: " + cursorColumn);
+                            throw new MigrationCursorException(MigrationErrorCode.CURSOR_VALUE_MISSING,
+                                    "Cursor column must not be null during migration: " + cursorColumn);
                         }
                         cursorValues.put(cursorColumn, cursorValue);
                     }
@@ -155,7 +157,8 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
             values.put(plan.getCursorColumn(), rawCursor);
             return new MigrationCursor(values);
         }
-        throw new MigrationException("Composite cursor checkpoint must use MigrationCursor: " + plan.getCursorColumns());
+        throw new MigrationCursorException(MigrationErrorCode.CURSOR_CHECKPOINT_INVALID,
+                "Composite cursor checkpoint must use MigrationCursor: " + plan.getCursorColumns());
     }
 
     private String buildSelectSql(EntityMigrationPlan plan, Set<String> selectColumns, boolean withCheckpoint) {

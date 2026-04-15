@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.algorithm;
 
 import java.util.Map;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 
 /**
@@ -39,7 +40,8 @@ public class AlgorithmRegistry {
     public CipherAlgorithm cipher(String name) {
         CipherAlgorithm algorithm = cipherAlgorithms.get(name);
         if (algorithm == null) {
-            throw new EncryptionConfigurationException("Missing cipher algorithm bean: " + name);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_CIPHER_ALGORITHM,
+                    "Missing cipher algorithm bean: " + name);
         }
         return algorithm;
     }
@@ -53,7 +55,8 @@ public class AlgorithmRegistry {
     public AssistedQueryAlgorithm assisted(String name) {
         AssistedQueryAlgorithm algorithm = assistedAlgorithms.get(name);
         if (algorithm == null) {
-            throw new EncryptionConfigurationException("Missing assisted query algorithm bean: " + name);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_ASSISTED_QUERY_ALGORITHM,
+                    "Missing assisted query algorithm bean: " + name);
         }
         return algorithm;
     }
@@ -67,7 +70,8 @@ public class AlgorithmRegistry {
     public LikeQueryAlgorithm like(String name) {
         LikeQueryAlgorithm algorithm = likeAlgorithms.get(name);
         if (algorithm == null) {
-            throw new EncryptionConfigurationException("Missing like query algorithm bean: " + name);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_LIKE_QUERY_ALGORITHM,
+                    "Missing like query algorithm bean: " + name);
         }
         return algorithm;
     }

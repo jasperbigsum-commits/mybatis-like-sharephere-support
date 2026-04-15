@@ -12,6 +12,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 /**
@@ -54,7 +55,8 @@ public class AesCipherAlgorithm implements CipherAlgorithm {
                     .put(encrypted)
                     .array());
         } catch (GeneralSecurityException ex) {
-            throw new EncryptionConfigurationException("Failed to encrypt value.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.CIPHER_OPERATION_FAILED,
+                    "Failed to encrypt value.", ex);
         }
     }
 
@@ -71,19 +73,22 @@ public class AesCipherAlgorithm implements CipherAlgorithm {
             cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(TAG_SIZE_BITS, iv));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException ex) {
-            throw new EncryptionConfigurationException("Failed to decrypt value.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.CIPHER_OPERATION_FAILED,
+                    "Failed to decrypt value.", ex);
         }
     }
 
     private byte[] deriveKey(String keyMaterial) {
         if (StringUtils.isBlank(keyMaterial)) {
-            throw new EncryptionConfigurationException("mybatis.encrypt.default-cipher-key must not be blank.");
+            throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                    "mybatis.encrypt.default-cipher-key must not be blank.");
         }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return Arrays.copyOf(digest.digest(keyMaterial.getBytes(StandardCharsets.UTF_8)), 16);
         } catch (GeneralSecurityException ex) {
-            throw new EncryptionConfigurationException("Failed to initialize AES key.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.CIPHER_OPERATION_FAILED,
+                    "Failed to initialize AES key.", ex);
         }
     }
 }

@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.algorithm.support;
 
 import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import javax.crypto.Cipher;
@@ -60,7 +61,8 @@ public class Sm4CipherAlgorithm implements CipherAlgorithm {
                     .put(encrypted)
                     .array());
         } catch (GeneralSecurityException ex) {
-            throw new EncryptionConfigurationException("Failed to encrypt value with SM4.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.CIPHER_OPERATION_FAILED,
+                    "Failed to encrypt value with SM4.", ex);
         }
     }
 
@@ -78,20 +80,23 @@ public class Sm4CipherAlgorithm implements CipherAlgorithm {
             cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(TAG_SIZE_BITS, iv));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException ex) {
-            throw new EncryptionConfigurationException("Failed to decrypt value with SM4.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.CIPHER_OPERATION_FAILED,
+                    "Failed to decrypt value with SM4.", ex);
         }
     }
 
     private byte[] deriveKey(String keyMaterial) {
         if (StringUtils.isBlank(keyMaterial)) {
-            throw new EncryptionConfigurationException("mybatis.encrypt.default-cipher-key must not be blank.");
+            throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                    "mybatis.encrypt.default-cipher-key must not be blank.");
         }
         try {
             // 对任意输入密钥材料做一次稳定摘要，得到固定长度的 SM4 密钥。
             MessageDigest digest = MessageDigest.getInstance("SM3", BouncyCastleProviderHolder.PROVIDER_NAME);
             return Arrays.copyOf(digest.digest(keyMaterial.getBytes(StandardCharsets.UTF_8)), KEY_SIZE);
         } catch (GeneralSecurityException ex) {
-            throw new EncryptionConfigurationException("Failed to initialize SM4 key.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.CIPHER_OPERATION_FAILED,
+                    "Failed to initialize SM4 key.", ex);
         }
     }
 }

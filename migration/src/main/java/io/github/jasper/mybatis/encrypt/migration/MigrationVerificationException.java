@@ -11,6 +11,16 @@ public class MigrationVerificationException extends MigrationException {
      * @param message error message
      */
     public MigrationVerificationException(String message) {
-        super(message);
+        this(MigrationErrorCode.VERIFICATION_VALUE_MISMATCH, message);
+    }
+
+    /**
+     * Create a verification exception with a structured error code.
+     *
+     * @param errorCode structured error code
+     * @param message error message
+     */
+    public MigrationVerificationException(MigrationErrorCode errorCode, String message) {
+        super(errorCode, message);
     }
 }

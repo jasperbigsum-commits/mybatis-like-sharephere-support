@@ -2,7 +2,7 @@ package io.github.jasper.mybatis.encrypt.migration.plan;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationDefinition;
-import io.github.jasper.mybatis.encrypt.migration.MigrationException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationFieldSelectorException;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
@@ -61,11 +61,11 @@ final class MigrationFieldSelectorResolver {
 
     void assertResolved() {
         if (!unresolvedIncludedSelectors.isEmpty()) {
-            throw new MigrationException("Unknown migration field selector(s): "
+            throw new MigrationFieldSelectorException("Unknown migration field selector(s): "
                     + describeSelectors(unresolvedIncludedSelectors));
         }
         if (!unresolvedBackupSelectors.isEmpty()) {
-            throw new MigrationException("Backup column selector(s) did not match any encrypt field: "
+            throw new MigrationFieldSelectorException("Backup column selector(s) did not match any encrypt field: "
                     + describeSelectors(unresolvedBackupSelectors));
         }
     }

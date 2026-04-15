@@ -3,7 +3,8 @@ package io.github.jasper.mybatis.encrypt.migration.jdbc;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
 import io.github.jasper.mybatis.encrypt.migration.MigrationConfirmationPolicy;
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
-import io.github.jasper.mybatis.encrypt.migration.MigrationException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
+import io.github.jasper.mybatis.encrypt.migration.MigrationExecutionException;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRange;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRangeReader;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
@@ -146,8 +147,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             if (ex instanceof RuntimeException) {
                 throw (RuntimeException) ex;
             }
-            throw new MigrationException("Failed to execute migration task for entity: "
-                    + plan.getEntityName(), ex);
+            throw new MigrationExecutionException(MigrationErrorCode.EXECUTION_FAILED,
+                    "Failed to execute migration task for entity: " + plan.getEntityName(), ex);
         }
     }
 
@@ -173,8 +174,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             state.setRangeStartValues(MigrationCursorCodec.stringify(range.getRangeStartCursor()));
             state.setRangeEndValues(MigrationCursorCodec.stringify(range.getRangeEndCursor()));
         } catch (SQLException ex) {
-            throw new MigrationException("Failed to read migration range for entity: "
-                    + plan.getEntityName(), ex);
+            throw new MigrationExecutionException(MigrationErrorCode.RANGE_READ_FAILED,
+                    "Failed to read migration range for entity: " + plan.getEntityName(), ex);
         }
     }
 

@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.support;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import org.apache.ibatis.executor.BatchExecutor;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.executor.keygen.NoKeyGenerator;
@@ -65,7 +66,8 @@ public class DefaultSeparateTableRowPersister implements SeparateTableRowPersist
     @Override
     public void insert(SeparateTableInsertRequest request, MappedStatement sourceStatement, Executor executor) {
         if (request == null || request.getColumnValues().isEmpty()) {
-            throw new EncryptionConfigurationException("Separate-table insert request must not be empty.");
+            throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                    "Separate-table insert request must not be empty.");
         }
         if (sourceStatement != null && executor != null) {
             insertWithMyBatis(request, sourceStatement, executor);
@@ -82,13 +84,14 @@ public class DefaultSeparateTableRowPersister implements SeparateTableRowPersist
         try {
             int updated = executor.update(mappedStatement, parameterObject);
             if (updated != 1 && updated != BatchExecutor.BATCH_UPDATE_RETURN_VALUE) {
-                throw new EncryptionConfigurationException(
+                throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
                         "Unexpected separate-table insert row count: " + updated);
             }
         } catch (EncryptionConfigurationException ex) {
             throw ex;
         } catch (Exception ex) {
-            throw new EncryptionConfigurationException("Failed to insert separate-table encrypted value.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                    "Failed to insert separate-table encrypted value.", ex);
         }
     }
 
@@ -100,11 +103,12 @@ public class DefaultSeparateTableRowPersister implements SeparateTableRowPersist
             bind(statement, values);
             int updated = statement.executeUpdate();
             if (updated != 1) {
-                throw new EncryptionConfigurationException(
+                throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
                         "Unexpected separate-table insert row count: " + updated);
             }
         } catch (SQLException ex) {
-            throw new EncryptionConfigurationException("Failed to insert separate-table encrypted value.", ex);
+            throw new EncryptionConfigurationException(EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                    "Failed to insert separate-table encrypted value.", ex);
         }
     }
 
@@ -139,11 +143,15 @@ public class DefaultSeparateTableRowPersister implements SeparateTableRowPersist
         String columns = request.getColumnValues().keySet().stream()
                 .map(this::quote)
                 .reduce((left, right) -> left + ", " + right)
-                .orElseThrow(() -> new EncryptionConfigurationException("Missing separate-table insert columns."));
+                .orElseThrow(() -> new EncryptionConfigurationException(
+                        EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                        "Missing separate-table insert columns."));
         String placeholders = request.getColumnValues().values().stream()
                 .map(value -> "?")
                 .reduce((left, right) -> left + ", " + right)
-                .orElseThrow(() -> new EncryptionConfigurationException("Missing separate-table insert values."));
+                .orElseThrow(() -> new EncryptionConfigurationException(
+                        EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                        "Missing separate-table insert values."));
         return "insert into " + quote(request.getTable()) + " (" + columns + ") values (" + placeholders + ")";
     }
 
@@ -151,11 +159,15 @@ public class DefaultSeparateTableRowPersister implements SeparateTableRowPersist
         String columns = request.getColumnValues().keySet().stream()
                 .map(this::quote)
                 .reduce((left, right) -> left + ", " + right)
-                .orElseThrow(() -> new EncryptionConfigurationException("Missing separate-table insert columns."));
+                .orElseThrow(() -> new EncryptionConfigurationException(
+                        EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                        "Missing separate-table insert columns."));
         String placeholders = request.getColumnValues().keySet().stream()
                 .map(column -> "#{" + column + "}")
                 .reduce((left, right) -> left + ", " + right)
-                .orElseThrow(() -> new EncryptionConfigurationException("Missing separate-table insert values."));
+                .orElseThrow(() -> new EncryptionConfigurationException(
+                        EncryptionErrorCode.SEPARATE_TABLE_OPERATION_FAILED,
+                        "Missing separate-table insert values."));
         return "insert into " + quote(request.getTable()) + " (" + columns + ") values (" + placeholders + ")";
     }
 

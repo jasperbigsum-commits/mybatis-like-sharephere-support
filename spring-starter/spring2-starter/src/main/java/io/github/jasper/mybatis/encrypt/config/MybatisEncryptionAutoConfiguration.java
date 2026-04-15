@@ -52,9 +52,10 @@ public class MybatisEncryptionAutoConfiguration {
 
 
     /**
-     * 将其 spring properties 转换转换未内部配置项
+     * 将 Spring Boot 绑定属性转换为内部统一配置模型。
+     *
      * @param userProperties 用户配置
-     * @return 内部配置内容
+     * @return 内部配置对象
      */
     @Bean
     public DatabaseEncryptionProperties convertProperties(UserDatabaseEncryptionProperties userProperties) {
@@ -225,11 +226,11 @@ public class MybatisEncryptionAutoConfiguration {
     }
 
     /**
-     * 在存在数据源时创建独立表加密管理器。
+     * 在存在数据源且未自定义写入器时创建默认独立表写入执行器。
      *
      * @param dataSource 数据源
      * @param properties 插件配置属性
-     * @return 独立表加密管理器
+     * @return 独立表写入执行器
      */
     @Bean
     @ConditionalOnBean(DataSource.class)

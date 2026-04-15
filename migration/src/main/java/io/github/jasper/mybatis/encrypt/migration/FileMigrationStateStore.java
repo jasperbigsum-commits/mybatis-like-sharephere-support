@@ -54,8 +54,12 @@ public class FileMigrationStateStore implements MigrationStateStore {
             state.setVerificationEnabled(Boolean.parseBoolean(properties.getProperty("verificationEnabled", "false")));
             state.setLastError(properties.getProperty("lastError"));
             return Optional.of(state);
+        } catch (IllegalArgumentException ex) {
+            throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_DATA_INVALID,
+                    "Failed to parse migration state file: " + file, ex);
         } catch (IOException ex) {
-            throw new MigrationException("Failed to load migration state file: " + file, ex);
+            throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
+                    "Failed to load migration state file: " + file, ex);
         }
     }
 
@@ -64,7 +68,8 @@ public class FileMigrationStateStore implements MigrationStateStore {
         try {
             Files.createDirectories(directory);
         } catch (IOException ex) {
-            throw new MigrationException("Failed to create migration state directory: " + directory, ex);
+            throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
+                    "Failed to create migration state directory: " + directory, ex);
         }
         Properties properties = new Properties();
         writeIfPresent(properties, "entityName", state.getEntityName());
@@ -103,7 +108,8 @@ public class FileMigrationStateStore implements MigrationStateStore {
         try (OutputStream outputStream = Files.newOutputStream(fileOf(plan))) {
             properties.store(outputStream, "mybatis-like-sharephere-support migration state");
         } catch (IOException ex) {
-            throw new MigrationException("Failed to save migration state for table: " + plan.getTableName(), ex);
+            throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
+                    "Failed to save migration state for table: " + plan.getTableName(), ex);
         }
     }
 

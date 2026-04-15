@@ -1,9 +1,12 @@
 package io.github.jasper.mybatis.encrypt.core.metadata;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import org.junit.jupiter.api.Test;
 
 class EncryptMetadataRegistryTest {
@@ -107,6 +110,41 @@ class EncryptMetadataRegistryTest {
                 .orElseThrow()
                 .findByProperty("archivePhone")
                 .isPresent());
+    }
+
+    @Test
+    void shouldRejectConfiguredTableRuleWithoutTableName() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        properties.getTables().add(tableRule);
+
+        EncryptionConfigurationException exception = assertThrows(EncryptionConfigurationException.class,
+                () -> new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()));
+
+        assertEquals(EncryptionErrorCode.INVALID_TABLE_RULE, exception.getErrorCode());
+        assertEquals("Configured table rule must define table name.", exception.getMessage());
+    }
+
+    @Test
+    void shouldRejectConfiguredSeparateTableFieldWithoutAssistedQueryColumn() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("user_phone_encrypt");
+
+        DatabaseEncryptionProperties.FieldRuleProperties fieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        fieldRule.setColumn("phone_ref");
+        fieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
+        fieldRule.setStorageTable("user_phone_encrypt_store");
+        tableRule.getFields().add(fieldRule);
+        properties.getTables().add(tableRule);
+
+        EncryptionConfigurationException exception = assertThrows(EncryptionConfigurationException.class,
+                () -> new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()));
+
+        assertEquals(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN, exception.getErrorCode());
+        assertEquals(
+                "Separate-table encrypted field must define assistedQueryColumn. property=phoneRef, table=<entity-default-table>, column=phone_ref, storageTable=user_phone_encrypt_store",
+                exception.getMessage());
     }
 
     static class PlainEntity {

@@ -35,7 +35,7 @@ public class UserDatabaseEncryptionProperties {
     private String defaultCipherKey = "change-me-before-production";
 
     /**
-     * 做HASH计算的时候所用到的盐，若存在则附加SLAT
+     * 辅助查询算法计算摘要时附加的十六进制盐值。
      */
     private String defaultHexSlat = "";
 
@@ -133,16 +133,18 @@ public class UserDatabaseEncryptionProperties {
     }
 
     /**
-     * 返回 默认盐
-     * @return 默认盐
+     * 返回默认十六进制盐值。
+     *
+     * @return 默认十六进制盐值
      */
     public String getDefaultHexSlat() {
         return defaultHexSlat;
     }
 
     /**
-     * 设置 默认盐
-     * @param defaultHexSlat 默认盐
+     * 设置默认十六进制盐值。
+     *
+     * @param defaultHexSlat 默认十六进制盐值
      */
     public void setDefaultHexSlat(String defaultHexSlat) {
         this.defaultHexSlat = defaultHexSlat;
@@ -203,18 +205,18 @@ public class UserDatabaseEncryptionProperties {
     }
 
     /**
-     * 返回表级规则映射。
+     * 返回表级规则列表。
      *
-     * @return 表规则配置
+     * @return 表规则配置列表
      */
     public List<TableRuleProperties> getTables() {
         return tables;
     }
 
     /**
-     * 设置表级规则映射。
+     * 设置表级规则列表。
      *
-     * @param tables 表规则配置
+     * @param tables 表规则配置列表
      */
     public void setTables(List<TableRuleProperties> tables) {
         this.tables = tables;
@@ -254,18 +256,18 @@ public class UserDatabaseEncryptionProperties {
         }
 
         /**
-         * 返回字段规则集合。
+         * 返回字段规则列表。
          *
-         * @return 字段规则映射
+         * @return 字段规则列表
          */
         public List<FieldRuleProperties> getFields() {
             return fields;
         }
 
         /**
-         * 设置字段规则集合。
+         * 设置字段规则列表。
          *
-         * @param fields 字段规则映射
+         * @param fields 字段规则列表
          */
         public void setFields(List<FieldRuleProperties> fields) {
             this.fields = fields;

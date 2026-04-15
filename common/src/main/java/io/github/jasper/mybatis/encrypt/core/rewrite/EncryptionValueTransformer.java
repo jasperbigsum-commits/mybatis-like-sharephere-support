@@ -6,6 +6,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 
 /**
  * 加密字段值转换器。
@@ -47,6 +48,7 @@ final class EncryptionValueTransformer {
         if (algorithm instanceof LikeQueryAlgorithm) {
             return ((LikeQueryAlgorithm) algorithm).transform(value);
         }
-        throw new EncryptionConfigurationException("Unsupported algorithm for field: " + rule.property());
+        throw new EncryptionConfigurationException(EncryptionErrorCode.GENERAL_FAILURE,
+                "Unsupported algorithm for field: " + rule.property());
     }
 }

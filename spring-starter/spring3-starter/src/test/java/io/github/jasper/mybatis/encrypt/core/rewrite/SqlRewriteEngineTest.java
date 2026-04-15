@@ -231,13 +231,51 @@ class SqlRewriteEngineTest {
 
         assertTrue(result.changed());
         assertTrue(result.sql().contains("u.`phone_like` LIKE ?") || result.sql().contains("u.phone_like LIKE ?"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
+        assertTrue(result.sql().contains(" OR "));
         assertFalse(result.sql().contains("CONCAT("));
         result.applyTo(boundSql);
-        assertEquals(2, boundSql.getParameterMappings().size());
+        assertEquals(3, boundSql.getParameterMappings().size());
         assertEquals("status", boundSql.getParameterMappings().get(0).getProperty());
         assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertTrue(boundSql.getParameterMappings().get(2).getProperty().startsWith("__encrypt_generated_"));
         assertEquals("%abc%", boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
-        assertEquals(1, result.maskedParameters().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("AbC"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(2).getProperty()));
+        assertEquals(2, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteExactLikeToLikeAndAssistedFallback() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.phone LIKE ?",
+                List.of(new ParameterMapping.Builder(configuration, "phoneLike", String.class).build()),
+                Map.of("phoneLike", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
+        assertTrue(result.sql().contains("u.`phone_like` LIKE ?") || result.sql().contains("u.phone_like LIKE ?"));
+        assertTrue(result.sql().contains(" OR "));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertTrue(boundSql.getParameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals("13800138000", boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty()));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
+        assertEquals(2, result.maskedParameters().size());
     }
 
     @Test
@@ -502,7 +540,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`") || result.sql().contains("user_id_card_encrypt"));
-        assertEquals(4, result.maskedParameters().size());
+        assertEquals(6, result.maskedParameters().size());
     }
 
     @Test
@@ -659,7 +697,11 @@ class SqlRewriteEngineTest {
 
         assertTrue(result.changed());
         assertTrue(result.sql().contains("__enc_like_phone"));
-        assertTrue(result.sql().contains("WHERE t.`__enc_like_phone` LIKE ?") || result.sql().contains("WHERE t.__enc_like_phone LIKE ?"));
+        assertTrue(result.sql().contains("__enc_assisted_phone"));
+        assertTrue(result.sql().contains("LIKE ?"));
+        assertTrue(result.sql().contains("= ?"));
+        assertTrue(result.sql().contains(" OR "));
+        assertEquals(2, result.maskedParameters().size());
     }
 
     @Test
@@ -789,7 +831,35 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
-        assertEquals(1, result.maskedParameters().size());
+        assertEquals(2, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteSeparateTableExactLikeToHashEqualityExistsSubQuery() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.id_card LIKE ?",
+                List.of(new ParameterMapping.Builder(configuration, "idCardLike", String.class).build()),
+                Map.of("idCardLike", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertTrue(result.sql().contains(" OR "));
+        assertEquals(2, result.maskedParameters().size());
     }
 
     @Test
@@ -817,13 +887,18 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
+        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains(" OR "));
         assertFalse(result.sql().contains("CONCAT("));
         result.applyTo(boundSql);
-        assertEquals(2, boundSql.getParameterMappings().size());
+        assertEquals(3, boundSql.getParameterMappings().size());
         assertEquals("status", boundSql.getParameterMappings().get(0).getProperty());
         assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertTrue(boundSql.getParameterMappings().get(2).getProperty().startsWith("__encrypt_generated_"));
         assertEquals("%320101%", boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
-        assertEquals(1, result.maskedParameters().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("320101"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(2).getProperty()));
+        assertEquals(2, result.maskedParameters().size());
     }
 
     @Test
@@ -914,7 +989,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
         assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
-        assertEquals(3, result.maskedParameters().size());
+        assertEquals(4, result.maskedParameters().size());
     }
 
     @Test
@@ -970,7 +1045,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
-        assertEquals(1, result.maskedParameters().size());
+        assertEquals(2, result.maskedParameters().size());
     }
 
     @Test
@@ -1059,7 +1134,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
-        assertEquals(2, result.maskedParameters().size());
+        assertEquals(3, result.maskedParameters().size());
     }
 
     @Test
@@ -1328,6 +1403,31 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         result.applyTo(boundSql);
         assertEquals(6, boundSql.getParameterMappings().size());
+    }
+
+    @Test
+    void shouldTreatLiteralUpdateSetRewriteAsChanged() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "UPDATE user_account SET phone = '13800138000' WHERE id = 1",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.UPDATE, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_cipher` = '"));
+        assertTrue(result.sql().contains("`phone_hash` = '"));
+        assertTrue(result.sql().contains("`phone_like` = '"));
     }
 
     @Test

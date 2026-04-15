@@ -20,7 +20,6 @@ import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 import org.apache.ibatis.plugin.Interceptor;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -49,20 +48,6 @@ import java.util.Map;
 @ConditionalOnProperty(prefix = "mybatis.encrypt", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(UserDatabaseEncryptionProperties.class)
 public class MybatisEncryptionAutoConfiguration {
-
-
-    /**
-     * 将 Spring Boot 绑定属性转换为内部统一配置模型。
-     *
-     * @param userProperties 用户配置
-     * @return 内部配置对象
-     */
-    @Bean
-    public DatabaseEncryptionProperties convertProperties(UserDatabaseEncryptionProperties userProperties) {
-        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
-        BeanUtils.copyProperties(userProperties, properties);
-        return properties;
-    }
 
     /**
      * 注册默认国密 SM4 对称加密算法实现。
@@ -119,6 +104,50 @@ public class MybatisEncryptionAutoConfiguration {
     @ConditionalOnMissingBean(name = "normalizedLike")
     public LikeQueryAlgorithm normalizedLikeQueryAlgorithm() {
         return new NormalizedLikeQueryAlgorithm();
+    }
+
+    /**
+     * 注册默认身份证号脱敏 LIKE 算法实现。
+     *
+     * @return 身份证号脱敏 LIKE 算法 Bean
+     */
+    @Bean(name = "idCardMaskLike")
+    @ConditionalOnMissingBean(name = "idCardMaskLike")
+    public LikeQueryAlgorithm idCardMaskLikeQueryAlgorithm() {
+        return new IdCardMaskLikeQueryAlgorithm();
+    }
+
+    /**
+     * 注册默认手机号/座机号脱敏 LIKE 算法实现。
+     *
+     * @return 手机号/座机号脱敏 LIKE 算法 Bean
+     */
+    @Bean(name = "phoneMaskLike")
+    @ConditionalOnMissingBean(name = "phoneMaskLike")
+    public LikeQueryAlgorithm phoneMaskLikeQueryAlgorithm() {
+        return new PhoneNumberMaskLikeQueryAlgorithm();
+    }
+
+    /**
+     * 注册默认银行卡号脱敏 LIKE 算法实现。
+     *
+     * @return 银行卡号脱敏 LIKE 算法 Bean
+     */
+    @Bean(name = "bankCardMaskLike")
+    @ConditionalOnMissingBean(name = "bankCardMaskLike")
+    public LikeQueryAlgorithm bankCardMaskLikeQueryAlgorithm() {
+        return new BankCardMaskLikeQueryAlgorithm();
+    }
+
+    /**
+     * 注册默认中文名称脱敏 LIKE 算法实现。
+     *
+     * @return 中文名称脱敏 LIKE 算法 Bean
+     */
+    @Bean(name = "nameMaskLike")
+    @ConditionalOnMissingBean(name = "nameMaskLike")
+    public LikeQueryAlgorithm nameMaskLikeQueryAlgorithm() {
+        return new NameMaskLikeQueryAlgorithm();
     }
 
     /**

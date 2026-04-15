@@ -95,7 +95,7 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
     }
 
     private java.util.List<String> readIndexedValues(Properties properties, String prefix) {
-        java.util.List<String> values = new java.util.ArrayList<String>();
+        java.util.List<String> values = new java.util.ArrayList<>();
         for (int index = 0; ; index++) {
             String value = properties.getProperty(prefix + index);
             if (value == null) {

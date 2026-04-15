@@ -65,7 +65,7 @@ final class SqlTableContext {
     List<EncryptColumnRule> rulesForSelectExpansion(Table table) {
         if (table != null && StringUtils.isNotBlank(table.getName())) {
             EncryptTableRule rule = ruleByAlias.get(NameUtils.normalizeIdentifier(table.getName()));
-            return rule == null ? Collections.<EncryptColumnRule>emptyList() : new ArrayList<EncryptColumnRule>(rule.getColumnRules());
+            return rule == null ? Collections.emptyList() : new ArrayList<>(rule.getColumnRules());
         }
         Collection<EncryptTableRule> uniqueRules = uniqueRules();
         if (uniqueRules.size() != 1) {

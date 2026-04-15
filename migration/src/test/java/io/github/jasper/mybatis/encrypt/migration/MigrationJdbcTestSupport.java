@@ -120,13 +120,13 @@ abstract class MigrationJdbcTestSupport {
 
     protected AlgorithmRegistry algorithmRegistry() {
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm> cipherAlgorithms =
-                new LinkedHashMap<String, io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm>();
+                new LinkedHashMap<>();
         cipherAlgorithms.put("sm4", new Sm4CipherAlgorithm("unit-test-key-123"));
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm> assistedAlgorithms =
-                new LinkedHashMap<String, io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm>();
+                new LinkedHashMap<>();
         assistedAlgorithms.put("sm3", new Sm3AssistedQueryAlgorithm());
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm> likeAlgorithms =
-                new LinkedHashMap<String, io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm>();
+                new LinkedHashMap<>();
         likeAlgorithms.put("normalizedLike", new NormalizedLikeQueryAlgorithm());
         return new AlgorithmRegistry(cipherAlgorithms, assistedAlgorithms, likeAlgorithms);
     }

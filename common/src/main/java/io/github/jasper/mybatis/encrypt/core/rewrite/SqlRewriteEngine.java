@@ -11,8 +11,6 @@ import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import net.sf.jsqlparser.expression.*;
-import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
-import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.*;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
@@ -22,15 +20,10 @@ import net.sf.jsqlparser.statement.delete.Delete;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.*;
 import net.sf.jsqlparser.statement.update.Update;
-import net.sf.jsqlparser.statement.update.UpdateSet;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 
 /**
  * SQL 改写引擎。
@@ -48,6 +41,13 @@ public class SqlRewriteEngine {
     private final SqlLogMasker sqlLogMasker = new SqlLogMasker();
     private final EncryptionValueTransformer valueTransformer;
     private final DerivedTableRuleBuilder derivedTableRuleBuilder;
+    private final SqlRewriteValidator sqlRewriteValidator = new SqlRewriteValidator();
+    private final SqlConditionRewriter sqlConditionRewriter;
+    private final SqlWriteExpressionRewriter sqlWriteExpressionRewriter;
+    private final SqlSelectProjectionRewriter sqlSelectProjectionRewriter;
+    private final SqlInsertRewriter sqlInsertRewriter;
+    private final SqlUpdateSetRewriter sqlUpdateSetRewriter;
+    private final SqlSelectTableContextBuilder sqlSelectTableContextBuilder;
 
     /**
      * 创建 SQL 改写引擎。
@@ -63,6 +63,31 @@ public class SqlRewriteEngine {
         this.properties = properties;
         this.valueTransformer = new EncryptionValueTransformer(algorithmRegistry);
         this.derivedTableRuleBuilder = new DerivedTableRuleBuilder(metadataRegistry);
+        this.sqlConditionRewriter = new SqlConditionRewriter(
+                valueTransformer,
+                this::buildColumn,
+                this::requireAssistedQueryColumn,
+                this::requireLikeQueryColumn,
+                this::quote,
+                this::rewriteSelect
+        );
+        this.sqlWriteExpressionRewriter = new SqlWriteExpressionRewriter(valueTransformer, sqlConditionRewriter);
+        this.sqlSelectProjectionRewriter = new SqlSelectProjectionRewriter(
+                this::resolveEncryptedColumn,
+                this::buildColumn,
+                this::requireAssistedQueryColumn
+        );
+        this.sqlInsertRewriter = new SqlInsertRewriter(sqlWriteExpressionRewriter, valueTransformer, this::quote);
+        this.sqlUpdateSetRewriter = new SqlUpdateSetRewriter(
+                sqlWriteExpressionRewriter,
+                valueTransformer,
+                this::buildColumn
+        );
+        this.sqlSelectTableContextBuilder = new SqlSelectTableContextBuilder(
+                metadataRegistry,
+                derivedTableRuleBuilder,
+                this::rewriteSelect
+        );
     }
 
     /**
@@ -127,54 +152,9 @@ public class SqlRewriteEngine {
         if (tableRule == null) {
             return;
         }
-        Values values;
-        try {
-            values = insert.getValues();
-        } catch (ClassCastException ex) {
-            values = null;
+        if (sqlInsertRewriter.rewrite(insert, tableRule, context)) {
+            context.markChanged();
         }
-        if (values == null || values.getExpressions() == null) {
-            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_INSERT,
-                    "Only VALUES inserts are supported for encrypted tables.");
-        }
-        ExpressionList<?> originalExpressions = values.getExpressions();
-        List<Column> originalColumns = new ArrayList<>(insert.getColumns());
-        // 重写字段定义
-        List<Column> rewrittenColumns = new ArrayList<>();
-        List<Expression> rewrittenExpressions = new ArrayList<>();
-        for (int index = 0; index < originalColumns.size(); index++) {
-            Column column = originalColumns.get(index);
-            Expression expression = originalExpressions.get(index);
-            EncryptColumnRule rule = tableRule.findByColumn(column.getColumnName()).orElse(null);
-            // 非加密字段则跳过加密
-            if (rule == null) {
-                rewrittenColumns.add(column);
-                rewrittenExpressions.add(passthroughWriteExpression(expression, context));
-                continue;
-            }
-            if (rule.isStoredInSeparateTable()) {
-                rewrittenColumns.add(column);
-                rewrittenExpressions.add(rewriteSeparateTableReferenceExpression(expression, context));
-                continue;
-            }
-            rewrittenColumns.add(new Column(quote(rule.storageColumn())));
-            // 准备写入值封装
-            WriteValue writeValue = rewriteEncryptedWriteExpression(expression, rule, context);
-            rewrittenExpressions.add(writeValue.expression());
-            if (rule.hasAssistedQueryColumn()) {
-                rewrittenColumns.add(new Column(quote(rule.assistedQueryColumn())));
-                rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformAssisted(rule, writeValue.plainValue()),
-                        MaskingMode.HASH, context));
-            }
-            if (rule.hasLikeQueryColumn()) {
-                rewrittenColumns.add(new Column(quote(rule.likeQueryColumn())));
-                rewrittenExpressions.add(buildShadowExpression(writeValue, valueTransformer.transformLike(rule, writeValue.plainValue()),
-                        MaskingMode.MASKED, context));
-            }
-        }
-        insert.setColumns(new ExpressionList<>(rewrittenColumns));
-        values.setExpressions(new ParenthesedExpressionList<>(rewrittenExpressions));
-        context.markChanged();
     }
 
     /**
@@ -185,47 +165,15 @@ public class SqlRewriteEngine {
      */
     private void rewriteUpdate(Update update, SqlRewriteContext context) {
         SqlTableContext tableContext = new SqlTableContext();
-        registerTable(tableContext, update.getTable());
+        sqlSelectTableContextBuilder.registerTable(tableContext, update.getTable());
         if (tableContext.isEmpty()) {
             return;
         }
-        List<UpdateSet> rewrittenUpdateSets = new ArrayList<>();
-        for (UpdateSet updateSet : update.getUpdateSets()) {
-            List<Column> originalColumns = new ArrayList<>(updateSet.getColumns());
-            ExpressionList<Expression> updateValues = (ExpressionList<Expression>) updateSet.getValues();
-            for (int index = 0; index < originalColumns.size(); index++) {
-                Column column = originalColumns.get(index);
-                Expression expression = updateValues.get(index);
-                EncryptColumnRule rule = tableContext.resolve(column).orElse(null);
-                if (rule == null) {
-                    rewrittenUpdateSets.add(new UpdateSet(column, passthroughWriteExpression(expression, context)));
-                    continue;
-                }
-
-                if (rule.isStoredInSeparateTable()) {
-                    rewrittenUpdateSets.add(
-                            new UpdateSet(column, rewriteSeparateTableReferenceExpression(expression, context)));
-                    continue;
-                }
-                WriteValue writeValue = rewriteEncryptedWriteExpression(expression, rule, context);
-                rewrittenUpdateSets.add(new UpdateSet(buildColumn(column, rule.storageColumn()), writeValue.expression()));
-                if (rule.hasAssistedQueryColumn()) {
-                    rewrittenUpdateSets.add(new UpdateSet(
-                            buildColumn(column, rule.assistedQueryColumn()),
-                            buildShadowExpression(writeValue, valueTransformer.transformAssisted(rule, writeValue.plainValue()),
-                                    MaskingMode.HASH, context)));
-                }
-                if (rule.hasLikeQueryColumn()) {
-                    rewrittenUpdateSets.add(new UpdateSet(
-                            buildColumn(column, rule.likeQueryColumn()),
-                            buildShadowExpression(writeValue, valueTransformer.transformLike(rule, writeValue.plainValue()),
-                                    MaskingMode.MASKED, context)));
-                }
-            }
+        if (sqlUpdateSetRewriter.rewrite(update, tableContext, context)) {
+            context.markChanged();
         }
-        update.setUpdateSets(rewrittenUpdateSets);
         // 只有 WHERE 子句会被改写到查询辅助列，SET 子句仍然写入主密文列。
-        update.setWhere(rewriteCondition(update.getWhere(), tableContext, context));
+        update.setWhere(sqlConditionRewriter.rewrite(update.getWhere(), tableContext, context));
     }
 
     /**
@@ -236,11 +184,11 @@ public class SqlRewriteEngine {
      */
     private void rewriteDelete(Delete delete, SqlRewriteContext context) {
         SqlTableContext tableContext = new SqlTableContext();
-        registerTable(tableContext, delete.getTable());
+        sqlSelectTableContextBuilder.registerTable(tableContext, delete.getTable());
         if (tableContext.isEmpty()) {
             return;
         }
-        delete.setWhere(rewriteCondition(delete.getWhere(), tableContext, context));
+        delete.setWhere(sqlConditionRewriter.rewrite(delete.getWhere(), tableContext, context));
     }
 
     private void rewriteSelect(Select select, SqlRewriteContext context) {
@@ -274,698 +222,19 @@ public class SqlRewriteEngine {
                     "Only plain select and set-operation select are supported for encrypted SQL rewrite.");
         }
         PlainSelect plainSelect = (PlainSelect) select;
-        SqlTableContext tableContext = new SqlTableContext();
-        registerFromItem(tableContext, plainSelect.getFromItem(), context);
-        if (plainSelect.getJoins() != null) {
-            for (Join join : plainSelect.getJoins()) {
-                registerFromItem(tableContext, join.getRightItem(), context);
-            }
-        }
+        SqlTableContext tableContext = sqlSelectTableContextBuilder.build(plainSelect, context);
         // SQL 参数绑定顺序遵循语句中的占位符出现顺序；SELECT 列表中的参数需要先消费。
-        consumeSelectItemParameters(plainSelect.getSelectItems(), context);
-        plainSelect.setWhere(rewriteCondition(plainSelect.getWhere(), tableContext, context));
-        plainSelect.setHaving(rewriteCondition(plainSelect.getHaving(), tableContext, context));
-        plainSelect.setQualify(rewriteCondition(plainSelect.getQualify(), tableContext, context));
+        sqlConditionRewriter.consumeSelectItemParameters(plainSelect.getSelectItems(), context);
+        plainSelect.setWhere(sqlConditionRewriter.rewrite(plainSelect.getWhere(), tableContext, context));
+        plainSelect.setHaving(sqlConditionRewriter.rewrite(plainSelect.getHaving(), tableContext, context));
+        plainSelect.setQualify(sqlConditionRewriter.rewrite(plainSelect.getQualify(), tableContext, context));
         if (tableContext.isEmpty()) {
             return;
         }
-        validateDistinct(plainSelect.getDistinct(), plainSelect.getSelectItems(), tableContext);
-        validateAggregateExpressions(plainSelect.getSelectItems(), plainSelect.getHaving(), plainSelect.getQualify(), tableContext);
-        if (projectionMode == ProjectionMode.COMPARISON) {
-            rewriteComparisonSelectItems(plainSelect, tableContext);
-        } else {
-            rewriteSelectItems(plainSelect, tableContext, projectionMode, context);
-        }
-        validateAnalyticExpressions(plainSelect.getSelectItems(), tableContext);
-        validateWindowDefinitions(plainSelect.getWindowDefinitions(), tableContext);
-        validateGroupBy(plainSelect.getGroupBy(), tableContext);
-        validateOrderBy(plainSelect.getOrderByElements(), tableContext);
-    }
-
-    /**
-     * 递归改写条件表达式树。
-     *
-     * <p>这是排查查询条件问题的主入口。它统一处理 `WHERE`、`HAVING`、`QUALIFY`、
-     * `CASE WHEN`、`EXISTS` 子查询以及括号嵌套。某类表达式如果没有在这里被正确消费或改写，
-     * 往往会进一步表现为参数槽位错位或条件未命中。</p>
-     *
-     * <p>JSqlParser 5.x 仍然使用带括号的表达式列表来表示部分分组条件，因此需要显式递归。</p>
-     */
-    private Expression rewriteCondition(Expression expression, SqlTableContext tableContext, SqlRewriteContext context) {
-        if (expression == null) {
-            return null;
-        }
-        if (expression instanceof Parenthesis) {
-            Parenthesis parenthesis = (Parenthesis) expression;
-            parenthesis.setExpression(rewriteCondition(parenthesis.getExpression(), tableContext, context));
-            return parenthesis;
-        }
-        if (expression instanceof ParenthesedExpressionList) {
-            @SuppressWarnings("rawtypes")
-            ParenthesedExpressionList parenthesis = (ParenthesedExpressionList) expression;
-            parenthesis.replaceAll(exp -> rewriteCondition((Expression) exp, tableContext, context));
-            return parenthesis;
-        }
-        if (expression instanceof ExistsExpression) {
-            ExistsExpression existsExpression = (ExistsExpression) expression;
-            if (existsExpression.getRightExpression() instanceof Select) {
-                rewriteSelect((Select) existsExpression.getRightExpression(), context);
-            }
-            return existsExpression;
-        }
-        if (expression instanceof NotExpression) {
-            NotExpression notExpression = (NotExpression) expression;
-            notExpression.setExpression(rewriteCondition(notExpression.getExpression(), tableContext, context));
-            return notExpression;
-        }
-        if (expression instanceof CaseExpression) {
-            CaseExpression caseExpression = (CaseExpression) expression;
-            if (caseExpression.getSwitchExpression() != null) {
-                caseExpression.setSwitchExpression(rewriteCondition(caseExpression.getSwitchExpression(), tableContext, context));
-            }
-            if (caseExpression.getWhenClauses() != null) {
-                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
-                    whenClause.setWhenExpression(rewriteCondition(whenClause.getWhenExpression(), tableContext, context));
-                    whenClause.setThenExpression(rewriteCondition(whenClause.getThenExpression(), tableContext, context));
-                }
-            }
-            if (caseExpression.getElseExpression() != null) {
-                caseExpression.setElseExpression(rewriteCondition(caseExpression.getElseExpression(), tableContext, context));
-            }
-            return caseExpression;
-        }
-        if (expression instanceof Select) {
-            rewriteSelect((Select) expression, context);
-            return expression;
-        }
-        if (expression instanceof AndExpression) {
-            AndExpression andExpression = (AndExpression) expression;
-            andExpression.setLeftExpression(rewriteCondition(andExpression.getLeftExpression(), tableContext, context));
-            andExpression.setRightExpression(rewriteCondition(andExpression.getRightExpression(), tableContext, context));
-            return andExpression;
-        }
-        if (expression instanceof OrExpression) {
-            OrExpression orExpression = (OrExpression) expression;
-            orExpression.setLeftExpression(rewriteCondition(orExpression.getLeftExpression(), tableContext, context));
-            orExpression.setRightExpression(rewriteCondition(orExpression.getRightExpression(), tableContext, context));
-            return orExpression;
-        }
-        if (expression instanceof EqualsTo) {
-            return rewriteEquality((EqualsTo) expression, tableContext, context);
-        }
-        if (expression instanceof NotEqualsTo) {
-            return rewriteEquality((NotEqualsTo) expression, tableContext, context);
-        }
-        if (expression instanceof LikeExpression) {
-            return rewriteLikeCondition((LikeExpression) expression, tableContext, context);
-        }
-        if (expression instanceof InExpression) {
-            return rewriteInCondition((InExpression) expression, tableContext, context);
-        }
-        if (expression instanceof IsNullExpression) {
-            return rewriteIsNullCondition((IsNullExpression) expression, tableContext, context);
-        }
-        if (expression instanceof Between) {
-            Between between = (Between) expression;
-            validateNonRangeEncryptedColumn(between.getLeftExpression(), tableContext,
-                    EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE,
-                    "BETWEEN is not supported on encrypted fields.");
-            consumeExpression(between.getBetweenExpressionStart(), context);
-            consumeExpression(between.getBetweenExpressionEnd(), context);
-            return between;
-        }
-        if (expression instanceof GreaterThan || expression instanceof GreaterThanEquals
-                || expression instanceof MinorThan || expression instanceof MinorThanEquals) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            validateNonRangeEncryptedColumn(binaryExpression.getLeftExpression(), tableContext,
-                    EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE,
-                    "Range comparison is not supported on encrypted fields.");
-            consumeExpression(binaryExpression.getRightExpression(), context);
-            return expression;
-        }
-        if (expression instanceof BinaryExpression) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            binaryExpression.setLeftExpression(rewriteCondition(binaryExpression.getLeftExpression(), tableContext, context));
-            binaryExpression.setRightExpression(rewriteCondition(binaryExpression.getRightExpression(), tableContext, context));
-            return binaryExpression;
-        }
-        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
-            Function function = (Function) expression;
-            for (Expression item : function.getParameters()) {
-                rewriteCondition(item, tableContext, context);
-            }
-            return expression;
-        }
-        if (expression instanceof JdbcParameter) {
-            context.consumeOriginal();
-        }
-        return expression;
-    }
-
-    /**
-     * 改写等值与不等值比较。
-     *
-     * <p>同表模式优先落到辅助查询列；独立表模式则改写成 `EXISTS` 子查询，
-     * 通过主表逻辑列中保存的 hash 值去关联独立表记录。</p>
-     */
-    private Expression rewriteEquality(BinaryExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
-        ColumnResolution resolution = resolveComparison(expression, tableContext);
-        if (resolution == null) {
-            expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
-            expression.setRightExpression(rewriteCondition(expression.getRightExpression(), tableContext, context));
-            return expression;
-        }
-        EncryptColumnRule rule = resolution.rule();
-        if (rule.isStoredInSeparateTable()) {
-            return rewriteSeparateTableCondition(resolution, expression.getRightExpression(), context,
-                    requireAssistedQueryColumn(rule, "equality query"), true);
-        }
-        String targetColumn = requireAssistedQueryColumn(rule, "equality query");
-        if (resolution.leftColumn()) {
-            expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
-            rewriteOperand(expression.getRightExpression(), context,
-                    valueTransformer.transformAssisted(rule, readOperandValue(expression.getRightExpression(), context)),
-                    MaskingMode.HASH);
-        } else {
-            expression.setRightExpression(buildColumn(resolution.column(), targetColumn));
-            rewriteOperand(expression.getLeftExpression(), context,
-                    valueTransformer.transformAssisted(rule, readOperandValue(expression.getLeftExpression(), context)),
-                    MaskingMode.HASH);
-        }
-        context.markChanged();
-        return expression;
-    }
-
-    /**
-     * 改写 `LIKE` 条件。
-     *
-     * <p>同表模式要求配置 `likeQueryColumn`；独立表模式会改写成外层 `EXISTS`，
-     * 其中关联条件仍然是“独立表 hash 列 = 主表逻辑列中的引用值”。</p>
-     */
-    private Expression rewriteLikeCondition(LikeExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
-        ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
-        if (resolution == null) {
-            expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
-            expression.setRightExpression(rewriteCondition(expression.getRightExpression(), tableContext, context));
-            return expression;
-        }
-        EncryptColumnRule rule = resolution.rule();
-        if (rule.isStoredInSeparateTable()) {
-            return rewriteSeparateTableCondition(resolution, expression.getRightExpression(), context,
-                    requireLikeQueryColumn(rule, "LIKE query"), false);
-        }
-        expression.setLeftExpression(buildColumn(resolution.column(), requireLikeQueryColumn(rule, "LIKE query")));
-        QueryOperand queryOperand = readComposableQueryOperand(expression.getRightExpression(), context,
-                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Encrypted LIKE condition must use prepared parameter, string literal, or CONCAT of them.");
-        expression.setRightExpression(buildComposableQueryExpression(queryOperand, context,
-                valueTransformer.transformLike(rule, queryOperand.value()), MaskingMode.MASKED));
-        context.markChanged();
-        return expression;
-    }
-
-    /**
-     * 改写 `IN` / `NOT IN` 条件。
-     *
-     * <p>字面量列表和子查询比较都会走这里，但独立表字段目前明确不支持 `IN`，
-     * 因为它需要额外的 `EXISTS` 展开或 join 语义，参数顺序也更容易失真。</p>
-     */
-    private Expression rewriteInCondition(InExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
-        ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
-        if (resolution == null) {
-            if (expression.getRightExpression() instanceof Select) {
-                rewriteSelect((Select) expression.getRightExpression(), context);
-            }
-            consumeItemsList(expression.getRightExpression(), context);
-            return expression;
-        }
-        EncryptColumnRule rule = resolution.rule();
-        if (rule.isStoredInSeparateTable()) {
-            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
-                    "IN query is not supported for separate-table encrypted field: " + rule.property());
-        }
-        // IN 查询与等值查询使用同一套目标列选择策略。
-        String targetColumn = requireAssistedQueryColumn(rule, "IN query");
-        expression.setLeftExpression(buildColumn(resolution.column(), targetColumn));
-        if (expression.getRightExpression() instanceof Select) {
-            rewriteSelect((Select) expression.getRightExpression(), context, ProjectionMode.COMPARISON);
+        sqlRewriteValidator.validateSelect(plainSelect, tableContext);
+        if (sqlSelectProjectionRewriter.rewrite(plainSelect, tableContext, projectionMode)) {
             context.markChanged();
-            return expression;
         }
-        if (!(expression.getRightExpression() instanceof ExpressionList<?>)) {
-            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                    "Unsupported IN operand for encrypted fields.");
-        }
-        ExpressionList<?> expressionList = (ExpressionList<?>) expression.getRightExpression();
-        for (Expression item : expressionList) {
-            rewriteOperand(item, context,
-                    valueTransformer.transformAssisted(rule, readOperandValue(item, context)),
-                    MaskingMode.HASH);
-        }
-        context.markChanged();
-        return expression;
-    }
-
-    /**
-     * 改写 `IS NULL` / `IS NOT NULL`。
-     *
-     * <p>同表模式判断密文列本身；独立表模式判断的是主表中的 hash 引用值是否能在独立表中找到记录，
-     * 因而会被改写成存在性子查询。</p>
-     */
-    private Expression rewriteIsNullCondition(IsNullExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
-        ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
-        if (resolution == null) {
-            expression.setLeftExpression(rewriteCondition(expression.getLeftExpression(), tableContext, context));
-            return expression;
-        }
-        EncryptColumnRule rule = resolution.rule();
-        if (rule.isStoredInSeparateTable()) {
-            context.markChanged();
-            return buildExistsPresenceSubQuery(resolution.column(), rule, expression.isNot());
-        }
-        expression.setLeftExpression(buildColumn(resolution.column(), rule.storageColumn()));
-        context.markChanged();
-        return expression;
-    }
-
-    private void rewriteOperand(Expression expression, SqlRewriteContext context, String transformedValue, MaskingMode maskingMode) {
-        if (expression instanceof JdbcParameter) {
-            context.replaceLastConsumed(transformedValue, maskingMode);
-            return;
-        }
-        if (expression instanceof StringValue) {
-            StringValue stringValue = (StringValue) expression;
-            stringValue.setValue(transformedValue);
-            return;
-        }
-        if (expression instanceof NullValue) {
-            return;
-        }
-        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Encrypted query condition must use prepared parameter or string literal.");
-    }
-
-    /**
-     * 把独立表字段条件改写成 `EXISTS` 子查询。
-     *
-     * <p>这个方法统一处理独立表等值和 LIKE 两种查询。它先把业务明文转换成查询态值，
-     * 再同步重建参数绑定，最后生成带有“hash 关联条件”的 `EXISTS`。</p>
-     */
-    private Expression rewriteSeparateTableCondition(ColumnResolution resolution,
-                                                     Expression operand,
-                                                     SqlRewriteContext context,
-                                                     String targetColumn,
-                                                     boolean assisted) {
-        EncryptColumnRule rule = resolution.rule();
-        if (StringUtils.isBlank(targetColumn)) {
-            throw new UnsupportedEncryptedOperationException(
-                    assisted ? EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN
-                            : EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN,
-                    "Separate-table encrypted " + (assisted ? "equality" : "LIKE")
-                            + " query requires "
-                            + (assisted ? "assistedQueryColumn" : "likeQueryColumn")
-                            + ". " + describeRule(rule));
-        }
-        QueryOperand queryOperand = readComposableQueryOperand(operand, context,
-                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Separate-table encrypted query must use prepared parameter, string literal, or CONCAT of them.");
-        String transformed = assisted
-                ? valueTransformer.transformAssisted(rule, queryOperand.value())
-                : valueTransformer.transformLike(rule, queryOperand.value());
-        return buildExistsSubQuery(resolution.column(), rule, targetColumn,
-                buildComposableQueryExpression(queryOperand, context, transformed,
-                        assisted ? MaskingMode.HASH : MaskingMode.MASKED), assisted);
-    }
-
-    private void replaceOperandBinding(Expression operand, SqlRewriteContext context, String transformed, MaskingMode maskingMode) {
-        if (operand instanceof JdbcParameter) {
-            context.replaceLastConsumed(transformed, maskingMode);
-            return;
-        }
-        if (operand instanceof StringValue || operand instanceof LongValue || operand instanceof NullValue) {
-            return;
-        }
-        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Separate-table encrypted query must use prepared parameter or literal.");
-    }
-
-    /**
-     * 改写写路径上的业务明文表达式。
-     *
-     * <p>它只负责生成主密文列对应的值，不直接处理辅助列和 LIKE 列。
-     * 后两者由调用方基于返回的 `WriteValue` 再决定是否追加影子参数。</p>
-     * 被加密转换字段
-     */
-    private WriteValue rewriteEncryptedWriteExpression(Expression expression,
-                                                       EncryptColumnRule rule,
-                                                       SqlRewriteContext context) {
-        Object plainValue = readOperandValue(expression, context);
-        String cipherValue = valueTransformer.transformCipher(rule, plainValue);
-        if (expression instanceof JdbcParameter) {
-            context.replaceLastConsumed(cipherValue, MaskingMode.MASKED);
-            return new WriteValue(expression, plainValue, true);
-        }
-        if (expression instanceof StringValue) {
-            StringValue stringValue = (StringValue) expression;
-            stringValue.setValue(cipherValue);
-            return new WriteValue(stringValue, plainValue, false);
-        }
-        if (expression instanceof LongValue) {
-            return new WriteValue(new StringValue(cipherValue), plainValue, false);
-        }
-        if (expression instanceof NullValue) {
-            return new WriteValue(expression, null, false);
-        }
-        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_WRITE_OPERAND,
-                "Encrypted write only supports prepared parameters or string literals.");
-    }
-
-    private Expression passthroughWriteExpression(Expression expression, SqlRewriteContext context) {
-        consumeExpression(expression, context);
-        return expression;
-    }
-
-    /**
-     * 改写独立表字段在主表写 SQL 中对应的参数。
-     *
-     * <p>独立表模式下，主表逻辑列写入的不再是业务明文，而是写前阶段已经准备好的独立表 hash 引用值。
-     * 这里会把原参数槽位替换成该引用值，并同步重建参数映射类型，避免运行时仍按原业务字段类型绑定。</p>
-     */
-    private Expression rewriteSeparateTableReferenceExpression(Expression expression, SqlRewriteContext context) {
-        if (expression instanceof JdbcParameter) {
-            int parameterIndex = context.consumeOriginal();
-            Object referenceId = context.originalValue(parameterIndex);
-            context.replaceParameter(parameterIndex, referenceId, MaskingMode.MASKED);
-            return expression;
-        }
-        consumeExpression(expression, context);
-        return expression;
-    }
-
-    private Expression buildShadowExpression(WriteValue writeValue, String value, MaskingMode maskingMode, SqlRewriteContext context) {
-        if (value == null) {
-            return new NullValue();
-        }
-        if (writeValue.parameterized()) {
-            return context.insertSynthetic(value, maskingMode);
-        }
-        return new StringValue(value);
-    }
-
-    private Object readOperandValue(Expression expression, SqlRewriteContext context) {
-        if (expression instanceof JdbcParameter) {
-            int parameterIndex = context.consumeOriginal();
-            return context.originalValue(parameterIndex);
-        }
-        if (expression instanceof StringValue) {
-            return ((StringValue) expression).getValue();
-        }
-        if (expression instanceof LongValue) {
-            return ((LongValue) expression).getStringValue();
-        }
-        return null;
-    }
-
-    private void consumeExpression(Expression expression, SqlRewriteContext context) {
-        if (expression == null) {
-            return;
-        }
-        if (expression instanceof JdbcParameter) {
-            context.consumeOriginal();
-            return;
-        }
-        if (expression instanceof Parenthesis) {
-            Parenthesis parenthesis = (Parenthesis) expression;
-            consumeExpression(parenthesis.getExpression(), context);
-            return;
-        }
-        if (expression instanceof ParenthesedExpressionList) {
-            ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
-            for (Expression exp : parenthesis) {
-                consumeExpression(exp, context);
-            }
-            return;
-        }
-        if (expression instanceof BinaryExpression) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            consumeExpression(binaryExpression.getLeftExpression(), context);
-            consumeExpression(binaryExpression.getRightExpression(), context);
-            return;
-        }
-        if (expression instanceof CaseExpression) {
-            CaseExpression caseExpression = (CaseExpression) expression;
-            consumeExpression(caseExpression.getSwitchExpression(), context);
-            if (caseExpression.getWhenClauses() != null) {
-                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
-                    consumeExpression(whenClause.getWhenExpression(), context);
-                    consumeExpression(whenClause.getThenExpression(), context);
-                }
-            }
-            consumeExpression(caseExpression.getElseExpression(), context);
-            return;
-        }
-        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
-            Function function = (Function) expression;
-            for (Expression item : function.getParameters()) {
-                consumeExpression(item, context);
-            }
-        }
-    }
-
-    private void consumeItemsList(Object itemsList, SqlRewriteContext context) {
-        if (itemsList instanceof ExpressionList<?>) {
-            ExpressionList<?> expressionList = (ExpressionList<?>) itemsList;
-            for (Expression item : expressionList) {
-                consumeExpression(item, context);
-            }
-        }
-    }
-
-    private void consumeSelectItemParameters(List<SelectItem<?>> selectItems, SqlRewriteContext context) {
-        if (selectItems == null) {
-            return;
-        }
-        for (SelectItem<?> item : selectItems) {
-            consumeExpression(item.getExpression(), context);
-        }
-    }
-
-    private Expression buildQueryValueExpression(Expression operand, String transformed) {
-        if (operand instanceof JdbcParameter) {
-            return new JdbcParameter();
-        }
-        if (operand instanceof StringValue) {
-            return transformed == null ? new NullValue() : new StringValue(transformed);
-        }
-        if (operand instanceof LongValue) {
-            return transformed == null ? new NullValue() : new StringValue(transformed);
-        }
-        if (operand instanceof NullValue) {
-            return new NullValue();
-        }
-        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Separate-table encrypted query must use prepared parameter or literal.");
-    }
-
-    private QueryOperand readComposableQueryOperand(Expression expression,
-                                                    SqlRewriteContext context,
-                                                    EncryptionErrorCode errorCode,
-                                                    String unsupportedMessage) {
-        if (expression instanceof JdbcParameter) {
-            int parameterIndex = context.consumeOriginal();
-            return QueryOperand.parameter(context.originalValue(parameterIndex), parameterIndex);
-        }
-        if (expression instanceof StringValue) {
-            return QueryOperand.literal(((StringValue) expression).getValue());
-        }
-        if (expression instanceof LongValue) {
-            return QueryOperand.literal(((LongValue) expression).getStringValue());
-        }
-        if (expression instanceof NullValue) {
-            return QueryOperand.literal(null);
-        }
-        if (expression instanceof Parenthesis) {
-            return readComposableQueryOperand(((Parenthesis) expression).getExpression(), context, errorCode, unsupportedMessage);
-        }
-        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
-            Function function = (Function) expression;
-            if (!"concat".equalsIgnoreCase(function.getName())) {
-                throw new UnsupportedEncryptedOperationException(errorCode, unsupportedMessage);
-            }
-            StringBuilder builder = new StringBuilder();
-            List<Integer> parameterIndexes = new ArrayList<>();
-            for (Expression item : function.getParameters()) {
-                QueryOperand part = readComposableQueryOperand(item, context, errorCode, unsupportedMessage);
-                parameterIndexes.addAll(part.parameterIndexes());
-                if (part.value() == null) {
-                    return new QueryOperand(null, parameterIndexes);
-                }
-                builder.append(part.value());
-            }
-            return new QueryOperand(builder.toString(), parameterIndexes);
-        }
-        throw new UnsupportedEncryptedOperationException(errorCode, unsupportedMessage);
-    }
-
-    private Expression buildComposableQueryExpression(QueryOperand operand,
-                                                      SqlRewriteContext context,
-                                                      String transformed,
-                                                      MaskingMode maskingMode) {
-        if (!operand.parameterized()) {
-            return transformed == null ? new NullValue() : new StringValue(transformed);
-        }
-        List<Integer> parameterIndexes = operand.parameterIndexes();
-        for (int i = parameterIndexes.size() - 1; i >= 0; i--) {
-            context.removeParameter(parameterIndexes.get(i));
-        }
-        return context.insertSynthetic(transformed, maskingMode);
-    }
-
-    /**
-     * 改写普通 `SELECT` 的投影列表。
-     *
-     * <p>`NORMAL` 模式输出业务可见的逻辑列别名；`DERIVED` 模式会额外注入隐藏的辅助列别名，
-     * 供外层查询继续按逻辑字段名改写条件。通配符场景会优先输出逻辑别名列，再保留原始 `*`，
-     * 避免 JDBC/MyBatis 在重复列名时优先读取到 wildcard 中的旧列值。</p>
-     */
-    private void rewriteSelectItems(PlainSelect plainSelect,
-                                    SqlTableContext tableContext,
-                                    ProjectionMode projectionMode,
-                                    SqlRewriteContext context) {
-        if (plainSelect.getSelectItems() == null) {
-            return;
-        }
-        List<SelectItem<?>> rewritten = new ArrayList<>();
-        for (SelectItem<?> item : plainSelect.getSelectItems()) {
-            Expression expression = item.getExpression();
-            if (expression instanceof AllTableColumns) {
-                AllTableColumns allTableColumns = (AllTableColumns) expression;
-                if (appendSelectAliasesForWildcard(rewritten,
-                        tableContext.rulesForSelectExpansion(allTableColumns.getTable()),
-                        allTableColumns.getTable(), projectionMode)) {
-                    context.markChanged();
-                }
-                rewritten.add(item);
-                continue;
-            }
-            if (expression instanceof AllColumns) {
-                if (appendSelectAliasesForWildcard(rewritten, tableContext.rulesForSelectExpansion(null), null,
-                        projectionMode)) {
-                    context.markChanged();
-                }
-                rewritten.add(item);
-                continue;
-            }
-            ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
-            if (resolution == null) {
-                rewritten.add(item);
-                continue;
-            }
-            if (resolution.rule().isStoredInSeparateTable()) {
-                rewritten.add(item);
-                context.markChanged();
-                continue;
-            }
-            rewritten.add(buildSelectStorageItem(item, resolution));
-            context.markChanged();
-            if (projectionMode == ProjectionMode.DERIVED) {
-                appendDerivedHelperSelectItems(rewritten, item, resolution);
-                context.markChanged();
-            }
-        }
-        if (!rewritten.isEmpty()) {
-            plainSelect.setSelectItems(rewritten);
-        }
-    }
-
-    /**
-     * 改写 `IN (subquery)` 右侧子查询的投影列表。
-     *
-     * <p>比较型子查询不能保留业务逻辑列语义，只能输出真正参与比较的物理列，
-     * 否则外层 `IN` 左右两侧含义会不一致。</p>
-     */
-    private void rewriteComparisonSelectItems(PlainSelect plainSelect, SqlTableContext tableContext) {
-        if (plainSelect.getSelectItems() == null) {
-            return;
-        }
-        List<SelectItem<?>> rewritten = new ArrayList<>();
-        for (SelectItem<?> item : plainSelect.getSelectItems()) {
-            Expression expression = item.getExpression();
-            if (expression instanceof AllColumns) {
-                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
-                            "Wildcard select is not supported in encrypted IN subquery.");
-            }
-            ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
-            if (resolution == null) {
-                rewritten.add(item);
-                continue;
-            }
-            if (resolution.rule().isStoredInSeparateTable()) {
-                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
-                            "Separate-table encrypted field is not supported in IN subquery.");
-            }
-            rewritten.add(buildComparisonSelectItem(item, resolution));
-        }
-        if (!rewritten.isEmpty()) {
-            plainSelect.setSelectItems(rewritten);
-        }
-    }
-
-    private boolean appendSelectAliasesForWildcard(List<SelectItem<?>> target,
-                                                   List<EncryptColumnRule> rules,
-                                                   Table tableReference,
-                                                   ProjectionMode projectionMode) {
-        boolean appended = false;
-        for (EncryptColumnRule rule : rules) {
-            if (rule.isStoredInSeparateTable()) {
-                continue;
-            }
-            Column sourceColumn = new Column(rule.column());
-            if (tableReference != null && StringUtils.isNotBlank(tableReference.getName())) {
-                sourceColumn.setTable(new Table(tableReference.getName()));
-            }
-            SelectItem<?> storageItem = buildSelectStorageItem(new SelectItem<>(sourceColumn), new ColumnResolution(sourceColumn, rule, true));
-            target.add(storageItem);
-            appended = true;
-            if (projectionMode == ProjectionMode.DERIVED) {
-                appendDerivedHelperSelectItems(target, storageItem, new ColumnResolution(sourceColumn, rule, true));
-            }
-        }
-        return appended;
-    }
-
-    private void appendDerivedHelperSelectItems(List<SelectItem<?>> target,
-                                                SelectItem<?> originalItem,
-                                                ColumnResolution resolution) {
-        String logicalAlias = selectAliasName(originalItem, resolution);
-        if (resolution.rule().hasAssistedQueryColumn()) {
-            target.add(SelectItem.from(
-                    buildColumn(resolution.column(), resolution.rule().assistedQueryColumn()),
-                    new Alias(hiddenAssistedAlias(logicalAlias), false)
-            ));
-        }
-        if (resolution.rule().hasLikeQueryColumn()) {
-            target.add(SelectItem.from(
-                    buildColumn(resolution.column(), resolution.rule().likeQueryColumn()),
-                    new Alias(hiddenLikeAlias(logicalAlias), false)
-            ));
-        }
-    }
-
-    private SelectItem<?> buildSelectStorageItem(SelectItem<?> originalItem, ColumnResolution resolution) {
-        Alias alias = originalItem.getAlias() != null
-                ? originalItem.getAlias()
-                : new Alias(resolution.column().getColumnName(), false);
-        return SelectItem.from(buildColumn(resolution.column(), resolution.rule().storageColumn()), alias);
-    }
-
-    private SelectItem<?> buildComparisonSelectItem(SelectItem<?> originalItem, ColumnResolution resolution) {
-        EncryptColumnRule rule = resolution.rule();
-        String targetColumn = requireAssistedQueryColumn(rule, "comparison subquery");
-        Alias alias = originalItem.getAlias() != null
-                ? originalItem.getAlias()
-                : new Alias(resolution.column().getColumnName(), false);
-        return SelectItem.from(buildColumn(resolution.column(), targetColumn), alias);
     }
 
     private String requireAssistedQueryColumn(EncryptColumnRule rule, String scenario) {
@@ -997,107 +266,6 @@ public class SqlRewriteEngine {
                 + ", column=" + rule.column();
     }
 
-    private String selectAliasName(SelectItem<?> item, ColumnResolution resolution) {
-        return item.getAlias() != null && item.getAlias().getName() != null && StringUtils.isNotBlank(item.getAlias().getName())
-                ? item.getAlias().getName()
-                : resolution.column().getColumnName();
-    }
-
-    private String hiddenAssistedAlias(String logicalAlias) {
-        return "__enc_assisted_" + logicalAlias;
-    }
-
-    private String hiddenLikeAlias(String logicalAlias) {
-        return "__enc_like_" + logicalAlias;
-    }
-
-    private void validateOrderBy(List<OrderByElement> orderByElements, SqlTableContext tableContext) {
-        if (orderByElements == null) {
-            return;
-        }
-        for (OrderByElement element : orderByElements) {
-            ColumnResolution resolution = resolveEncryptedColumn(element.getExpression(), tableContext);
-            if (resolution != null) {
-                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY,
-                        "ORDER BY is not supported on encrypted field: " + resolution.rule().property());
-            }
-        }
-    }
-
-    /**
-     * 构造独立表等值/LIKE 查询使用的 `EXISTS` 子查询。
-     *
-     * <p>子查询中始终同时包含两部分谓词：一是“独立表 hash 列 = 主表逻辑列里的引用值”，
-     * 二是目标查询列与转换后查询值的比较。排查独立表条件问题时，这两个条件缺一不可。</p>
-     */
-    private Expression buildExistsSubQuery(Column sourceColumn,
-                                           EncryptColumnRule rule,
-                                           String targetColumn,
-                                           Expression valueExpression,
-                                           boolean equality) {
-        PlainSelect subQueryBody = new PlainSelect();
-        subQueryBody.addSelectItems(SelectItem.from(new LongValue(1)));
-        subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
-        EqualsTo joinEquals = new EqualsTo();
-        joinEquals.setLeftExpression(new Column(quote(rule.assistedQueryColumn())));
-        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.column()));
-        Expression valuePredicate;
-        if (equality) {
-            EqualsTo valueEquals = new EqualsTo();
-            valueEquals.setLeftExpression(new Column(quote(targetColumn)));
-            valueEquals.setRightExpression(valueExpression);
-            valuePredicate = valueEquals;
-        } else {
-            LikeExpression likeExpression = new LikeExpression();
-            likeExpression.setLeftExpression(new Column(quote(targetColumn)));
-            likeExpression.setRightExpression(valueExpression);
-            valuePredicate = likeExpression;
-        }
-        subQueryBody.setWhere(new AndExpression(joinEquals, valuePredicate));
-        ExistsExpression existsExpression = new ExistsExpression();
-        existsExpression.setRightExpression(new ParenthesedSelect().withSelect(subQueryBody));
-        return existsExpression;
-    }
-
-    /**
-     * 构造独立表 `IS NULL` / `IS NOT NULL` 对应的存在性子查询。
-     *
-     * <p>这里判断的不是业务明文是否为空，而是主表中保存的 hash 引用值是否能在独立表中定位到记录。</p>
-     */
-    private Expression buildExistsPresenceSubQuery(Column sourceColumn,
-                                                   EncryptColumnRule rule,
-                                                   boolean shouldExist) {
-        PlainSelect subQueryBody = new PlainSelect();
-        subQueryBody.addSelectItems(SelectItem.from(new LongValue(1)));
-        subQueryBody.setFromItem(new Table(quote(rule.storageTable())));
-        EqualsTo joinEquals = new EqualsTo();
-        joinEquals.setLeftExpression(new Column(quote(rule.assistedQueryColumn())));
-        joinEquals.setRightExpression(buildColumn(sourceColumn, rule.column()));
-        subQueryBody.setWhere(joinEquals);
-        ExistsExpression existsExpression = new ExistsExpression();
-        existsExpression.setRightExpression(new ParenthesedSelect().withSelect(subQueryBody));
-        existsExpression.setNot(!shouldExist);
-        return existsExpression;
-    }
-
-    private void validateNonRangeEncryptedColumn(Expression expression,
-                                                 SqlTableContext tableContext,
-                                                 EncryptionErrorCode errorCode,
-                                                 String message) {
-        if (resolveEncryptedColumn(expression, tableContext) != null) {
-            throw new UnsupportedEncryptedOperationException(errorCode, message);
-        }
-    }
-
-    private ColumnResolution resolveComparison(BinaryExpression expression, SqlTableContext tableContext) {
-        ColumnResolution left = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
-        if (left != null) {
-            return new ColumnResolution(left.column(), left.rule(), true);
-        }
-        ColumnResolution right = resolveEncryptedColumn(expression.getRightExpression(), tableContext);
-        return right == null ? null : new ColumnResolution(right.column(), right.rule(), false);
-    }
-
     private ColumnResolution resolveEncryptedColumn(Expression expression, SqlTableContext tableContext) {
         if (!(expression instanceof Column)) {
             return null;
@@ -1107,312 +275,6 @@ public class SqlRewriteEngine {
         return rule == null ? null : new ColumnResolution(column, rule, true);
     }
 
-    private void registerFromItem(SqlTableContext tableContext, FromItem fromItem, SqlRewriteContext context) {
-        if (fromItem instanceof Table) {
-            Table table = (Table) fromItem;
-            registerTable(tableContext, table);
-            return;
-        }
-        if (fromItem instanceof ParenthesedSelect) {
-            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
-            if (parenthesedSelect.getSelect() == null) {
-                return;
-            }
-            rewriteSelect(parenthesedSelect.getSelect(), context, ProjectionMode.DERIVED);
-            if (parenthesedSelect.getAlias() != null && parenthesedSelect.getAlias().getName() != null
-                    && StringUtils.isNotBlank(parenthesedSelect.getAlias().getName())) {
-                EncryptTableRule derivedRule = derivedTableRuleBuilder.build(parenthesedSelect.getAlias().getName(),
-                        parenthesedSelect.getSelect());
-                if (derivedRule != null) {
-                    tableContext.registerDerived(parenthesedSelect.getAlias().getName(), derivedRule);
-                }
-            }
-        }
-    }
-
-    private void validateDistinct(Distinct distinct, List<SelectItem<?>> selectItems, SqlTableContext tableContext) {
-        if (distinct == null || selectItems == null) {
-            return;
-        }
-        for (SelectItem<?> item : selectItems) {
-            if (containsEncryptedReference(item.getExpression(), tableContext)) {
-                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_DISTINCT,
-                        "DISTINCT is not supported on encrypted fields.");
-            }
-        }
-    }
-
-    private void validateAggregateExpressions(List<SelectItem<?>> selectItems,
-                                              Expression having,
-                                              Expression qualify,
-                                              SqlTableContext tableContext) {
-        if (selectItems != null) {
-            for (SelectItem<?> item : selectItems) {
-                if (containsUnsupportedAggregate(item.getExpression(), tableContext)) {
-                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION,
-                            "Aggregate function is not supported on encrypted fields.");
-                }
-            }
-        }
-        if (containsUnsupportedAggregate(having, tableContext) ||
-                containsUnsupportedAggregate(qualify, tableContext)) {
-            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION,
-                    "Aggregate function is not supported on encrypted fields.");
-        }
-    }
-
-    private void validateAnalyticExpressions(List<SelectItem<?>> selectItems, SqlTableContext tableContext) {
-        if (selectItems == null) {
-            return;
-        }
-        for (SelectItem<?> item : selectItems) {
-            Expression expression = item.getExpression();
-            if (expression instanceof AnalyticExpression
-                    && containsEncryptedReference(expression, tableContext)) {
-                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW,
-                        "Window function is not supported on encrypted fields.");
-            }
-        }
-    }
-
-    private void validateWindowDefinitions(List<WindowDefinition> windowDefinitions, SqlTableContext tableContext) {
-        if (windowDefinitions == null) {
-            return;
-        }
-        for (WindowDefinition windowDefinition : windowDefinitions) {
-            if (containsEncryptedReference(windowDefinition, tableContext)) {
-                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW,
-                        "Named window definition is not supported on encrypted fields.");
-            }
-        }
-    }
-
-    private void validateGroupBy(GroupByElement groupByElement, SqlTableContext tableContext) {
-        if (groupByElement == null || groupByElement.getGroupByExpressionList() == null) {
-            return;
-        }
-        for (Object item : groupByElement.getGroupByExpressionList()) {
-            if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
-                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_GROUP_BY,
-                        "GROUP BY is not supported on encrypted fields.");
-            }
-        }
-    }
-
-    private boolean containsEncryptedReference(Expression expression, SqlTableContext tableContext) {
-        if (expression == null) {
-            return false;
-        }
-        if (resolveEncryptedColumn(expression, tableContext) != null) {
-            return true;
-        }
-        if (expression instanceof Parenthesis) {
-            Parenthesis parenthesis = (Parenthesis) expression;
-            return containsEncryptedReference(parenthesis.getExpression(), tableContext);
-        }
-        if (expression instanceof ParenthesedExpressionList) {
-            ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
-            for (Expression item : parenthesis) {
-                if (containsEncryptedReference(item, tableContext)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (expression instanceof BinaryExpression) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            return containsEncryptedReference(binaryExpression.getLeftExpression(), tableContext)
-                    || containsEncryptedReference(binaryExpression.getRightExpression(), tableContext);
-        }
-        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
-            Function function = (Function) expression;
-            for (Expression item : function.getParameters()) {
-                if (containsEncryptedReference(item, tableContext)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (expression instanceof CaseExpression) {
-            CaseExpression caseExpression = (CaseExpression) expression;
-            if (containsEncryptedReference(caseExpression.getSwitchExpression(), tableContext)) {
-                return true;
-            }
-            if (caseExpression.getWhenClauses() != null) {
-                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
-                    if (containsEncryptedReference(whenClause.getWhenExpression(), tableContext)
-                            || containsEncryptedReference(whenClause.getThenExpression(), tableContext)) {
-                        return true;
-                    }
-                }
-            }
-            return containsEncryptedReference(caseExpression.getElseExpression(), tableContext);
-        }
-        if (expression instanceof NotExpression) {
-            NotExpression notExpression = (NotExpression) expression;
-            return containsEncryptedReference(notExpression.getExpression(), tableContext);
-        }
-        if (expression instanceof AnalyticExpression) {
-            AnalyticExpression analyticExpression = (AnalyticExpression) expression;
-            if (containsEncryptedReference(analyticExpression.getExpression(), tableContext)
-                    || containsEncryptedReference(analyticExpression.getFilterExpression(), tableContext)
-                    || containsEncryptedReference(analyticExpression.getOffset(), tableContext)
-                    || containsEncryptedReference(analyticExpression.getDefaultValue(), tableContext)) {
-                return true;
-            }
-            if (analyticExpression.getPartitionExpressionList() != null) {
-                for (Object item : analyticExpression.getPartitionExpressionList()) {
-                    if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
-                        return true;
-                    }
-                }
-            }
-            if (analyticExpression.getOrderByElements() != null) {
-                for (OrderByElement element : analyticExpression.getOrderByElements()) {
-                    if (containsEncryptedReference(element.getExpression(), tableContext)) {
-                        return true;
-                    }
-                }
-            }
-            if (analyticExpression.getWindowDefinition() != null) {
-                return containsEncryptedReference(analyticExpression.getWindowDefinition(), tableContext);
-            }
-            return false;
-        }
-        return false;
-    }
-
-    private boolean containsEncryptedReference(WindowDefinition windowDefinition, SqlTableContext tableContext) {
-        if (windowDefinition == null) {
-            return false;
-        }
-        if (windowDefinition.getPartitionExpressionList() != null) {
-            for (Object item : windowDefinition.getPartitionExpressionList()) {
-                if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
-                    return true;
-                }
-            }
-        }
-        if (windowDefinition.getOrderByElements() != null) {
-            for (OrderByElement element : windowDefinition.getOrderByElements()) {
-                if (containsEncryptedReference(element.getExpression(), tableContext)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean containsUnsupportedAggregate(Expression expression, SqlTableContext tableContext) {
-        if (expression == null) {
-            return false;
-        }
-        if (expression instanceof Function) {
-            Function function = (Function) expression;
-            if (isAggregateFunction(function)) {
-                if (function.isAllColumns()) {
-                    return false;
-                }
-                if (function.getParameters() != null) {
-                    for (Expression item : function.getParameters()) {
-                        if (containsEncryptedReference(item, tableContext) || containsUnsupportedAggregate(item, tableContext)) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-            if (function.getParameters() != null) {
-                for (Expression item : function.getParameters()) {
-                    if (containsUnsupportedAggregate(item, tableContext)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-        if (expression instanceof BinaryExpression) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            return containsUnsupportedAggregate(binaryExpression.getLeftExpression(), tableContext)
-                    || containsUnsupportedAggregate(binaryExpression.getRightExpression(), tableContext);
-        }
-        if (expression instanceof Parenthesis) {
-            Parenthesis parenthesis = (Parenthesis) expression;
-            return containsUnsupportedAggregate(parenthesis.getExpression(), tableContext);
-        }
-        if (expression instanceof ParenthesedExpressionList) {
-            ParenthesedExpressionList<?> parenthesis = (ParenthesedExpressionList<?>) expression;
-            for (Expression item : parenthesis) {
-                if (containsUnsupportedAggregate(item, tableContext)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if (expression instanceof NotExpression) {
-            NotExpression notExpression = (NotExpression) expression;
-            return containsUnsupportedAggregate(notExpression.getExpression(), tableContext);
-        }
-        if (expression instanceof CaseExpression) {
-            CaseExpression caseExpression = (CaseExpression) expression;
-            if (containsUnsupportedAggregate(caseExpression.getSwitchExpression(), tableContext)
-                    || containsUnsupportedAggregate(caseExpression.getElseExpression(), tableContext)) {
-                return true;
-            }
-            if (caseExpression.getWhenClauses() != null) {
-                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
-                    if (containsUnsupportedAggregate(whenClause.getWhenExpression(), tableContext)
-                            || containsUnsupportedAggregate(whenClause.getThenExpression(), tableContext)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-        if (expression instanceof AnalyticExpression) {
-            AnalyticExpression analyticExpression = (AnalyticExpression) expression;
-            return containsUnsupportedAggregate(analyticExpression.getExpression(), tableContext)
-                    || containsUnsupportedAggregate(analyticExpression.getFilterExpression(), tableContext)
-                    || containsUnsupportedAggregate(analyticExpression.getOffset(), tableContext)
-                    || containsUnsupportedAggregate(analyticExpression.getDefaultValue(), tableContext);
-        }
-        if (expression instanceof Select) {
-            Select select = (Select) expression;
-            if (select instanceof PlainSelect) {
-                PlainSelect plainSelect = (PlainSelect) select;
-                return containsUnsupportedAggregate(plainSelect.getHaving(), tableContext)
-                        || containsUnsupportedAggregate(plainSelect.getQualify(), tableContext);
-            }
-            return false;
-        }
-        return false;
-    }
-
-    private boolean isAggregateFunction(Function function) {
-        String name = function.getName();
-        if (name == null) {
-            return false;
-        }
-        String upperName = name.toUpperCase(Locale.ROOT);
-        return "COUNT".equals(upperName)
-                || "SUM".equals(upperName)
-                || "AVG".equals(upperName)
-                || "MIN".equals(upperName)
-                || "MAX".equals(upperName)
-                || "LISTAGG".equals(upperName)
-                || "STRING_AGG".equals(upperName)
-                || "GROUP_CONCAT".equals(upperName)
-                || "ARRAY_AGG".equals(upperName);
-    }
-
-    private void registerTable(SqlTableContext tableContext, Table table) {
-        EncryptTableRule rule = metadataRegistry.findByTable(table.getName()).orElse(null);
-        if (rule == null) {
-            return;
-        }
-        tableContext.register(table.getName(), table.getAlias() != null ? table.getAlias().getName() : null, rule);
-    }
-
     private Column buildColumn(Column source, String targetColumn) {
         Column column = new Column(quote(targetColumn));
         if (source.getTable() != null && source.getTable().getName() != null) {
@@ -1420,95 +282,6 @@ public class SqlRewriteEngine {
             column.setTable(new Table(source.getTable().getName()));
         }
         return column;
-    }
-
-    private static final class WriteValue {
-
-        private final Expression expression;
-        private final Object plainValue;
-        private final boolean parameterized;
-
-        private WriteValue(Expression expression, Object plainValue, boolean parameterized) {
-            this.expression = expression;
-            this.plainValue = plainValue;
-            this.parameterized = parameterized;
-        }
-
-        private Expression expression() {
-            return expression;
-        }
-
-        private Object plainValue() {
-            return plainValue;
-        }
-
-        private boolean parameterized() {
-            return parameterized;
-        }
-    }
-
-    private static final class QueryOperand {
-
-        private final Object value;
-        private final List<Integer> parameterIndexes;
-
-        private QueryOperand(Object value, List<Integer> parameterIndexes) {
-            this.value = value;
-            this.parameterIndexes = parameterIndexes;
-        }
-
-        private static QueryOperand parameter(Object value, int parameterIndex) {
-            List<Integer> parameterIndexes = new ArrayList<>(1);
-            parameterIndexes.add(parameterIndex);
-            return new QueryOperand(value, parameterIndexes);
-        }
-
-        private static QueryOperand literal(Object value) {
-            return new QueryOperand(value, new ArrayList<>());
-        }
-
-        private Object value() {
-            return value;
-        }
-
-        private List<Integer> parameterIndexes() {
-            return parameterIndexes;
-        }
-
-        private boolean parameterized() {
-            return !parameterIndexes.isEmpty();
-        }
-    }
-
-    private static final class ColumnResolution {
-
-        private final Column column;
-        private final EncryptColumnRule rule;
-        private final boolean leftColumn;
-
-        private ColumnResolution(Column column, EncryptColumnRule rule, boolean leftColumn) {
-            this.column = column;
-            this.rule = rule;
-            this.leftColumn = leftColumn;
-        }
-
-        private Column column() {
-            return column;
-        }
-
-        private EncryptColumnRule rule() {
-            return rule;
-        }
-
-        private boolean leftColumn() {
-            return leftColumn;
-        }
-    }
-
-    private enum ProjectionMode {
-        NORMAL,
-        COMPARISON,
-        DERIVED
     }
 
     private String quote(String identifier) {

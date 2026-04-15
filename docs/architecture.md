@@ -47,6 +47,9 @@
   - 注册默认算法
   - 注册规则中心
   - 注册 `DatabaseEncryptionInterceptor` 并交由 MyBatis 自动装配链路接入
+- `UserDatabaseEncryptionProperties`
+  - starter 只负责外部配置绑定
+  - 具体规则模型直接复用 `common` 模块中的 `DatabaseEncryptionProperties`，避免 Spring 2/3 各维护一套重复配置结构
 
 ## 执行链路
 

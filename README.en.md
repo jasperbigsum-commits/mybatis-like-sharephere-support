@@ -20,6 +20,41 @@
 - Primary encryption: `SM4`
 - Assisted equality lookup: `SM3`
 - LIKE support: `normalizedLike`
+- `idCardMaskLike`: keeps the first 3 and last 3 characters for ID cards
+- `phoneMaskLike`: keeps the last 4 characters for mobile and landline numbers
+- `bankCardMaskLike`: keeps the last 4 characters for bank cards
+- `nameMaskLike`: masks Chinese personal names with common rules and organization names with a heuristic "location prefix + first 2 + last 2" strategy
+
+Four masking-style LIKE preprocessing implementations are also included, with semantics aligned to Apache ShardingSphere, but they are not auto-registered as default beans because each one requires explicit parameters:
+
+- `KeepFirstNLastMLikeQueryAlgorithm`
+- `KeepFromXToYLikeQueryAlgorithm`
+- `MaskFirstNLastMLikeQueryAlgorithm`
+- `MaskFromXToYLikeQueryAlgorithm`
+
+The business-oriented algorithms above are auto-registered as Spring beans, so they can be referenced directly from `like-query-algorithm`, for example:
+
+```yaml
+mybatis:
+  encrypt:
+    tables:
+      - table: user_account
+        fields:
+          - property: phone
+            column: phone
+            assisted-query-column: phone_hash
+            like-query-column: phone_like
+            like-query-algorithm: phoneMaskLike
+```
+
+If you want one of the parameterized generic cover algorithms instead, declare your own bean and reference it from `like-query-algorithm`, for example:
+
+```java
+@Bean("customPhoneMaskLike")
+public LikeQueryAlgorithm customPhoneMaskLike() {
+    return new KeepFirstNLastMLikeQueryAlgorithm(3, 4);
+}
+```
 
 This is closer to common domestic commercial-crypto expectations, but using these algorithms alone does not prove full compliance. Compliance still depends on end-to-end key management, product selection, operational controls, and auditability.
 

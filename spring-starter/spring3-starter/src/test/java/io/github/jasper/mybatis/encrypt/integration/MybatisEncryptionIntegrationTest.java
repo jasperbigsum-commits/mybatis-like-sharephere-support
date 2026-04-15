@@ -370,6 +370,70 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldRewriteDirectLikeToLikeAndAssistedFallbackParameters() throws Exception {
+        UserRecord user = user(13L, "Mia", "13600136013", "320101199001010213");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        parameterCaptureInterceptor.reset();
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserRecord loaded = mapper.selectByPhoneLike("13600136013");
+            assertNotNull(loaded);
+            assertEquals(13L, loaded.getId());
+            assertEquals("13600136013", loaded.getPhone());
+        }
+
+        StatementCapture mainSelect = parameterCaptureInterceptor.findPreparedStatementContaining("from user_account");
+        assertNotNull(mainSelect);
+        String normalizedSql = singleLine(mainSelect.sql).toLowerCase(Locale.ROOT);
+        assertTrue(normalizedSql.contains("phone_like"));
+        assertTrue(normalizedSql.contains("phone_hash"));
+        assertTrue(normalizedSql.contains("like ?"));
+        assertTrue(normalizedSql.contains("= ?"));
+        assertTrue(normalizedSql.contains(" or "));
+        assertEquals(2, mainSelect.parameters.size());
+        assertEquals("13600136013", mainSelect.parameters.get(0));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13600136013"),
+                mainSelect.parameters.get(1));
+    }
+
+    @Test
+    void shouldRewriteConcatLikeToLikeAndAssistedFallbackParameters() throws Exception {
+        UserRecord user = user(14L, "Nina", "13600136014", "320101199001010214");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        parameterCaptureInterceptor.reset();
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserRecord loaded = mapper.selectByPhoneLikeConcat("136001");
+            assertNotNull(loaded);
+            assertEquals(14L, loaded.getId());
+            assertEquals("13600136014", loaded.getPhone());
+        }
+
+        StatementCapture mainSelect = parameterCaptureInterceptor.findPreparedStatementContaining("from user_account");
+        assertNotNull(mainSelect);
+        String normalizedSql = singleLine(mainSelect.sql).toLowerCase(Locale.ROOT);
+        assertTrue(normalizedSql.contains("phone_like"));
+        assertTrue(normalizedSql.contains("phone_hash"));
+        assertTrue(normalizedSql.contains("like ?"));
+        assertTrue(normalizedSql.contains("= ?"));
+        assertTrue(normalizedSql.contains(" or "));
+        assertEquals(2, mainSelect.parameters.size());
+        assertEquals("%136001%", mainSelect.parameters.get(0));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("136001"),
+                mainSelect.parameters.get(1));
+    }
+
+    @Test
     void shouldReadComplexDerivedJoinQueryAcrossStorageModes() throws Exception {
         UserRecord matched = user(31L, "Kate", "13000130001", "320101199001010131");
         UserRecord ignored = user(32L, "Leo", "13000130002", "320101199001010132");
@@ -1099,6 +1163,20 @@ class MybatisEncryptionIntegrationTest {
                 where phone = #{phone}
                 """)
         UserRecord selectByPhone(@Param("phone") String phone);
+
+        @Select("""
+                select id, name, phone, id_card
+                from user_account
+                where phone like #{phoneLike}
+                """)
+        UserRecord selectByPhoneLike(@Param("phoneLike") String phoneLike);
+
+        @Select("""
+                select id, name, phone, id_card
+                from user_account
+                where phone like concat('%', #{segment}, '%')
+                """)
+        UserRecord selectByPhoneLikeConcat(@Param("segment") String segment);
 
         @Select("""
                 select id, name, phone, id_card

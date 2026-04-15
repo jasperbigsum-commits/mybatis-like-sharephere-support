@@ -170,13 +170,13 @@ class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
         assertEquals(3L, report.getVerifiedRows());
         assertEquals(Arrays.asList("tenant_id", "record_no"), report.getCursorColumns());
         assertEquals(Arrays.asList("tenantB", "1"), report.getLastProcessedCursorValues());
-        Map<String, String> expectedRangeStart = new LinkedHashMap<String, String>();
+        Map<String, String> expectedRangeStart = new LinkedHashMap<>();
         expectedRangeStart.put("tenant_id", "tenantA");
         expectedRangeStart.put("record_no", "1");
-        Map<String, String> expectedRangeEnd = new LinkedHashMap<String, String>();
+        Map<String, String> expectedRangeEnd = new LinkedHashMap<>();
         expectedRangeEnd.put("tenant_id", "tenantB");
         expectedRangeEnd.put("record_no", "1");
-        Map<String, String> expectedLastProcessed = new LinkedHashMap<String, String>();
+        Map<String, String> expectedLastProcessed = new LinkedHashMap<>();
         expectedLastProcessed.put("tenant_id", "tenantB");
         expectedLastProcessed.put("record_no", "1");
         assertEquals(expectedRangeStart, report.getRangeStartCursorMap());

@@ -468,11 +468,8 @@ public final class QueryResultPlanFactory {
         private void registerLookupFromItem(ProjectionTableContext tableContext, FromItem fromItem) {
             if (fromItem instanceof Table) {
                 Table table = (Table) fromItem;
-                EncryptTableRule tableRule = metadataRegistry.findByTable(table.getName()).orElse(null);
-                if (tableRule != null) {
-                    tableContext.register(table.getName(),
-                            table.getAlias() != null ? table.getAlias().getName() : null, tableRule);
-                }
+                metadataRegistry.findByTable(table.getName()).ifPresent(tableRule -> tableContext.register(table.getName(),
+                        table.getAlias() != null ? table.getAlias().getName() : null, tableRule));
                 return;
             }
             if (fromItem instanceof ParenthesedSelect) {
@@ -589,7 +586,7 @@ public final class QueryResultPlanFactory {
         private List<EncryptColumnRule> rulesForSelectExpansion(Table table) {
             if (table != null && StringUtils.isNotBlank(table.getName())) {
                 EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(table.getName()));
-                return tableRule == null ? java.util.Collections.<EncryptColumnRule>emptyList()
+                return tableRule == null ? java.util.Collections.emptyList()
                         : new ArrayList<>(tableRule.getColumnRules());
             }
             Collection<EncryptTableRule> uniqueRules = uniqueRules();

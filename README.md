@@ -47,8 +47,43 @@
 - `sm4`：默认主加密算法
 - `sm3`：默认辅助等值查询算法
 - `normalizedLike`：标准化 LIKE 查询算法
+- `idCardMaskLike`：身份证号保留前后 3 位
+- `phoneMaskLike`：手机号/座机号保留后 4 位
+- `bankCardMaskLike`：银行卡号保留后 4 位
+- `nameMaskLike`：中文姓名按常见规则脱敏，机构名称按“地名前缀 + 前 2 + 后 2”启发式脱敏
 - `aes`：兼容模式主加密算法
 - `sha256`：兼容模式辅助等值查询算法
+
+另外已内置 4 个参考 Apache ShardingSphere 语义的脱敏型 LIKE 预处理实现，但它们都依赖具体参数，因此不会自动注册默认 Bean：
+
+- `KeepFirstNLastMLikeQueryAlgorithm`
+- `KeepFromXToYLikeQueryAlgorithm`
+- `MaskFirstNLastMLikeQueryAlgorithm`
+- `MaskFromXToYLikeQueryAlgorithm`
+
+上面 4 个业务常用算法已经作为 Spring Boot 默认 Bean 自动注册，可直接在字段规则里引用，例如：
+
+```yaml
+mybatis:
+  encrypt:
+    tables:
+      - table: user_account
+        fields:
+          - property: phone
+            column: phone
+            assisted-query-column: phone_hash
+            like-query-column: phone_like
+            like-query-algorithm: phoneMaskLike
+```
+
+若要使用带参数的通用覆盖算法，则自行声明 Spring Bean，再在字段规则的 `like-query-algorithm` 中引用 Bean 名。例如：
+
+```java
+@Bean("customPhoneMaskLike")
+public LikeQueryAlgorithm customPhoneMaskLike() {
+    return new KeepFirstNLastMLikeQueryAlgorithm(3, 4);
+}
+```
 
 ## 明确限制
 

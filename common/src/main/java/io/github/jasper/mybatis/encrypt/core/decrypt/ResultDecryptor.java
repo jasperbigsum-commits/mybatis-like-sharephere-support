@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
+import io.github.jasper.mybatis.encrypt.util.ObjectTraversalUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -100,13 +101,13 @@ public class ResultDecryptor {
     }
 
     private void decryptWithPlan(Object resultObject, QueryResultPlan queryResultPlan) {
-        for (Object candidate : topLevelResults(resultObject)) {
+        for (Object candidate : ObjectTraversalUtils.topLevelResults(resultObject)) {
             decryptCandidate(candidate, queryResultPlan);
         }
     }
 
     private void decryptCandidate(Object candidate, QueryResultPlan queryResultPlan) {
-        if (candidate == null || candidate instanceof Map<?, ?> || isSimpleValueType(candidate.getClass())) {
+        if (candidate == null || candidate instanceof Map<?, ?> || ObjectTraversalUtils.isSimpleValueType(candidate.getClass())) {
             return;
         }
         QueryResultPlan.TypePlan typePlan = queryResultPlan.findPlan(candidate.getClass());
@@ -130,33 +131,6 @@ public class ResultDecryptor {
             metaObject.setValue(propertyPath,
                     algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt((String) value));
         }
-    }
-
-    private Collection<?> topLevelResults(Object resultObject) {
-        if (resultObject instanceof Collection<?>) {
-            return (Collection<?>) resultObject;
-        }
-        if (resultObject.getClass().isArray()) {
-            int length = java.lang.reflect.Array.getLength(resultObject);
-            List<Object> results = new ArrayList<>(length);
-            for (int index = 0; index < length; index++) {
-                results.add(java.lang.reflect.Array.get(resultObject, index));
-            }
-            return results;
-        }
-        return java.util.Collections.singletonList(resultObject);
-    }
-
-    private boolean isSimpleValueType(Class<?> type) {
-        return type.isPrimitive()
-                || type.isEnum()
-                || CharSequence.class.isAssignableFrom(type)
-                || Number.class.isAssignableFrom(type)
-                || Boolean.class == type
-                || Character.class == type
-                || java.util.Date.class.isAssignableFrom(type)
-                || java.time.temporal.Temporal.class.isAssignableFrom(type)
-                || Class.class == type;
     }
 
     private static final class QueryScope {

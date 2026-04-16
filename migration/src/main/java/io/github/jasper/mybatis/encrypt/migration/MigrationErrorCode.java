@@ -25,9 +25,17 @@ public enum MigrationErrorCode {
      */
     BACKUP_COLUMN_CONFLICT,
     /**
+     * 迁移目标表被全局排除
+     */
+    TABLE_EXCLUDED,
+    /**
      * 游标值缺失
      */
     CURSOR_VALUE_MISSING,
+    /**
+     * checkpoint 锁已被占用
+     */
+    CHECKPOINT_LOCKED,
     /**
      * 游标检查点无效
      */

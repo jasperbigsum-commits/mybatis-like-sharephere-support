@@ -5,6 +5,8 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
+import io.github.jasper.mybatis.encrypt.migration.MigrationExecutionException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecordWriter;
 import io.github.jasper.mybatis.encrypt.migration.ReferenceIdGenerator;
@@ -16,8 +18,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Default JDBC writer for both same-table and separate-table migration modes.
@@ -44,11 +48,18 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
 
     @Override
     public boolean write(Connection connection, EntityMigrationPlan plan, MigrationRecord record) throws SQLException {
+        Map<String, Object> currentRow = loadCurrentMainRow(connection, plan, record.getCursor());
         Map<String, Object> mainTableUpdates = new LinkedHashMap<>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
-            Object plainValue = record.getColumnValue(columnPlan.getSourceColumn());
+            if (isAlreadyMigratedWithoutPlaintext(connection, columnPlan, currentRow)) {
+                continue;
+            }
+            Object plainValue = resolvePlainValue(columnPlan, record, currentRow);
             MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
             if (derivedFieldValues.isEmpty()) {
+                continue;
+            }
+            if (isAlreadyInTargetState(connection, columnPlan, currentRow, plainValue, derivedFieldValues)) {
                 continue;
             }
             if (columnPlan.shouldWriteBackup()) {
@@ -76,6 +87,144 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         }
         updateMainTable(connection, plan, record.getCursor(), mainTableUpdates);
         return true;
+    }
+
+    private Map<String, Object> loadCurrentMainRow(Connection connection,
+                                                   EntityMigrationPlan plan,
+                                                   MigrationCursor rowCursor) throws SQLException {
+        Set<String> columns = new LinkedHashSet<String>();
+        for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
+            columns.add(columnPlan.getSourceColumn());
+            if (!columnPlan.isStoredInSeparateTable()) {
+                columns.add(columnPlan.getStorageColumn());
+                if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
+                    columns.add(columnPlan.getAssistedQueryColumn());
+                }
+                if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
+                    columns.add(columnPlan.getLikeQueryColumn());
+                }
+            }
+            if (columnPlan.shouldWriteBackup()) {
+                columns.add(columnPlan.getBackupColumn());
+            }
+        }
+        StringBuilder sql = new StringBuilder("select ");
+        int index = 0;
+        for (String column : columns) {
+            if (index++ > 0) {
+                sql.append(", ");
+            }
+            sql.append(quote(column));
+        }
+        sql.append(" from ").append(quote(plan.getTableName())).append(" where ");
+        appendCursorEqualityPredicate(sql, plan.getCursorColumns());
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            int parameterIndex = 1;
+            for (Object cursorValue : rowCursor.getValues().values()) {
+                statement.setObject(parameterIndex++, cursorValue);
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new MigrationExecutionException(MigrationErrorCode.EXECUTION_FAILED,
+                            "Missing current row while writing migration checkpoint: " + rowCursor,
+                            null);
+                }
+                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                for (String column : columns) {
+                    row.put(column, resultSet.getObject(column));
+                }
+                return row;
+            }
+        }
+    }
+
+    private Object resolvePlainValue(EntityMigrationColumnPlan columnPlan,
+                                     MigrationRecord record,
+                                     Map<String, Object> currentRow) {
+        if (columnPlan.shouldWriteBackup()) {
+            Object backupValue = currentRow.get(columnPlan.getBackupColumn());
+            if (!isBlankValue(backupValue)) {
+                return backupValue;
+            }
+        }
+        return currentRow.containsKey(columnPlan.getSourceColumn())
+                ? currentRow.get(columnPlan.getSourceColumn())
+                : record.getColumnValue(columnPlan.getSourceColumn());
+    }
+
+    private boolean isAlreadyInTargetState(Connection connection,
+                                           EntityMigrationColumnPlan columnPlan,
+                                           Map<String, Object> currentRow,
+                                           Object plainValue,
+                                           MigrationValueResolver.DerivedFieldValues derivedFieldValues)
+            throws SQLException {
+        if (columnPlan.shouldWriteBackup()
+                && !valueEquals(currentRow.get(columnPlan.getBackupColumn()), plainValue)) {
+            return false;
+        }
+        if (columnPlan.isStoredInSeparateTable()) {
+            if (!valueEquals(currentRow.get(columnPlan.getSourceColumn()), derivedFieldValues.getHashValue())) {
+                return false;
+            }
+            Map<String, Object> separateRow = loadSeparateRow(connection, columnPlan, derivedFieldValues.getHashValue());
+            if (separateRow == null) {
+                return false;
+            }
+            return valueEquals(separateRow.get(columnPlan.getStorageColumn()), derivedFieldValues.getCipherText())
+                    && valueEquals(separateRow.get(columnPlan.getAssistedQueryColumn()), derivedFieldValues.getHashValue())
+                    && matchesOptionalValue(separateRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue());
+        }
+        if (!valueEquals(currentRow.get(columnPlan.getStorageColumn()), derivedFieldValues.getCipherText())) {
+            return false;
+        }
+        if (!matchesOptionalValue(currentRow.get(columnPlan.getAssistedQueryColumn()), derivedFieldValues.getHashValue())) {
+            return false;
+        }
+        if (!matchesOptionalValue(currentRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue())) {
+            return false;
+        }
+        if (!columnPlan.overwritesSourceColumn()) {
+            return true;
+        }
+        return valueEquals(currentRow.get(columnPlan.getSourceColumn()),
+                expectedSourceValue(columnPlan, derivedFieldValues));
+    }
+
+    private boolean isAlreadyMigratedWithoutPlaintext(Connection connection,
+                                                      EntityMigrationColumnPlan columnPlan,
+                                                      Map<String, Object> currentRow) throws SQLException {
+        if (!columnPlan.overwritesSourceColumn() || columnPlan.shouldWriteBackup()) {
+            return false;
+        }
+        Object sourceValue = currentRow.get(columnPlan.getSourceColumn());
+        if (isBlankValue(sourceValue)) {
+            return false;
+        }
+        if (columnPlan.isStoredInSeparateTable()) {
+            Map<String, Object> separateRow = loadSeparateRow(connection, columnPlan, String.valueOf(sourceValue));
+            return separateRow != null
+                    && !isBlankValue(separateRow.get(columnPlan.getStorageColumn()))
+                    && optionalColumnPresent(separateRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn());
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getStorageColumn())
+                && isBlankValue(currentRow.get(columnPlan.getStorageColumn()))) {
+            return false;
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getAssistedQueryColumn())
+                && !valueEquals(sourceValue, currentRow.get(columnPlan.getAssistedQueryColumn()))) {
+            return false;
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getLikeQueryColumn())
+                && !valueEquals(sourceValue, currentRow.get(columnPlan.getLikeQueryColumn()))) {
+            return false;
+        }
+        if (isBlankValue(currentRow.get(columnPlan.getStorageColumn()))) {
+            return false;
+        }
+        if (!optionalColumnPresent(currentRow.get(columnPlan.getAssistedQueryColumn()), columnPlan.getAssistedQueryColumn())) {
+            return false;
+        }
+        return optionalColumnPresent(currentRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn());
     }
 
     private void updateMainTable(Connection connection,
@@ -129,6 +278,38 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         }
     }
 
+    private Map<String, Object> loadSeparateRow(Connection connection,
+                                                EntityMigrationColumnPlan columnPlan,
+                                                String referenceHash) throws SQLException {
+        if (referenceHash == null || StringUtils.isBlank(columnPlan.getAssistedQueryColumn())) {
+            return null;
+        }
+        StringBuilder sql = new StringBuilder("select ")
+                .append(quote(columnPlan.getStorageColumn()))
+                .append(", ")
+                .append(quote(columnPlan.getAssistedQueryColumn()));
+        if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
+            sql.append(", ").append(quote(columnPlan.getLikeQueryColumn()));
+        }
+        sql.append(" from ").append(quote(columnPlan.getStorageTable()))
+                .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            statement.setString(1, referenceHash);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
+                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                row.put(columnPlan.getStorageColumn(), resultSet.getObject(columnPlan.getStorageColumn()));
+                row.put(columnPlan.getAssistedQueryColumn(), resultSet.getObject(columnPlan.getAssistedQueryColumn()));
+                if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
+                    row.put(columnPlan.getLikeQueryColumn(), resultSet.getObject(columnPlan.getLikeQueryColumn()));
+                }
+                return row;
+            }
+        }
+    }
+
     private void insertSeparateRow(Connection connection,
                                    EntityMigrationColumnPlan columnPlan,
                                    Object referenceId,
@@ -172,5 +353,44 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
 
     private String quote(String identifier) {
         return properties.getSqlDialect().quote(identifier);
+    }
+
+    private boolean valueEquals(Object actual, Object expected) {
+        String actualText = actual == null ? null : String.valueOf(actual);
+        String expectedText = expected == null ? null : String.valueOf(expected);
+        return expectedText == null ? actualText == null : expectedText.equals(actualText);
+    }
+
+    private boolean matchesOptionalValue(Object actual, String expected) {
+        return expected == null ? true : valueEquals(actual, expected);
+    }
+
+    private boolean optionalColumnPresent(Object actual, String columnName) {
+        return StringUtils.isBlank(columnName) || !isBlankValue(actual);
+    }
+
+    private boolean isBlankValue(Object value) {
+        return value == null || StringUtils.isBlank(String.valueOf(value));
+    }
+
+    private boolean matchesSameColumn(String left, String right) {
+        return StringUtils.isNotBlank(left) && left.equals(right);
+    }
+
+    private String expectedSourceValue(EntityMigrationColumnPlan columnPlan,
+                                       MigrationValueResolver.DerivedFieldValues derivedFieldValues) {
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getStorageColumn())) {
+            return derivedFieldValues.getCipherText();
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getAssistedQueryColumn())) {
+            return derivedFieldValues.getHashValue();
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getLikeQueryColumn())) {
+            return derivedFieldValues.getLikeValue();
+        }
+        if (columnPlan.isStoredInSeparateTable()) {
+            return derivedFieldValues.getHashValue();
+        }
+        return null;
     }
 }

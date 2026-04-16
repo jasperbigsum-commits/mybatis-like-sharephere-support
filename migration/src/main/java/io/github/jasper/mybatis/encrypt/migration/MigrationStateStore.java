@@ -22,4 +22,12 @@ public interface MigrationStateStore {
      * @param state state snapshot
      */
     void save(EntityMigrationPlan plan, MigrationState state);
+
+    /**
+     * Acquire one exclusive checkpoint lock for the current migration scope.
+     *
+     * @param plan migration plan
+     * @return lock handle that must be closed after execution
+     */
+    MigrationCheckpointLock acquireCheckpointLock(EntityMigrationPlan plan);
 }

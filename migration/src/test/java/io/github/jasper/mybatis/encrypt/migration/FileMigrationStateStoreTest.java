@@ -90,8 +90,60 @@ class FileMigrationStateStoreTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("Failed to parse migration state file"));
     }
 
+    @Test
+    void shouldPrefixStateFileWithDatasourceNameWhenPresent() throws Exception {
+        Path stateDir = createTempDirectory("migration-state-store-datasource");
+        FileMigrationStateStore stateStore = new FileMigrationStateStore(stateDir);
+        EntityMigrationPlan plan = new EntityMigrationPlan(
+                "archiveDs",
+                SameTableUserEntity.class,
+                SameTableUserEntity.class.getName(),
+                "user_account",
+                Collections.singletonList("id"),
+                100,
+                true,
+                Collections.<EntityMigrationColumnPlan>emptyList());
+
+        MigrationState state = new MigrationState();
+        state.setDataSourceName("archiveDs");
+        state.setEntityName(plan.getEntityName());
+        state.setTableName(plan.getTableName());
+        state.setCursorColumns(Collections.singletonList("id"));
+
+        stateStore.save(plan, state);
+
+        assertTrue(java.nio.file.Files.exists(stateFile(stateDir, plan)));
+        MigrationState loaded = stateStore.load(plan).orElseThrow(AssertionError::new);
+        assertEquals("archiveDs", loaded.getDataSourceName());
+    }
+
+    @Test
+    void shouldRejectConcurrentCheckpointLockForSamePlan() throws Exception {
+        Path stateDir = createTempDirectory("migration-state-store-lock");
+        FileMigrationStateStore stateStore = new FileMigrationStateStore(stateDir);
+        EntityMigrationPlan plan = new EntityMigrationPlan(
+                SameTableUserEntity.class,
+                SameTableUserEntity.class.getName(),
+                "user_account",
+                Collections.singletonList("id"),
+                100,
+                true,
+                Collections.<EntityMigrationColumnPlan>emptyList());
+
+        try (MigrationCheckpointLock ignored = stateStore.acquireCheckpointLock(plan)) {
+            MigrationCheckpointLockException exception = assertThrows(MigrationCheckpointLockException.class,
+                    () -> stateStore.acquireCheckpointLock(plan));
+            assertEquals(MigrationErrorCode.CHECKPOINT_LOCKED, exception.getErrorCode());
+        }
+    }
+
     private Path stateFile(Path directory, EntityMigrationPlan plan) {
-        return directory.resolve(sanitize(plan.getEntityName()) + "__" + sanitize(plan.getTableName()) + ".properties");
+        StringBuilder fileName = new StringBuilder();
+        if (plan.getDataSourceName() != null && !plan.getDataSourceName().trim().isEmpty()) {
+            fileName.append(sanitize(plan.getDataSourceName())).append("__");
+        }
+        fileName.append(sanitize(plan.getEntityName())).append("__").append(sanitize(plan.getTableName())).append(".properties");
+        return directory.resolve(fileName.toString());
     }
 
     private String sanitize(String value) {

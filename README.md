@@ -392,6 +392,26 @@ mybatis:
     sql-dialect: DM
 ```
 
+多数据源场景下，可以保留一个全局默认方言，再按 datasource 名称做覆盖。`datasource-name-pattern`
+支持 `|` 分隔多个名称或通配模式：
+
+```yaml
+mybatis:
+  encrypt:
+    sql-dialect: MYSQL
+    datasource-dialects:
+      - datasource-name-pattern: "dmPrimary|dmArchive-*"
+        sql-dialect: DM
+      - datasource-name-pattern: "oracle-report"
+        sql-dialect: ORACLE12
+```
+
+说明：
+
+- 未命中任何规则时回退到全局 `sql-dialect`
+- `*` 匹配任意长度字符，`?` 匹配单个字符
+- MyBatis 插件、独立表写入和迁移模块都会复用同一套解析逻辑
+
 日志策略：
 
 - 主密文参数打印为 `***`
@@ -608,11 +628,13 @@ public class UserAccountMigrationRunner {
 
 - `MigrationTaskFactory`
 - `MigrationStateStore`
-  默认是 `InMemoryMigrationStateStore`
+  默认是 `FileMigrationStateStore`
 - `MigrationConfirmationPolicy`
   默认是 `AllowAllMigrationConfirmationPolicy`
+- `GlobalMigrationTaskFactory`
+  多数据源场景下按 datasource 名称路由到具体迁移工厂
 
-如果你希望断点状态改为文件持久化，或要求上线前必须确认风险范围，只需覆写对应 Bean，`MigrationTaskFactory` 会自动复用：
+如果你希望修改默认 checkpoint 目录，或要求上线前必须确认风险范围，只需覆写对应 Bean，`MigrationTaskFactory` 会自动复用：
 
 ```java
 @Configuration
@@ -630,6 +652,67 @@ public class MigrationSupportConfiguration {
 }
 ```
 
+如果应用里有多个 JDBC 数据源，推荐直接注入 `GlobalMigrationTaskFactory`：
+
+```java
+@Service
+public class ArchiveMigrationRunner {
+
+    private final GlobalMigrationTaskFactory globalMigrationTaskFactory;
+
+    public ArchiveMigrationRunner(GlobalMigrationTaskFactory globalMigrationTaskFactory) {
+        this.globalMigrationTaskFactory = globalMigrationTaskFactory;
+    }
+
+    public MigrationReport migrateArchive() {
+        return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+迁移默认策略也支持直接走配置，不必每个任务都重复写 builder：
+
+```yaml
+mybatis:
+  encrypt:
+    migration:
+      default-cursor-columns:
+        - id
+      checkpoint-directory: migration-state
+      batch-size: 500
+      verify-after-write: true
+      exclude-tables:
+        - "flyway_schema_history|undo_log"
+      backup-column-templates:
+        - table-pattern: "user_*"
+          field-pattern: "idCard|phone"
+          template: "${column}_backup"
+```
+
+说明：
+
+- `exclude-tables` 命中后，迁移计划会直接失败并返回 `TABLE_EXCLUDED`
+- `backup-column-templates` 仅在字段会覆盖原主表明文列、且没有显式 `backupColumn(...)` 时生效
+- `default-cursor-columns` 会作为 `MigrationTaskFactory.createForTable("user_account")`、`executeForEntity(UserAccount.class)` 和一键迁移入口的默认游标
+- `checkpoint-directory` 是默认 checkpoint 持久化目录，starter 会直接使用文件状态存储，不再使用内存状态
+- 模板支持 `${table}`、`${property}`、`${column}`
+
+如果只是想最简配置直接迁移全部已注册表，可以在实体扫描或配置规则准备完成后直接调用：
+
+```java
+List<MigrationReport> reports = migrationTaskFactory.executeAllRegisteredTables();
+```
+
+多数据源场景对应：
+
+```java
+List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredTables("archiveDs");
+```
+
+该入口按“物理表名”去重，同一张表即使同时来自注解扫描和外部表规则，也只会迁移一次。
+即使 checkpoint 回退到旧批次，writer 也会按当前目标态做幂等判断，已完成记录会跳过而不会重复插入外表或重复覆盖主表。
+同一 `dataSource + entity/table` 迁移任务并发启动时，会先争抢 checkpoint lock；未抢到锁的实例会直接以 `CHECKPOINT_LOCKED` 失败，避免重复执行。
+
 状态文件包含：
 
 - `cursorColumns.*` / `cursorJavaTypes.*`
@@ -640,6 +723,7 @@ public class MigrationSupportConfiguration {
 - `scannedRows` / `migratedRows` / `skippedRows` / `verifiedRows`
 
 单列游标场景下还会额外保留 `idColumn`、`lastProcessedId` 等兼容别名，方便旧任务平滑迁移。
+如果任务来自 `GlobalMigrationTaskFactory`，状态文件和确认文件名会自动带上 datasource 名称前缀，避免多数据源重名任务互相覆盖。
 
 文件确认模式示例：
 

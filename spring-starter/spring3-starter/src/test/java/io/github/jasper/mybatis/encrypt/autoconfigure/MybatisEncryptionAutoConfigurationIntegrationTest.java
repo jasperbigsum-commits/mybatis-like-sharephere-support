@@ -1,7 +1,9 @@
 package io.github.jasper.mybatis.encrypt.autoconfigure;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.migration.FileMigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationReport;
+import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 import jakarta.annotation.Resource;
@@ -16,6 +18,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
@@ -29,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
                 "mybatis.encrypt.default-cipher-key=boot-integration-key",
                 "mybatis.encrypt.scan-entity-annotations=true",
                 "mybatis.encrypt.scan-packages=io.github.jasper.mybatis.encrypt.autoconfigure",
+                "mybatis.encrypt.migration.checkpoint-directory=target/test-migration-state-spring3",
                 "mybatis.encrypt.log-masked-sql=false",
                 "mybatis.configuration.map-underscore-to-camel-case=true"
         }
@@ -53,8 +59,12 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
     @Resource
     private MigrationTaskFactory migrationTaskFactory;
 
+    @Resource
+    private MigrationStateStore migrationStateStore;
+
     @BeforeEach
     void setUp() throws Exception {
+        deleteIfExists(Paths.get("target/test-migration-state-spring3"));
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute("drop table if exists user_id_card_encrypt");
             statement.execute("drop table if exists user_account");
@@ -86,6 +96,7 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
     void shouldAutoConfigurePluginBeansAndEntityScanning() {
         assertNotNull(interceptor);
         assertNotNull(migrationTaskFactory);
+        assertTrue(migrationStateStore instanceof FileMigrationStateStore);
         assertTrue(metadataRegistry.findByEntity(AutoConfiguredUserRecord.class).isPresent());
         assertEquals(1, sqlSessionFactory.getConfiguration().getInterceptors().stream()
                 .filter(DatabaseEncryptionInterceptor.class::isInstance)
@@ -179,6 +190,22 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
             dataSource.setUser("sa");
             dataSource.setPassword("");
             return dataSource;
+        }
+    }
+
+    private void deleteIfExists(Path directory) throws Exception {
+        if (!Files.exists(directory)) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
+            paths.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (Exception ex) {
+                            throw new RuntimeException(ex);
+                        }
+                    });
         }
     }
 }

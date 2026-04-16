@@ -1,9 +1,15 @@
 package io.github.jasper.mybatis.encrypt.config;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.util.NameUtils;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.LinkedHashMap;
 
 /**
  * 数据库加密插件的外部配置。
@@ -52,6 +58,16 @@ public class DatabaseEncryptionProperties {
      * 改写 SQL 时用于引用标识符的 SQL 方言。
      */
     private SqlDialect sqlDialect = SqlDialect.MYSQL;
+
+    /**
+     * 按数据源名称匹配的 SQL 方言覆盖规则。
+     */
+    private List<DataSourceDialectRuleProperties> datasourceDialects = new ArrayList<>();
+
+    /**
+     * 迁移模块默认策略。
+     */
+    private MigrationProperties migration = new MigrationProperties();
 
     /**
      * 配置中显式声明的按表加密规则列表。
@@ -190,7 +206,7 @@ public class DatabaseEncryptionProperties {
      * @return 当前 SQL 方言
      */
     public SqlDialect getSqlDialect() {
-        return sqlDialect;
+        return resolveSqlDialect(SqlDialectContextHolder.currentDataSourceName());
     }
 
     /**
@@ -200,6 +216,51 @@ public class DatabaseEncryptionProperties {
      */
     public void setSqlDialect(SqlDialect sqlDialect) {
         this.sqlDialect = sqlDialect;
+    }
+
+    /**
+     * 返回全局默认 SQL 方言，不应用数据源覆盖规则。
+     *
+     * @return 全局默认 SQL 方言
+     */
+    public SqlDialect getDefaultSqlDialect() {
+        return sqlDialect;
+    }
+
+    /**
+     * 返回数据源方言覆盖规则。
+     *
+     * @return 数据源方言覆盖规则
+     */
+    public List<DataSourceDialectRuleProperties> getDatasourceDialects() {
+        return datasourceDialects;
+    }
+
+    /**
+     * 设置数据源方言覆盖规则。
+     *
+     * @param datasourceDialects 数据源方言覆盖规则
+     */
+    public void setDatasourceDialects(List<DataSourceDialectRuleProperties> datasourceDialects) {
+        this.datasourceDialects = datasourceDialects;
+    }
+
+    /**
+     * 返回迁移模块默认策略。
+     *
+     * @return 迁移模块默认策略
+     */
+    public MigrationProperties getMigration() {
+        return migration;
+    }
+
+    /**
+     * 设置迁移模块默认策略。
+     *
+     * @param migration 迁移模块默认策略
+     */
+    public void setMigration(MigrationProperties migration) {
+        this.migration = migration;
     }
 
     /**
@@ -218,6 +279,317 @@ public class DatabaseEncryptionProperties {
      */
     public void setTables(List<TableRuleProperties> tables) {
         this.tables = tables;
+    }
+
+    /**
+     * 按数据源名称解析当前应使用的 SQL 方言。
+     *
+     * <p>支持通过 {@code |} 分隔多个名称或通配模式，例如
+     * {@code master|archive-*|reporting?}。</p>
+     *
+     * @param dataSourceName 数据源 bean 名称
+     * @return 命中的 SQL 方言；未命中时回退到全局默认值
+     */
+    public SqlDialect resolveSqlDialect(String dataSourceName) {
+        if (StringUtils.isNotBlank(dataSourceName)) {
+            for (DataSourceDialectRuleProperties rule : datasourceDialects) {
+                if (rule != null && rule.matches(dataSourceName) && rule.getSqlDialect() != null) {
+                    return rule.getSqlDialect();
+                }
+            }
+        }
+        return sqlDialect;
+    }
+
+    /**
+     * 判断某个表是否被全局迁移策略排除。
+     *
+     * @param tableName 物理表名
+     * @return 命中排除规则时返回 {@code true}
+     */
+    public boolean isMigrationTableExcluded(String tableName) {
+        if (migration == null || StringUtils.isBlank(tableName)) {
+            return false;
+        }
+        return migration.matchesExcludedTable(tableName);
+    }
+
+    /**
+     * 根据全局迁移模板规则解析备份列名。
+     *
+     * @param tableName 主表名
+     * @param property 加密属性名
+     * @param column 明文字段列名
+     * @return 解析得到的备份列名；未命中规则时返回 {@code null}
+     */
+    public String resolveMigrationBackupColumn(String tableName, String property, String column) {
+        if (migration == null) {
+            return null;
+        }
+        return migration.resolveBackupColumn(tableName, property, column);
+    }
+
+    private static boolean matchesPipePattern(String pipePattern, String candidate) {
+        if (StringUtils.isBlank(pipePattern) || StringUtils.isBlank(candidate)) {
+            return false;
+        }
+        String normalizedCandidate = candidate.trim().toLowerCase(Locale.ROOT);
+        String[] parts = pipePattern.split("\\|");
+        for (String part : parts) {
+            String normalizedPattern = part == null ? "" : part.trim().toLowerCase(Locale.ROOT);
+            if (normalizedPattern.isEmpty()) {
+                continue;
+            }
+            if (globMatches(normalizedPattern, normalizedCandidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean globMatches(String pattern, String candidate) {
+        StringBuilder regex = new StringBuilder();
+        for (int index = 0; index < pattern.length(); index++) {
+            char current = pattern.charAt(index);
+            if (current == '*') {
+                regex.append(".*");
+            } else if (current == '?') {
+                regex.append('.');
+            } else if ("\\.[]{}()+-^$|".indexOf(current) >= 0) {
+                regex.append('\\').append(current);
+            } else {
+                regex.append(current);
+            }
+        }
+        return candidate.matches(regex.toString());
+    }
+
+    private static String normalizeTableName(String tableName) {
+        return StringUtils.isBlank(tableName) ? null : NameUtils.normalizeIdentifier(tableName);
+    }
+
+    private static String trimToNull(String value) {
+        return StringUtils.isBlank(value) ? null : value.trim();
+    }
+
+    /**
+     * 数据源名称与 SQL 方言的匹配规则。
+     */
+    public static class DataSourceDialectRuleProperties {
+
+        /**
+         * 数据源 bean 名称 pipe 模式。
+         */
+        private String datasourceNamePattern;
+
+        /**
+         * 命中后的 SQL 方言。
+         */
+        private SqlDialect sqlDialect;
+
+        public String getDatasourceNamePattern() {
+            return datasourceNamePattern;
+        }
+
+        public void setDatasourceNamePattern(String datasourceNamePattern) {
+            this.datasourceNamePattern = datasourceNamePattern;
+        }
+
+        public SqlDialect getSqlDialect() {
+            return sqlDialect;
+        }
+
+        public void setSqlDialect(SqlDialect sqlDialect) {
+            this.sqlDialect = sqlDialect;
+        }
+
+        public boolean matches(String dataSourceName) {
+            return matchesPipePattern(datasourceNamePattern, dataSourceName);
+        }
+    }
+
+    /**
+     * 迁移模块默认策略。
+     */
+    public static class MigrationProperties {
+
+        /**
+         * 默认迁移游标列。
+         */
+        private List<String> defaultCursorColumns = Collections.singletonList("id");
+
+        /**
+         * checkpoint 持久化目录。
+         */
+        private String checkpointDirectory = "migration-state";
+
+        /**
+         * 默认迁移批大小。
+         */
+        private int batchSize = 200;
+
+        /**
+         * 默认是否启用写后校验。
+         */
+        private boolean verifyAfterWrite = true;
+
+        /**
+         * 全局排除的迁移表。
+         */
+        private List<String> excludeTables = new ArrayList<>();
+
+        /**
+         * 备份列模板规则，按声明顺序匹配。
+         */
+        private List<BackupColumnTemplateRuleProperties> backupColumnTemplates = new ArrayList<>();
+
+        public List<String> getDefaultCursorColumns() {
+            return defaultCursorColumns;
+        }
+
+        public void setDefaultCursorColumns(List<String> defaultCursorColumns) {
+            this.defaultCursorColumns = defaultCursorColumns;
+        }
+
+        public String getCheckpointDirectory() {
+            return checkpointDirectory;
+        }
+
+        public void setCheckpointDirectory(String checkpointDirectory) {
+            this.checkpointDirectory = checkpointDirectory;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public boolean isVerifyAfterWrite() {
+            return verifyAfterWrite;
+        }
+
+        public void setVerifyAfterWrite(boolean verifyAfterWrite) {
+            this.verifyAfterWrite = verifyAfterWrite;
+        }
+
+        public List<String> getExcludeTables() {
+            return excludeTables;
+        }
+
+        public void setExcludeTables(List<String> excludeTables) {
+            this.excludeTables = excludeTables;
+        }
+
+        public List<BackupColumnTemplateRuleProperties> getBackupColumnTemplates() {
+            return backupColumnTemplates;
+        }
+
+        public void setBackupColumnTemplates(List<BackupColumnTemplateRuleProperties> backupColumnTemplates) {
+            this.backupColumnTemplates = backupColumnTemplates;
+        }
+
+        boolean matchesExcludedTable(String tableName) {
+            String normalizedTable = normalizeTableName(tableName);
+            if (normalizedTable == null) {
+                return false;
+            }
+            for (String excludeTable : excludeTables) {
+                if (matchesPipePattern(excludeTable, normalizedTable)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        String resolveBackupColumn(String tableName, String property, String column) {
+            String normalizedTable = normalizeTableName(tableName);
+            String normalizedColumn = trimToNull(column);
+            String normalizedProperty = trimToNull(property);
+            for (BackupColumnTemplateRuleProperties rule : backupColumnTemplates) {
+                if (rule == null || !rule.matches(normalizedTable, normalizedProperty, normalizedColumn)) {
+                    continue;
+                }
+                return rule.render(normalizedTable, normalizedProperty, normalizedColumn);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 迁移备份列模板规则。
+     */
+    public static class BackupColumnTemplateRuleProperties {
+
+        /**
+         * 匹配主表名的 pipe 模式。
+         */
+        private String tablePattern = "*";
+
+        /**
+         * 匹配字段选择器的 pipe 模式；同时匹配属性名和源列名。
+         */
+        private String fieldPattern = "*";
+
+        /**
+         * 备份列模板，支持 `${table}`、`${property}`、`${column}`。
+         */
+        private String template = "${column}_backup";
+
+        public String getTablePattern() {
+            return tablePattern;
+        }
+
+        public void setTablePattern(String tablePattern) {
+            this.tablePattern = tablePattern;
+        }
+
+        public String getFieldPattern() {
+            return fieldPattern;
+        }
+
+        public void setFieldPattern(String fieldPattern) {
+            this.fieldPattern = fieldPattern;
+        }
+
+        public String getTemplate() {
+            return template;
+        }
+
+        public void setTemplate(String template) {
+            this.template = template;
+        }
+
+        boolean matches(String tableName, String property, String column) {
+            if (!matchesPipePattern(tablePattern, firstNonBlank(tableName, ""))) {
+                return false;
+            }
+            return matchesPipePattern(fieldPattern, firstNonBlank(property, ""))
+                    || matchesPipePattern(fieldPattern, firstNonBlank(column, ""));
+        }
+
+        String render(String tableName, String property, String column) {
+            String resolvedTemplate = trimToNull(template);
+            if (resolvedTemplate == null) {
+                return null;
+            }
+            Map<String, String> variables = new LinkedHashMap<String, String>();
+            variables.put("table", firstNonBlank(tableName, ""));
+            variables.put("property", firstNonBlank(property, ""));
+            variables.put("column", firstNonBlank(column, ""));
+            String rendered = resolvedTemplate;
+            for (Map.Entry<String, String> entry : variables.entrySet()) {
+                rendered = rendered.replace("${" + entry.getKey() + "}", entry.getValue());
+            }
+            String normalizedRendered = trimToNull(rendered);
+            return normalizedRendered == null ? null : normalizedRendered;
+        }
+
+        private String firstNonBlank(String first, String second) {
+            return StringUtils.isNotBlank(first) ? first : second;
+        }
     }
 
     /**

@@ -102,6 +102,104 @@ public interface MigrationTaskFactory {
                                     Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
 
     /**
+     * Create one task for a registered entity using globally configured default cursor columns.
+     *
+     * @param entityType registered entity type
+     * @return executable migration task
+     */
+    MigrationTask createForEntity(Class<?> entityType);
+
+    /**
+     * Create one task for a registered table using globally configured default cursor columns.
+     *
+     * @param tableName physical table name
+     * @return executable migration task
+     */
+    MigrationTask createForTable(String tableName);
+
+    /**
+     * Create one task for a registered entity using globally configured default cursor columns.
+     *
+     * @param entityType registered entity type
+     * @param builderCustomizer optional builder customizer
+     * @return executable migration task
+     */
+    MigrationTask createForEntity(Class<?> entityType, Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
+
+    /**
+     * Create one task for a registered table using globally configured default cursor columns.
+     *
+     * @param tableName physical table name
+     * @param builderCustomizer optional builder customizer
+     * @return executable migration task
+     */
+    MigrationTask createForTable(String tableName, Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
+
+    /**
+     * Create tasks for all registered physical tables using globally configured default cursor columns.
+     *
+     * @return executable migration tasks
+     */
+    List<MigrationTask> createAllRegisteredTables();
+
+    /**
+     * Create tasks for all registered physical tables using globally configured default cursor columns.
+     *
+     * @param builderCustomizer optional builder customizer applied to each task
+     * @return executable migration tasks
+     */
+    List<MigrationTask> createAllRegisteredTables(Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
+
+    /**
+     * Create and execute one task for a registered entity using globally configured default cursor columns.
+     *
+     * @param entityType registered entity type
+     * @return final migration report
+     */
+    MigrationReport executeForEntity(Class<?> entityType);
+
+    /**
+     * Create and execute one task for a registered entity using globally configured default cursor columns.
+     *
+     * @param entityType registered entity type
+     * @param builderCustomizer optional builder customizer
+     * @return final migration report
+     */
+    MigrationReport executeForEntity(Class<?> entityType, Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
+
+    /**
+     * Create and execute one task for a registered table using globally configured default cursor columns.
+     *
+     * @param tableName physical table name
+     * @return final migration report
+     */
+    MigrationReport executeForTable(String tableName);
+
+    /**
+     * Create and execute one task for a registered table using globally configured default cursor columns.
+     *
+     * @param tableName physical table name
+     * @param builderCustomizer optional builder customizer
+     * @return final migration report
+     */
+    MigrationReport executeForTable(String tableName, Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
+
+    /**
+     * Execute all registered physical tables using globally configured default cursor columns.
+     *
+     * @return final migration reports
+     */
+    List<MigrationReport> executeAllRegisteredTables();
+
+    /**
+     * Execute all registered physical tables using globally configured default cursor columns.
+     *
+     * @param builderCustomizer optional builder customizer applied to each task
+     * @return final migration reports
+     */
+    List<MigrationReport> executeAllRegisteredTables(Consumer<EntityMigrationDefinition.Builder> builderCustomizer);
+
+    /**
      * Create one task for a registered entity using one stable cursor column.
      *
      * @param entityType registered entity type

@@ -9,6 +9,7 @@ import java.util.List;
  */
 public final class EntityMigrationPlan {
 
+    private final String dataSourceName;
     private final Class<?> entityType;
     private final String entityName;
     private final String tableName;
@@ -28,13 +29,15 @@ public final class EntityMigrationPlan {
      * @param verifyAfterWrite whether write-after verification is enabled
      * @param columnPlans immutable column migration plans
      */
-    public EntityMigrationPlan(Class<?> entityType,
+    public EntityMigrationPlan(String dataSourceName,
+                               Class<?> entityType,
                                String entityName,
                                String tableName,
                                List<String> cursorColumns,
                                int batchSize,
                                boolean verifyAfterWrite,
                                List<EntityMigrationColumnPlan> columnPlans) {
+        this.dataSourceName = dataSourceName;
         this.entityType = entityType;
         this.entityName = entityName;
         this.tableName = tableName;
@@ -45,12 +48,42 @@ public final class EntityMigrationPlan {
     }
 
     /**
+     * Create one immutable entity migration plan.
+     *
+     * @param entityType registered entity type, or {@code null} for table-driven tasks
+     * @param entityName entity or task display name
+     * @param tableName normalized main-table name
+     * @param cursorColumns ordered stable cursor columns in the main table
+     * @param batchSize migration batch size
+     * @param verifyAfterWrite whether write-after verification is enabled
+     * @param columnPlans immutable column migration plans
+     */
+    public EntityMigrationPlan(Class<?> entityType,
+                               String entityName,
+                               String tableName,
+                               List<String> cursorColumns,
+                               int batchSize,
+                               boolean verifyAfterWrite,
+                               List<EntityMigrationColumnPlan> columnPlans) {
+        this(null, entityType, entityName, tableName, cursorColumns, batchSize, verifyAfterWrite, columnPlans);
+    }
+
+    /**
      * Return the registered entity type.
      *
      * @return entity type
      */
     public Class<?> getEntityType() {
         return entityType;
+    }
+
+    /**
+     * Return the bound data source name when the task is created from a global routing factory.
+     *
+     * @return data source name, or {@code null}
+     */
+    public String getDataSourceName() {
+        return dataSourceName;
     }
 
     /**

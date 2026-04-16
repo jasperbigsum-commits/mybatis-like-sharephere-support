@@ -11,6 +11,7 @@ import java.util.Map;
  */
 public final class MigrationReport {
 
+    private final String dataSourceName;
     private final String entityName;
     private final String tableName;
     private final MigrationStatus status;
@@ -53,7 +54,7 @@ public final class MigrationReport {
                            long migratedRows,
                            long skippedRows,
                            long verifiedRows) {
-        this(entityName, tableName, status, totalRows, Collections.emptyList(), Collections.emptyList(),
+        this(null, entityName, tableName, status, totalRows, Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(), rangeStart, rangeEnd,
                 lastProcessedCursor, scannedRows, migratedRows, skippedRows, verifiedRows);
     }
@@ -92,6 +93,48 @@ public final class MigrationReport {
                            long migratedRows,
                            long skippedRows,
                            long verifiedRows) {
+        this(null, entityName, tableName, status, totalRows, cursorColumns, rangeStartValues, rangeEndValues,
+                lastProcessedCursorValues, rangeStart, rangeEnd, lastProcessedCursor,
+                scannedRows, migratedRows, skippedRows, verifiedRows);
+    }
+
+    /**
+     * Create one immutable migration progress snapshot.
+     *
+     * @param dataSourceName data source name
+     * @param entityName entity simple name
+     * @param tableName main-table name
+     * @param status current task status
+     * @param totalRows total rows in task range
+     * @param cursorColumns ordered cursor columns in the main table
+     * @param rangeStartValues serialized smallest cursor values in task range
+     * @param rangeEndValues serialized greatest cursor values in task range
+     * @param lastProcessedCursorValues serialized latest committed cursor checkpoint
+     * @param rangeStart smallest cursor in task range
+     * @param rangeEnd greatest cursor in task range
+     * @param lastProcessedCursor latest committed cursor checkpoint
+     * @param scannedRows scanned row count
+     * @param migratedRows migrated row count
+     * @param skippedRows skipped row count
+     * @param verifiedRows verified row count
+     */
+    public MigrationReport(String dataSourceName,
+                           String entityName,
+                           String tableName,
+                           MigrationStatus status,
+                           long totalRows,
+                           List<String> cursorColumns,
+                           List<String> rangeStartValues,
+                           List<String> rangeEndValues,
+                           List<String> lastProcessedCursorValues,
+                           String rangeStart,
+                           String rangeEnd,
+                           String lastProcessedCursor,
+                           long scannedRows,
+                           long migratedRows,
+                           long skippedRows,
+                           long verifiedRows) {
+        this.dataSourceName = dataSourceName;
         this.entityName = entityName;
         this.tableName = tableName;
         this.status = status;
@@ -107,6 +150,15 @@ public final class MigrationReport {
         this.migratedRows = migratedRows;
         this.skippedRows = skippedRows;
         this.verifiedRows = verifiedRows;
+    }
+
+    /**
+     * Return the bound data source name when present.
+     *
+     * @return data source name, or {@code null}
+     */
+    public String getDataSourceName() {
+        return dataSourceName;
     }
 
     /**

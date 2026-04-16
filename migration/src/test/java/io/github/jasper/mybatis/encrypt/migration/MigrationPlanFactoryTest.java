@@ -1,5 +1,6 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
+import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -68,5 +69,34 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
 
         assertEquals(MigrationErrorCode.METADATA_RULE_MISSING, exception.getErrorCode());
         assertTrue(exception.getMessage().contains("Missing registered table encryption rule"));
+    }
+
+    @Test
+    void shouldApplyBackupColumnTemplateRuleForOverwriteField() {
+        DatabaseEncryptionProperties properties = properties();
+        DatabaseEncryptionProperties.BackupColumnTemplateRuleProperties templateRule =
+                new DatabaseEncryptionProperties.BackupColumnTemplateRuleProperties();
+        templateRule.setTablePattern("user_account");
+        templateRule.setFieldPattern("phone");
+        templateRule.setTemplate("${column}_backup");
+        properties.getMigration().getBackupColumnTemplates().add(templateRule);
+
+        EntityMigrationPlan plan = new EntityMigrationPlanFactory(metadataRegistry(), properties).create(
+                EntityMigrationDefinition.builder(HashOverwriteUserEntity.class, "id").build());
+
+        assertEquals("phone_backup", plan.getColumnPlans().get(0).getBackupColumn());
+    }
+
+    @Test
+    void shouldRejectExcludedMigrationTable() {
+        DatabaseEncryptionProperties properties = properties();
+        properties.getMigration().getExcludeTables().add("user_account|user_archive_*");
+
+        MigrationDefinitionException exception = assertThrows(MigrationDefinitionException.class, () ->
+                new EntityMigrationPlanFactory(metadataRegistry(), properties).create(
+                        EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build()));
+
+        assertEquals(MigrationErrorCode.TABLE_EXCLUDED, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("excluded"));
     }
 }

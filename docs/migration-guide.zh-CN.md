@@ -67,9 +67,11 @@ MigrationReport report = task.execute();
 
 - `MigrationTaskFactory`
 - `MigrationStateStore`
-  默认实现是 `InMemoryMigrationStateStore`
+  默认实现是 `FileMigrationStateStore`
 - `MigrationConfirmationPolicy`
   默认实现是 `AllowAllMigrationConfirmationPolicy`
+- `GlobalMigrationTaskFactory`
+  多数据源场景下按 datasource 名称路由迁移任务
 
 最小使用示例：
 
@@ -98,6 +100,67 @@ public class UserAccountMigrationRunner {
 `builder` 中和字段选择相关的参数现在既可以传加密属性名，也可以直接传主表源列名。
 例如 `backupColumn("idCard", "id_card_backup")` 与 `backupColumnByColumn("id_card", "id_card_backup")` 都可用。
 
+如果应用里有多个 JDBC 数据源，推荐注入 `GlobalMigrationTaskFactory`：
+
+```java
+@Service
+public class ArchiveMigrationRunner {
+
+    private final GlobalMigrationTaskFactory globalMigrationTaskFactory;
+
+    public ArchiveMigrationRunner(GlobalMigrationTaskFactory globalMigrationTaskFactory) {
+        this.globalMigrationTaskFactory = globalMigrationTaskFactory;
+    }
+
+    public MigrationReport migrateArchive() {
+        return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+迁移默认策略也可以走统一配置，减少每个任务重复写 builder：
+
+```yaml
+mybatis:
+  encrypt:
+    migration:
+      default-cursor-columns:
+        - id
+      checkpoint-directory: migration-state
+      batch-size: 500
+      verify-after-write: true
+      exclude-tables:
+        - "flyway_schema_history|undo_log"
+      backup-column-templates:
+        - table-pattern: "user_*"
+          field-pattern: "idCard|phone"
+          template: "${column}_backup"
+```
+
+规则说明：
+
+- `exclude-tables` 支持 `|` 分隔多个表名或通配模式，命中后直接抛出 `TABLE_EXCLUDED`
+- `backup-column-templates` 仅在字段会覆盖主表原列、且当前任务未显式指定 `backupColumn(...)` 时生效
+- `default-cursor-columns` 会被 `createForTable("user_account")`、`executeForEntity(UserAccount.class)` 和一键迁移入口自动复用
+- `checkpoint-directory` 是默认 checkpoint 持久化目录，starter 会直接落盘保存状态，不再使用内存状态
+- 模板支持 `${table}`、`${property}`、`${column}`
+
+如果想做到最简配置一键迁移，在规则已注册完成后可直接调用：
+
+```java
+List<MigrationReport> reports = migrationTaskFactory.executeAllRegisteredTables();
+```
+
+多数据源场景：
+
+```java
+List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredTables("archiveDs");
+```
+
+该入口按物理表名去重，同一张表即使同时来自注解扫描和外部表规则，也只会迁移一次。
+如果 checkpoint 回退到旧批次，writer 会按当前目标态做幂等判断，已完成记录会跳过而不会重复插入外表或再次覆盖主表。
+同一 `dataSource + entity/table` 任务并发启动时，会先争抢 checkpoint lock；未拿到锁的实例会直接以 `CHECKPOINT_LOCKED` 失败。
+
 如果你希望先构建任务，再决定执行时机：
 
 ```java
@@ -116,7 +179,7 @@ MigrationReport report = task.execute();
 - 非 Spring 场景、独立脚本或测试桩场景再使用 `JdbcMigrationTasks.create(...)`
 - 如果表没有单一 `id`，可以传入稳定有序的游标列组合，例如 `List.of("tenant_id", "created_at", "biz_no")`
 
-如果你希望把默认内存状态改成文件持久化，或者要求上线前必须确认风险范围，只需覆写对应 Bean：
+如果你希望修改默认 checkpoint 目录，或者要求上线前必须确认风险范围，只需覆写对应 Bean：
 
 ```java
 @Configuration
@@ -248,6 +311,8 @@ MigrationTask task = JdbcMigrationTasks.create(
 - `cursorJavaType` / `idJavaType`
 - `rangeStart` / `rangeEnd`
 - `lastProcessedCursor` / `lastProcessedId`
+
+如果任务来自 `GlobalMigrationTaskFactory`，状态文件和确认文件还会自动带上 datasource 名称前缀，避免多数据源下同名任务互相覆盖。
 
 样例：
 

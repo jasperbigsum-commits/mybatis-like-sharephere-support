@@ -9,6 +9,7 @@ import java.util.List;
  */
 public class MigrationState {
 
+    private String dataSourceName;
     private String entityName;
     private String tableName;
     private List<String> cursorColumns = Collections.emptyList();
@@ -32,6 +33,24 @@ public class MigrationState {
      */
     public String getEntityName() {
         return entityName;
+    }
+
+    /**
+     * Return the bound data source name.
+     *
+     * @return data source name
+     */
+    public String getDataSourceName() {
+        return dataSourceName;
+    }
+
+    /**
+     * Set the bound data source name.
+     *
+     * @param dataSourceName data source name
+     */
+    public void setDataSourceName(String dataSourceName) {
+        this.dataSourceName = dataSourceName;
     }
 
     /**
@@ -457,7 +476,7 @@ public class MigrationState {
      * @return migration report
      */
     public MigrationReport toReport() {
-        return new MigrationReport(entityName, tableName, status, totalRows, cursorColumns, rangeStartValues,
+        return new MigrationReport(dataSourceName, entityName, tableName, status, totalRows, cursorColumns, rangeStartValues,
                 rangeEndValues, lastProcessedCursorValues, getRangeStart(), getRangeEnd(), getLastProcessedCursor(),
                 scannedRows, migratedRows, skippedRows, verifiedRows);
     }

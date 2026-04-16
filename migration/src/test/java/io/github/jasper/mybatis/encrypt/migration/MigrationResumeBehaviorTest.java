@@ -184,4 +184,42 @@ class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
         assertEquals("{tenant_id=tenantB, record_no=1}", report.getLastProcessedCursor());
         assertEquals(expectedLastProcessed, report.getLastProcessedCursorMap());
     }
+
+    @Test
+    void shouldRejectConcurrentExecutionWhenCheckpointLockIsHeld() throws Exception {
+        DataSource dataSource = newDataSource("resume_lock");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')");
+
+        DatabaseEncryptionProperties properties = properties();
+        EncryptMetadataRegistry metadataRegistry = metadataRegistry();
+        AlgorithmRegistry algorithmRegistry = algorithmRegistry();
+        Path stateDir = createTempDirectory("migration-state-lock");
+        FileMigrationStateStore stateStore = new FileMigrationStateStore(stateDir);
+        EntityMigrationPlan plan = new EntityMigrationPlanFactory(metadataRegistry)
+                .create(EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build());
+        JdbcMigrationRecordReader reader = new JdbcMigrationRecordReader(properties);
+        JdbcMigrationRecordVerifier verifier = new JdbcMigrationRecordVerifier(properties, algorithmRegistry);
+        JdbcEntityMigrationTask task = new JdbcEntityMigrationTask(
+                dataSource,
+                plan,
+                reader,
+                reader,
+                new JdbcMigrationRecordWriter(properties, algorithmRegistry, new SnowflakeReferenceIdGenerator()),
+                verifier,
+                stateStore,
+                AllowAllMigrationConfirmationPolicy.INSTANCE
+        );
+
+        try (MigrationCheckpointLock ignored = stateStore.acquireCheckpointLock(plan)) {
+            MigrationCheckpointLockException exception = assertThrows(MigrationCheckpointLockException.class, task::execute);
+            assertEquals(MigrationErrorCode.CHECKPOINT_LOCKED, exception.getErrorCode());
+        }
+    }
 }

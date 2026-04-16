@@ -133,6 +133,26 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+In multi-datasource setups you can keep one global default dialect and override it by datasource bean name.
+`datasource-name-pattern` supports pipe-separated names or wildcard expressions:
+
+```yaml
+mybatis:
+  encrypt:
+    sql-dialect: MYSQL
+    datasource-dialects:
+      - datasource-name-pattern: "dmPrimary|dmArchive-*"
+        sql-dialect: DM
+      - datasource-name-pattern: "oracle-report"
+        sql-dialect: ORACLE12
+```
+
+Notes:
+
+- unmatched datasources fall back to the global `sql-dialect`
+- `*` matches any character sequence and `?` matches one character
+- the runtime interceptor, separate-table support, and migration module share the same resolver
+
 If the project already uses the Spring Boot starter, prefer injecting `MigrationTaskFactory` directly instead of assembling all migration infrastructure dependencies in business code:
 
 ```java
@@ -165,11 +185,13 @@ Auto-configuration provides these defaults:
 
 - `MigrationTaskFactory`
 - `MigrationStateStore`
-  default: `InMemoryMigrationStateStore`
+  default: `FileMigrationStateStore`
 - `MigrationConfirmationPolicy`
   default: `AllowAllMigrationConfirmationPolicy`
+- `GlobalMigrationTaskFactory`
+  routes to a concrete datasource-scoped migration factory in multi-datasource applications
 
-If you want file-backed checkpoints or explicit operator confirmation, override those beans and `MigrationTaskFactory` will reuse them automatically:
+If you want to change the default checkpoint directory or require explicit operator confirmation, override those beans and `MigrationTaskFactory` will reuse them automatically:
 
 ```java
 @Configuration
@@ -187,9 +209,71 @@ public class MigrationSupportConfiguration {
 }
 ```
 
+If the application has multiple JDBC datasources, inject `GlobalMigrationTaskFactory` directly:
+
+```java
+@Service
+public class ArchiveMigrationRunner {
+
+    private final GlobalMigrationTaskFactory globalMigrationTaskFactory;
+
+    public ArchiveMigrationRunner(GlobalMigrationTaskFactory globalMigrationTaskFactory) {
+        this.globalMigrationTaskFactory = globalMigrationTaskFactory;
+    }
+
+    public MigrationReport migrateArchive() {
+        return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+Migration defaults can also be declared once in configuration instead of being repeated in every builder:
+
+```yaml
+mybatis:
+  encrypt:
+    migration:
+      default-cursor-columns:
+        - id
+      checkpoint-directory: migration-state
+      batch-size: 500
+      verify-after-write: true
+      exclude-tables:
+        - "flyway_schema_history|undo_log"
+      backup-column-templates:
+        - table-pattern: "user_*"
+          field-pattern: "idCard|phone"
+          template: "${column}_backup"
+```
+
+Notes:
+
+- tasks that hit `exclude-tables` fail fast with `TABLE_EXCLUDED`
+- `backup-column-templates` apply only when a field overwrites the source plaintext column and no explicit `backupColumn(...)` is provided
+- `default-cursor-columns` are reused by `MigrationTaskFactory.createForTable("user_account")`, `executeForEntity(UserAccount.class)`, and the one-click entry
+- `checkpoint-directory` is the default persistent checkpoint directory; the starter now uses file-backed state storage instead of in-memory state
+- templates support `${table}`, `${property}`, and `${column}`
+
+If you want the simplest possible full migration after rules are registered, call:
+
+```java
+List<MigrationReport> reports = migrationTaskFactory.executeAllRegisteredTables();
+```
+
+For multi-datasource applications:
+
+```java
+List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredTables("archiveDs");
+```
+
+This entry deduplicates by physical table name, so the same table is migrated only once even if it is discovered from both annotation scanning and external table rules.
+Even when a checkpoint falls behind a committed batch, the writer replays idempotently and skips rows that already match the target state instead of inserting duplicate external rows or overwriting the main table again.
+When the same `dataSource + entity/table` migration task is started concurrently, instances compete for a checkpoint lock first; losers fail fast with `CHECKPOINT_LOCKED` so the task cannot run twice in parallel.
+
 State files now persist general cursor fields such as `cursorColumns.*`, `cursorJavaTypes.*`,
 `rangeStartValues.*`, `rangeEndValues.*`, and `lastProcessedCursorValues.*`.
 For single-column cursors, compatibility aliases like `idColumn` and `lastProcessedId` are still written.
+When a task comes from `GlobalMigrationTaskFactory`, state and confirmation filenames are prefixed with the datasource name to avoid collisions between similarly named tasks.
 
 ## Confirmation before mutation
 

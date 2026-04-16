@@ -9,6 +9,7 @@ import java.util.List;
  */
 public final class MigrationRiskManifest {
 
+    private final String dataSourceName;
     private final String entityName;
     private final String tableName;
     private final List<String> cursorColumns;
@@ -22,10 +23,12 @@ public final class MigrationRiskManifest {
      * @param cursorColumns ordered cursor columns in the main table
      * @param entries affected mutation entries
      */
-    public MigrationRiskManifest(String entityName,
+    public MigrationRiskManifest(String dataSourceName,
+                                 String entityName,
                                  String tableName,
                                  List<String> cursorColumns,
                                  List<MigrationRiskEntry> entries) {
+        this.dataSourceName = dataSourceName;
         this.entityName = entityName;
         this.tableName = tableName;
         this.cursorColumns = cursorColumns == null
@@ -41,6 +44,15 @@ public final class MigrationRiskManifest {
      */
     public String getEntityName() {
         return entityName;
+    }
+
+    /**
+     * Return the bound data source name when present.
+     *
+     * @return data source name, or {@code null}
+     */
+    public String getDataSourceName() {
+        return dataSourceName;
     }
 
     /**

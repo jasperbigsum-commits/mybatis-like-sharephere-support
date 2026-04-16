@@ -36,7 +36,7 @@ public final class JdbcMigrationTasks {
                                        AlgorithmRegistry algorithmRegistry,
                                        DatabaseEncryptionProperties properties,
                                        MigrationStateStore stateStore) {
-        return create(dataSource, definition, metadataRegistry, algorithmRegistry, properties, stateStore,
+        return create(dataSource, null, definition, metadataRegistry, algorithmRegistry, properties, stateStore,
                 AllowAllMigrationConfirmationPolicy.INSTANCE);
     }
 
@@ -59,10 +59,37 @@ public final class JdbcMigrationTasks {
                                        DatabaseEncryptionProperties properties,
                                        MigrationStateStore stateStore,
                                        MigrationConfirmationPolicy confirmationPolicy) {
-        EntityMigrationPlan plan = new EntityMigrationPlanFactory(metadataRegistry).create(definition);
+        return create(dataSource, null, definition, metadataRegistry, algorithmRegistry, properties, stateStore,
+                confirmationPolicy);
+    }
+
+    /**
+     * Create the default standalone JDBC migration task with a named data source.
+     *
+     * @param dataSource JDBC data source
+     * @param dataSourceName JDBC 数据源名称
+     * @param definition user-facing task definition
+     * @param metadataRegistry encryption metadata registry
+     * @param algorithmRegistry algorithm registry
+     * @param properties SQL dialect and encryption properties
+     * @param stateStore checkpoint state store
+     * @param confirmationPolicy risk confirmation policy
+     * @return executable migration task
+     */
+    public static MigrationTask create(DataSource dataSource,
+                                       String dataSourceName,
+                                       EntityMigrationDefinition definition,
+                                       EncryptMetadataRegistry metadataRegistry,
+                                       AlgorithmRegistry algorithmRegistry,
+                                       DatabaseEncryptionProperties properties,
+                                       MigrationStateStore stateStore,
+                                       MigrationConfirmationPolicy confirmationPolicy) {
+        EntityMigrationPlan plan = new EntityMigrationPlanFactory(metadataRegistry, properties)
+                .create(definition, dataSourceName);
         JdbcMigrationRecordReader recordReader = new JdbcMigrationRecordReader(properties);
         return new JdbcEntityMigrationTask(
                 dataSource,
+                dataSourceName,
                 plan,
                 recordReader,
                 recordReader,

@@ -10,6 +10,8 @@ import org.apache.ibatis.mapping.ResultMap;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -86,6 +88,15 @@ public class EncryptMetadataRegistry {
      */
     public void registerEntityType(Class<?> entityType) {
         findByEntity(entityType);
+    }
+
+    /**
+     * 返回当前已注册的物理表名快照。
+     *
+     * @return 已注册物理表名
+     */
+    public Set<String> getRegisteredTableNames() {
+        return new LinkedHashSet<String>(tableRules.keySet());
     }
 
     /**

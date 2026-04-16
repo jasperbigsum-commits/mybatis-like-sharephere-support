@@ -1,7 +1,9 @@
 package io.github.jasper.mybatis.encrypt.plugin;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.config.SqlDialectContextHolder;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
+import io.github.jasper.mybatis.encrypt.core.support.DataSourceNameResolver;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
@@ -52,6 +54,30 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     private final DatabaseEncryptionProperties properties;
     private final SeparateTableEncryptionManager separateTableEncryptionManager;
     private final EncryptMetadataRegistry metadataRegistry;
+    private final DataSourceNameResolver dataSourceNameResolver;
+
+    /**
+     * 创建 MyBatis 加密拦截器。
+     *
+     * @param sqlRewriteEngine SQL 改写引擎
+     * @param resultDecryptor 查询结果解密器
+     * @param properties 插件配置属性
+     * @param separateTableEncryptionManager 独立表加密管理器
+     * @param metadataRegistry 加密元数据注册中心
+     */
+    public DatabaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
+                                         ResultDecryptor resultDecryptor,
+                                         DatabaseEncryptionProperties properties,
+                                         SeparateTableEncryptionManager separateTableEncryptionManager,
+                                         EncryptMetadataRegistry metadataRegistry,
+                                         DataSourceNameResolver dataSourceNameResolver) {
+        this.sqlRewriteEngine = sqlRewriteEngine;
+        this.resultDecryptor = resultDecryptor;
+        this.properties = properties;
+        this.separateTableEncryptionManager = separateTableEncryptionManager;
+        this.metadataRegistry = metadataRegistry;
+        this.dataSourceNameResolver = dataSourceNameResolver;
+    }
 
     /**
      * 创建 MyBatis 加密拦截器。
@@ -67,11 +93,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
                                          DatabaseEncryptionProperties properties,
                                          SeparateTableEncryptionManager separateTableEncryptionManager,
                                          EncryptMetadataRegistry metadataRegistry) {
-        this.sqlRewriteEngine = sqlRewriteEngine;
-        this.resultDecryptor = resultDecryptor;
-        this.properties = properties;
-        this.separateTableEncryptionManager = separateTableEncryptionManager;
-        this.metadataRegistry = metadataRegistry;
+        this(sqlRewriteEngine, resultDecryptor, properties, separateTableEncryptionManager, metadataRegistry, null);
     }
 
     @Override
@@ -106,37 +128,41 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (DefaultSeparateTableRowPersister.isManagedStatementId(mappedStatement.getId())) {
             return invocation.proceed();
         }
-        Executor executor = (Executor) invocation.getTarget();
-        Object parameterObject = args.length > 1 ? args[1] : null;
-        BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
-        MappedStatement rewrittenStatement = rewriteMappedStatement(executor, mappedStatement, boundSql);
-        if (rewrittenStatement != mappedStatement) {
-            args[0] = rewrittenStatement;
-            if (args.length == 6) {
-                args[5] = boundSql;
+        try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolveDataSourceName(mappedStatement))) {
+            Executor executor = (Executor) invocation.getTarget();
+            Object parameterObject = args.length > 1 ? args[1] : null;
+            BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
+            MappedStatement rewrittenStatement = rewriteMappedStatement(executor, mappedStatement, boundSql);
+            if (rewrittenStatement != mappedStatement) {
+                args[0] = rewrittenStatement;
+                if (args.length == 6) {
+                    args[5] = boundSql;
+                }
             }
+            return invocation.proceed();
         }
-        return invocation.proceed();
     }
 
     private Object interceptResultSet(Invocation invocation) throws Throwable {
         MappedStatement mappedStatement = resolveResultSetMappedStatement(invocation.getTarget());
         BoundSql boundSql = resolveResultSetBoundSql(invocation.getTarget());
-        boolean queryScopeOpened = false;
-        if (mappedStatement != null) {
-            resultDecryptor.beginQueryScope(mappedStatement, boundSql);
-            if (separateTableEncryptionManager != null) {
-                separateTableEncryptionManager.beginQueryScope();
-            }
-            queryScopeOpened = true;
-        }
-        try {
-            return resultDecryptor.decrypt(invocation.proceed());
-        } finally {
-            if (queryScopeOpened) {
-                resultDecryptor.endQueryScope();
+        try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolveDataSourceName(mappedStatement))) {
+            boolean queryScopeOpened = false;
+            if (mappedStatement != null) {
+                resultDecryptor.beginQueryScope(mappedStatement, boundSql);
                 if (separateTableEncryptionManager != null) {
-                    separateTableEncryptionManager.endQueryScope();
+                    separateTableEncryptionManager.beginQueryScope();
+                }
+                queryScopeOpened = true;
+            }
+            try {
+                return resultDecryptor.decrypt(invocation.proceed());
+            } finally {
+                if (queryScopeOpened) {
+                    resultDecryptor.endQueryScope();
+                    if (separateTableEncryptionManager != null) {
+                        separateTableEncryptionManager.endQueryScope();
+                    }
                 }
             }
         }
@@ -401,6 +427,10 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         String leaf = dotIndex >= 0 ? property.substring(dotIndex + 1) : name;
         int bracketIndex = leaf.indexOf('[');
         return bracketIndex >= 0 ? leaf.substring(0, bracketIndex) : leaf;
+    }
+
+    private String resolveDataSourceName(MappedStatement mappedStatement) {
+        return dataSourceNameResolver == null ? null : dataSourceNameResolver.resolve(mappedStatement);
     }
 
     /**

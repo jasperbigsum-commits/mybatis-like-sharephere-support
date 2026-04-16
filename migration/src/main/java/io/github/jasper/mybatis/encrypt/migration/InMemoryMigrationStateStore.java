@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentMap;
 public class InMemoryMigrationStateStore implements MigrationStateStore {
 
     private final ConcurrentMap<String, MigrationState> states = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Boolean> locks = new ConcurrentHashMap<String, Boolean>();
 
     @Override
     public Optional<MigrationState> load(EntityMigrationPlan plan) {
@@ -22,12 +23,34 @@ public class InMemoryMigrationStateStore implements MigrationStateStore {
         states.put(keyOf(plan), copyOf(state));
     }
 
+    @Override
+    public MigrationCheckpointLock acquireCheckpointLock(EntityMigrationPlan plan) {
+        String key = keyOf(plan);
+        if (locks.putIfAbsent(key, Boolean.TRUE) != null) {
+            throw new MigrationCheckpointLockException(MigrationErrorCode.CHECKPOINT_LOCKED,
+                    "Migration checkpoint lock is already held for task: " + key);
+        }
+        return new MigrationCheckpointLock() {
+            private boolean closed;
+
+            @Override
+            public void close() {
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                locks.remove(key);
+            }
+        };
+    }
+
     private String keyOf(EntityMigrationPlan plan) {
         return plan.getEntityName() + "::" + plan.getTableName();
     }
 
     private MigrationState copyOf(MigrationState source) {
         MigrationState target = new MigrationState();
+        target.setDataSourceName(source.getDataSourceName());
         target.setEntityName(source.getEntityName());
         target.setTableName(source.getTableName());
         target.setCursorColumns(source.getCursorColumns());

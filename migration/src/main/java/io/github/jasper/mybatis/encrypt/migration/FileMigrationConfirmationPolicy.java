@@ -70,6 +70,9 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
         }
         Properties properties = new Properties();
         properties.setProperty("approved", Boolean.toString(approved));
+        if (manifest.getDataSourceName() != null) {
+            properties.setProperty("dataSourceName", manifest.getDataSourceName());
+        }
         properties.setProperty("entityName", manifest.getEntityName());
         properties.setProperty("tableName", manifest.getTableName());
         for (int index = 0; index < manifest.getCursorColumns().size(); index++) {
@@ -88,10 +91,14 @@ public class FileMigrationConfirmationPolicy implements MigrationConfirmationPol
     }
 
     private Path confirmationFile(EntityMigrationPlan plan) {
-        String fileName = plan.getEntityName().replaceAll("[^a-zA-Z0-9._-]", "_")
-                + "__" + plan.getTableName().replaceAll("[^a-zA-Z0-9._-]", "_")
-                + ".confirm.properties";
-        return directory.resolve(fileName);
+        StringBuilder fileName = new StringBuilder();
+        if (plan.getDataSourceName() != null && !plan.getDataSourceName().trim().isEmpty()) {
+            fileName.append(plan.getDataSourceName().replaceAll("[^a-zA-Z0-9._-]", "_")).append("__");
+        }
+        fileName.append(plan.getEntityName().replaceAll("[^a-zA-Z0-9._-]", "_"))
+                .append("__").append(plan.getTableName().replaceAll("[^a-zA-Z0-9._-]", "_"))
+                .append(".confirm.properties");
+        return directory.resolve(fileName.toString());
     }
 
     private java.util.List<String> readIndexedValues(Properties properties, String prefix) {

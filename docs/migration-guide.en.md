@@ -67,9 +67,11 @@ Auto-configuration provides these beans by default:
 
 - `MigrationTaskFactory`
 - `MigrationStateStore`
-  default implementation: `InMemoryMigrationStateStore`
+  default implementation: `FileMigrationStateStore`
 - `MigrationConfirmationPolicy`
   default implementation: `AllowAllMigrationConfirmationPolicy`
+- `GlobalMigrationTaskFactory`
+  routes migration tasks by datasource name in multi-datasource applications
 
 Minimal example:
 
@@ -99,6 +101,67 @@ Field-related builder selectors now accept either the encrypt property name or t
 For example, both `backupColumn("idCard", "id_card_backup")` and
 `backupColumnByColumn("id_card", "id_card_backup")` are supported.
 
+If the application has multiple JDBC datasources, prefer injecting `GlobalMigrationTaskFactory`:
+
+```java
+@Service
+public class ArchiveMigrationRunner {
+
+    private final GlobalMigrationTaskFactory globalMigrationTaskFactory;
+
+    public ArchiveMigrationRunner(GlobalMigrationTaskFactory globalMigrationTaskFactory) {
+        this.globalMigrationTaskFactory = globalMigrationTaskFactory;
+    }
+
+    public MigrationReport migrateArchive() {
+        return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+Migration defaults can also be declared once in configuration:
+
+```yaml
+mybatis:
+  encrypt:
+    migration:
+      default-cursor-columns:
+        - id
+      checkpoint-directory: migration-state
+      batch-size: 500
+      verify-after-write: true
+      exclude-tables:
+        - "flyway_schema_history|undo_log"
+      backup-column-templates:
+        - table-pattern: "user_*"
+          field-pattern: "idCard|phone"
+          template: "${column}_backup"
+```
+
+Rule notes:
+
+- `exclude-tables` supports pipe-separated table names or wildcard patterns and fails fast with `TABLE_EXCLUDED`
+- `backup-column-templates` apply only when a field overwrites the main-table source column and no explicit `backupColumn(...)` is present
+- `default-cursor-columns` are reused automatically by `createForTable("user_account")`, `executeForEntity(UserAccount.class)`, and the one-click entry
+- `checkpoint-directory` is the default persistent checkpoint directory; the starter now stores migration state on disk instead of in memory
+- templates support `${table}`, `${property}`, and `${column}`
+
+If you want the simplest one-click migration after rules are registered, call:
+
+```java
+List<MigrationReport> reports = migrationTaskFactory.executeAllRegisteredTables();
+```
+
+For multi-datasource applications:
+
+```java
+List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredTables("archiveDs");
+```
+
+This entry deduplicates by physical table name, so the same table is migrated only once even when it comes from both annotation scanning and external table rules.
+If a checkpoint falls behind a committed batch, the writer replays idempotently and skips rows that already match the target state instead of inserting duplicate external rows or overwriting the main table again.
+When the same `dataSource + entity/table` task starts concurrently, instances first compete for a checkpoint lock; the losers fail fast with `CHECKPOINT_LOCKED`.
+
 If you want to build the task first and execute it later:
 
 ```java
@@ -117,7 +180,7 @@ Notes:
 - Use `JdbcMigrationTasks.create(...)` in standalone scripts, non-Spring programs, or focused tests
 - If a table has no single `id`, pass an ordered stable cursor set such as `List.of("tenant_id", "created_at", "biz_no")`
 
-If you want file-backed checkpoints or mandatory operator confirmation, override the corresponding beans:
+If you want to change the default checkpoint directory or require mandatory operator confirmation, override the corresponding beans:
 
 ```java
 @Configuration
@@ -238,6 +301,8 @@ State files store:
 - `rangeStartValues.*`
 - `rangeEndValues.*`
 - `lastProcessedCursorValues.*`
+
+When the task comes from `GlobalMigrationTaskFactory`, state and confirmation filenames are also prefixed with the datasource name so similarly named tasks from different datasources do not overwrite each other.
 - `scannedRows`
 - `migratedRows`
 - `skippedRows`

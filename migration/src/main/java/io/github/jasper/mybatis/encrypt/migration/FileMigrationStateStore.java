@@ -5,7 +5,12 @@ import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.Properties;
@@ -35,6 +40,7 @@ public class FileMigrationStateStore implements MigrationStateStore {
         try (InputStream inputStream = Files.newInputStream(file)) {
             properties.load(inputStream);
             MigrationState state = new MigrationState();
+            state.setDataSourceName(properties.getProperty("dataSourceName"));
             state.setEntityName(properties.getProperty("entityName"));
             state.setTableName(properties.getProperty("tableName"));
             state.setCursorColumns(readIndexedList(properties, "cursorColumns",
@@ -72,6 +78,7 @@ public class FileMigrationStateStore implements MigrationStateStore {
                     "Failed to create migration state directory: " + directory, ex);
         }
         Properties properties = new Properties();
+        writeIfPresent(properties, "dataSourceName", state.getDataSourceName());
         writeIfPresent(properties, "entityName", state.getEntityName());
         writeIfPresent(properties, "tableName", state.getTableName());
         writeIndexedList(properties, "cursorColumns", state.getCursorColumns());
@@ -105,17 +112,78 @@ public class FileMigrationStateStore implements MigrationStateStore {
         properties.setProperty("verifiedRows", Long.toString(state.getVerifiedRows()));
         properties.setProperty("verificationEnabled", Boolean.toString(state.isVerificationEnabled()));
         writeIfPresent(properties, "lastError", state.getLastError());
-        try (OutputStream outputStream = Files.newOutputStream(fileOf(plan))) {
+        Path targetFile = fileOf(plan);
+        Path tempFile = targetFile.resolveSibling(targetFile.getFileName().toString() + ".tmp");
+        try (OutputStream outputStream = Files.newOutputStream(tempFile)) {
             properties.store(outputStream, "mybatis-like-sharephere-support migration state");
+            outputStream.flush();
         } catch (IOException ex) {
             throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
                     "Failed to save migration state for table: " + plan.getTableName(), ex);
         }
+        try {
+            Files.move(tempFile, targetFile,
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException ex) {
+            try {
+                Files.move(tempFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveEx) {
+                throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
+                        "Failed to save migration state for table: " + plan.getTableName(), moveEx);
+            }
+        }
+    }
+
+    @Override
+    public MigrationCheckpointLock acquireCheckpointLock(EntityMigrationPlan plan) {
+        try {
+            Files.createDirectories(directory);
+        } catch (IOException ex) {
+            throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
+                    "Failed to create migration state directory: " + directory, ex);
+        }
+        Path lockFile = lockFileOf(plan);
+        try {
+            FileChannel channel = FileChannel.open(lockFile,
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+            FileLock fileLock;
+            try {
+                fileLock = channel.tryLock();
+            } catch (OverlappingFileLockException ex) {
+                closeQuietly(channel);
+                throw new MigrationCheckpointLockException(MigrationErrorCode.CHECKPOINT_LOCKED,
+                        "Migration checkpoint lock is already held for task: " + lockFile, ex);
+            }
+            if (fileLock == null) {
+                closeQuietly(channel);
+                throw new MigrationCheckpointLockException(MigrationErrorCode.CHECKPOINT_LOCKED,
+                        "Migration checkpoint lock is already held for task: " + lockFile);
+            }
+            return new FileCheckpointLock(lockFile, channel, fileLock);
+        } catch (MigrationCheckpointLockException ex) {
+            throw ex;
+        } catch (IOException ex) {
+            throw new MigrationStateStoreException(MigrationErrorCode.STATE_STORE_IO_FAILED,
+                    "Failed to acquire migration checkpoint lock for table: " + plan.getTableName(), ex);
+        }
     }
 
     private Path fileOf(EntityMigrationPlan plan) {
-        String name = sanitize(plan.getEntityName()) + "__" + sanitize(plan.getTableName()) + ".properties";
-        return directory.resolve(name);
+        StringBuilder name = new StringBuilder();
+        if (StringUtils.isNotBlank(plan.getDataSourceName())) {
+            name.append(sanitize(plan.getDataSourceName())).append("__");
+        }
+        name.append(sanitize(plan.getEntityName())).append("__").append(sanitize(plan.getTableName())).append(".properties");
+        return directory.resolve(name.toString());
+    }
+
+    private Path lockFileOf(EntityMigrationPlan plan) {
+        StringBuilder name = new StringBuilder();
+        if (StringUtils.isNotBlank(plan.getDataSourceName())) {
+            name.append(sanitize(plan.getDataSourceName())).append("__");
+        }
+        name.append(sanitize(plan.getEntityName())).append("__").append(sanitize(plan.getTableName())).append(".lock");
+        return directory.resolve(name.toString());
     }
 
     private String sanitize(String value) {
@@ -165,5 +233,47 @@ public class FileMigrationStateStore implements MigrationStateStore {
 
     private long parseLong(String value) {
         return StringUtils.isBlank(value) ? 0L : Long.parseLong(value);
+    }
+
+    private void closeQuietly(FileChannel channel) {
+        try {
+            channel.close();
+        } catch (IOException ignore) {
+        }
+    }
+
+    private static final class FileCheckpointLock implements MigrationCheckpointLock {
+
+        private final Path lockFile;
+        private final FileChannel channel;
+        private final FileLock fileLock;
+        private boolean closed;
+
+        private FileCheckpointLock(Path lockFile, FileChannel channel, FileLock fileLock) {
+            this.lockFile = lockFile;
+            this.channel = channel;
+            this.fileLock = fileLock;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            try {
+                fileLock.release();
+            } catch (IOException ignore) {
+            } finally {
+                try {
+                    channel.close();
+                } catch (IOException ignore) {
+                }
+                try {
+                    Files.deleteIfExists(lockFile);
+                } catch (IOException ignore) {
+                }
+            }
+        }
     }
 }

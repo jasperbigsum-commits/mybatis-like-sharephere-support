@@ -6,15 +6,19 @@ import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.*;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
+import io.github.jasper.mybatis.encrypt.core.support.DataSourceNameResolver;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
 import io.github.jasper.mybatis.encrypt.core.support.DefaultSeparateTableRowPersister;
+import io.github.jasper.mybatis.encrypt.core.support.RoutingSeparateTableEncryptionManager;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableRowPersister;
 import io.github.jasper.mybatis.encrypt.migration.AllowAllMigrationConfirmationPolicy;
+import io.github.jasper.mybatis.encrypt.migration.DefaultGlobalMigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.migration.DefaultMigrationTaskFactory;
-import io.github.jasper.mybatis.encrypt.migration.InMemoryMigrationStateStore;
+import io.github.jasper.mybatis.encrypt.migration.FileMigrationStateStore;
+import io.github.jasper.mybatis.encrypt.migration.GlobalMigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.migration.MigrationConfirmationPolicy;
 import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
@@ -26,11 +30,14 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
+import java.nio.file.Paths;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -214,9 +221,9 @@ public class MybatisEncryptionAutoConfiguration {
     @Bean
     public ResultDecryptor resultDecryptor(EncryptMetadataRegistry metadataRegistry,
                                            AlgorithmRegistry algorithmRegistry,
-                                           Map<String, SeparateTableEncryptionManager> managers) {
-        return new ResultDecryptor(metadataRegistry, algorithmRegistry,
-                managers.values().stream().findFirst().orElse(null));
+                                           @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                           SeparateTableEncryptionManager separateTableEncryptionManager) {
+        return new ResultDecryptor(metadataRegistry, algorithmRegistry, separateTableEncryptionManager);
     }
 
     /**
@@ -249,9 +256,12 @@ public class MybatisEncryptionAutoConfiguration {
                                                                        ResultDecryptor resultDecryptor,
                                                                        DatabaseEncryptionProperties properties,
                                                                        EncryptMetadataRegistry metadataRegistry,
-                                                                       Map<String, SeparateTableEncryptionManager> managers) {
+                                                                       @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                                                       SeparateTableEncryptionManager separateTableEncryptionManager,
+                                                                       @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                                                       DataSourceNameResolver dataSourceNameResolver) {
         return new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties,
-                managers.values().stream().findFirst().orElse(null), metadataRegistry);
+                separateTableEncryptionManager, metadataRegistry, dataSourceNameResolver);
     }
 
     /**
@@ -262,11 +272,24 @@ public class MybatisEncryptionAutoConfiguration {
      * @return 独立表写入执行器
      */
     @Bean
-    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnSingleCandidate(DataSource.class)
     @ConditionalOnMissingBean(SeparateTableRowPersister.class)
     public SeparateTableRowPersister separateTableRowPersister(DataSource dataSource,
                                                                DatabaseEncryptionProperties properties) {
         return new DefaultSeparateTableRowPersister(dataSource, properties);
+    }
+
+    /**
+     * 创建当前上下文使用的数据源名称解析器。
+     *
+     * @param dataSources 数据源集合
+     * @return 数据源名称解析器
+     */
+    @Bean
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnMissingBean(DataSourceNameResolver.class)
+    public DataSourceNameResolver dataSourceNameResolver(Map<String, DataSource> dataSources) {
+        return new DataSourceNameResolver(dataSources);
     }
 
     /**
@@ -281,24 +304,44 @@ public class MybatisEncryptionAutoConfiguration {
      */
     @Bean
     @ConditionalOnBean(DataSource.class)
-    public SeparateTableEncryptionManager separateTableEncryptionManager(DataSource dataSource,
-                                                                         EncryptMetadataRegistry metadataRegistry,
-                                                                         AlgorithmRegistry algorithmRegistry,
-                                                                         DatabaseEncryptionProperties properties,
-                                                                         SeparateTableRowPersister rowPersister) {
-        return new SeparateTableEncryptionManager(
-                dataSource, metadataRegistry, algorithmRegistry, properties, rowPersister);
+    public SeparateTableEncryptionManager separateTableEncryptionManager(
+            Map<String, DataSource> dataSources,
+            EncryptMetadataRegistry metadataRegistry,
+            AlgorithmRegistry algorithmRegistry,
+            DatabaseEncryptionProperties properties,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) SeparateTableRowPersister rowPersister) {
+        if (dataSources.size() <= 1) {
+            DataSource dataSource = dataSources.values().stream().findFirst().orElse(null);
+            if (dataSource == null) {
+                return null;
+            }
+            SeparateTableRowPersister effectiveRowPersister = rowPersister != null
+                    ? rowPersister : new DefaultSeparateTableRowPersister(dataSource, properties);
+            return new SeparateTableEncryptionManager(
+                    dataSource, metadataRegistry, algorithmRegistry, properties, effectiveRowPersister);
+        }
+        Map<String, SeparateTableEncryptionManager> managers = new LinkedHashMap<String, SeparateTableEncryptionManager>();
+        for (Map.Entry<String, DataSource> entry : dataSources.entrySet()) {
+            managers.put(entry.getKey(), new SeparateTableEncryptionManager(
+                    entry.getValue(),
+                    metadataRegistry,
+                    algorithmRegistry,
+                    properties,
+                    new DefaultSeparateTableRowPersister(entry.getValue(), properties)));
+        }
+        return new RoutingSeparateTableEncryptionManager(managers);
     }
 
     /**
      * 创建默认迁移状态存储器。
      *
-     * @return 默认内存状态存储器
+     * @param properties 插件配置属性
+     * @return 默认文件状态存储器
      */
     @Bean
     @ConditionalOnMissingBean(MigrationStateStore.class)
-    public MigrationStateStore migrationStateStore() {
-        return new InMemoryMigrationStateStore();
+    public MigrationStateStore migrationStateStore(DatabaseEncryptionProperties properties) {
+        return new FileMigrationStateStore(Paths.get(properties.getMigration().getCheckpointDirectory()));
     }
 
     /**
@@ -325,14 +368,42 @@ public class MybatisEncryptionAutoConfiguration {
      */
     @Bean
     @ConditionalOnBean(DataSource.class)
+    @ConditionalOnMissingBean(GlobalMigrationTaskFactory.class)
+    public GlobalMigrationTaskFactory globalMigrationTaskFactory(Map<String, DataSource> dataSources,
+                                                                 EncryptMetadataRegistry metadataRegistry,
+                                                                 AlgorithmRegistry algorithmRegistry,
+                                                                 DatabaseEncryptionProperties properties,
+                                                                 MigrationStateStore stateStore,
+                                                                 MigrationConfirmationPolicy confirmationPolicy) {
+        return new DefaultGlobalMigrationTaskFactory(dataSources, metadataRegistry, algorithmRegistry, properties,
+                stateStore, confirmationPolicy);
+    }
+
+    /**
+     * 创建迁移任务工厂，简化 Spring 场景下的任务构建。
+     *
+     * @param dataSource 数据源
+     * @param dataSourceNameResolver 数据源名称解析器
+     * @param metadataRegistry 加密元数据注册中心
+     * @param algorithmRegistry 算法注册中心
+     * @param properties 插件配置属性
+     * @param stateStore 状态存储器
+     * @param confirmationPolicy 确认策略
+     * @return 迁移任务工厂
+     */
+    @Bean
+    @ConditionalOnSingleCandidate(DataSource.class)
     @ConditionalOnMissingBean(MigrationTaskFactory.class)
     public MigrationTaskFactory migrationTaskFactory(DataSource dataSource,
+                                                     @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                                     DataSourceNameResolver dataSourceNameResolver,
                                                      EncryptMetadataRegistry metadataRegistry,
                                                      AlgorithmRegistry algorithmRegistry,
                                                      DatabaseEncryptionProperties properties,
                                                      MigrationStateStore stateStore,
                                                      MigrationConfirmationPolicy confirmationPolicy) {
-        return new DefaultMigrationTaskFactory(dataSource, metadataRegistry, algorithmRegistry, properties,
+        String dataSourceName = dataSourceNameResolver == null ? null : dataSourceNameResolver.resolve(dataSource);
+        return new DefaultMigrationTaskFactory(dataSource, dataSourceName, metadataRegistry, algorithmRegistry, properties,
                 stateStore, confirmationPolicy);
     }
 

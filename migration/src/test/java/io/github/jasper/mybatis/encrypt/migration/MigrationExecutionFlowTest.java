@@ -224,4 +224,31 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals(1L, report.getMigratedRows());
         assertEquals(1L, report.getVerifiedRows());
     }
+
+    @Test
+    void shouldUseDefaultCursorColumnsForFactoryShortcutMethods() throws Exception {
+        DataSource dataSource = newDataSource("default_cursor_shortcut");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')");
+
+        DefaultMigrationTaskFactory taskFactory = new DefaultMigrationTaskFactory(
+                dataSource,
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-default-cursor")),
+                AllowAllMigrationConfirmationPolicy.INSTANCE);
+
+        MigrationReport report = taskFactory.executeForEntity(SameTableUserEntity.class);
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        assertEquals(1L, report.getMigratedRows());
+        assertEquals("1", report.getLastProcessedCursor());
+    }
 }

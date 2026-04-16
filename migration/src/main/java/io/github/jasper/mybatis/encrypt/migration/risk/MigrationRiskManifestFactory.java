@@ -51,7 +51,7 @@ public class MigrationRiskManifestFactory {
                 entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getLikeQueryColumn()));
             }
         }
-        return new MigrationRiskManifest(plan.getEntityName(), plan.getTableName(), plan.getCursorColumns(),
+        return new MigrationRiskManifest(plan.getDataSourceName(), plan.getEntityName(), plan.getTableName(), plan.getCursorColumns(),
                 new ArrayList<>(entries));
     }
 }

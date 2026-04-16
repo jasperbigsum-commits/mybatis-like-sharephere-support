@@ -11,10 +11,21 @@ public final class MaskFromXToYLikeQueryAlgorithm extends AbstractMaskLikeQueryA
     private final int toY;
     private final char replaceChar;
 
+    /**
+     * from x to y mask like query algorithm
+     * @param fromX from x
+     * @param toY to y
+     */
     public MaskFromXToYLikeQueryAlgorithm(int fromX, int toY) {
         this(fromX, toY, DEFAULT_REPLACE_CHAR);
     }
 
+    /**（
+     * from x to y mask like query algorithm
+     * @param fromX from x
+     * @param toY to y
+     * @param replaceChar replace character
+     */
     public MaskFromXToYLikeQueryAlgorithm(int fromX, int toY, char replaceChar) {
         requireNonNegative("fromX", fromX);
         requireNonNegative("toY", toY);

@@ -215,7 +215,7 @@ public class MybatisEncryptionAutoConfiguration {
      *
      * @param metadataRegistry 加密元数据注册中心
      * @param algorithmRegistry 算法注册中心
-     * @param managers 独立表加密管理器集合
+     * @param separateTableEncryptionManager 独立表加密管理器集合
      * @return 结果解密器
      */
     @Bean
@@ -248,7 +248,8 @@ public class MybatisEncryptionAutoConfiguration {
      * @param resultDecryptor 查询结果解密器
      * @param properties 插件配置属性
      * @param metadataRegistry 加密元数据注册中心
-     * @param managers 独立表加密管理器集合
+     * @param separateTableEncryptionManager 独立表加密管理器集合
+     * @param dataSourceNameResolver 数据源名称处理器
      * @return MyBatis 加密拦截器
      */
     @Bean
@@ -295,7 +296,7 @@ public class MybatisEncryptionAutoConfiguration {
     /**
      * 在存在数据源时创建独立表加密管理器。
      *
-     * @param dataSource 数据源
+     * @param dataSources 数据源
      * @param metadataRegistry 加密元数据注册中心
      * @param algorithmRegistry 算法注册中心
      * @param properties 插件配置属性
@@ -358,7 +359,7 @@ public class MybatisEncryptionAutoConfiguration {
     /**
      * 创建迁移任务工厂，简化 Spring 场景下的任务构建。
      *
-     * @param dataSource 数据源
+     * @param dataSources 数据源
      * @param metadataRegistry 加密元数据注册中心
      * @param algorithmRegistry 算法注册中心
      * @param properties 插件配置属性

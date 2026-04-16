@@ -5,6 +5,9 @@ package io.github.jasper.mybatis.encrypt.exception;
  */
 public class EncryptionException extends RuntimeException {
 
+    /**
+     * 错误码
+     */
     private final EncryptionErrorCode errorCode;
 
     /**

@@ -45,6 +45,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
     /**
      * jdbc实例迁移任务
      * @param dataSource 数据源
+     * @param dataSourceName 数据源名称
      * @param plan 计划
      * @param rangeReader 读取范围限制器
      * @param recordReader 读取器

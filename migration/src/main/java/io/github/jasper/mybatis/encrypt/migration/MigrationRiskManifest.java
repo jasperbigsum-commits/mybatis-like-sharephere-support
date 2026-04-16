@@ -18,6 +18,7 @@ public final class MigrationRiskManifest {
     /**
      * Create one immutable risk manifest.
      *
+     * @param dataSourceName 数据源名称
      * @param entityName entity simple name
      * @param tableName main-table name
      * @param cursorColumns ordered cursor columns in the main table

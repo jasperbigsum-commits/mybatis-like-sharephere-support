@@ -5,6 +5,9 @@ package io.github.jasper.mybatis.encrypt.migration;
  */
 public class MigrationException extends RuntimeException {
 
+    /**
+     * 错误编码
+     */
     private final MigrationErrorCode errorCode;
 
     /**

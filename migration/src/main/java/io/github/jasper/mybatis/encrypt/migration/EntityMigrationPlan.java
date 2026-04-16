@@ -21,6 +21,7 @@ public final class EntityMigrationPlan {
     /**
      * Create one immutable entity migration plan.
      *
+     * @param dataSourceName 数据源名称
      * @param entityType registered entity type, or {@code null} for table-driven tasks
      * @param entityName entity or task display name
      * @param tableName normalized main-table name

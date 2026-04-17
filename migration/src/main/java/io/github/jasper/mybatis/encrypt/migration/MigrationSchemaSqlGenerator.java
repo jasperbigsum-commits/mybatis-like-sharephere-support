@@ -437,42 +437,92 @@ public final class MigrationSchemaSqlGenerator {
         private int cipherColumnLengthWeight = 4;
         private int referenceIdColumnLength = 64;
 
+        /**
+         * 返回辅助查询哈希列长度。
+         *
+         * @return 哈希列长度
+         */
         public int getHashColumnLength() {
             return hashColumnLength;
         }
 
+        /**
+         * 设置辅助查询哈希列长度。
+         *
+         * @param hashColumnLength 哈希列长度，必须大于 0
+         */
         public void setHashColumnLength(int hashColumnLength) {
             this.hashColumnLength = positive(hashColumnLength, "hashColumnLength");
         }
 
+        /**
+         * 返回回退字符列长度。
+         *
+         * @return 回退字符列长度
+         */
         public int getFallbackCharacterLength() {
             return fallbackCharacterLength;
         }
 
+        /**
+         * 设置回退字符列长度。
+         *
+         * @param fallbackCharacterLength 回退字符列长度，必须大于 0
+         */
         public void setFallbackCharacterLength(int fallbackCharacterLength) {
             this.fallbackCharacterLength = positive(fallbackCharacterLength, "fallbackCharacterLength");
         }
 
+        /**
+         * 返回密文列基础长度。
+         *
+         * @return 密文列基础长度
+         */
         public int getCipherColumnBaseLength() {
             return cipherColumnBaseLength;
         }
 
+        /**
+         * 设置密文列基础长度。
+         *
+         * @param cipherColumnBaseLength 密文列基础长度，必须大于 0
+         */
         public void setCipherColumnBaseLength(int cipherColumnBaseLength) {
             this.cipherColumnBaseLength = positive(cipherColumnBaseLength, "cipherColumnBaseLength");
         }
 
+        /**
+         * 返回密文列长度权重。
+         *
+         * @return 密文列长度权重
+         */
         public int getCipherColumnLengthWeight() {
             return cipherColumnLengthWeight;
         }
 
+        /**
+         * 设置密文列长度权重。
+         *
+         * @param cipherColumnLengthWeight 密文列长度权重，必须大于 0
+         */
         public void setCipherColumnLengthWeight(int cipherColumnLengthWeight) {
             this.cipherColumnLengthWeight = positive(cipherColumnLengthWeight, "cipherColumnLengthWeight");
         }
 
+        /**
+         * 返回独立表引用列长度。
+         *
+         * @return 引用列长度
+         */
         public int getReferenceIdColumnLength() {
             return referenceIdColumnLength;
         }
 
+        /**
+         * 设置独立表引用列长度。
+         *
+         * @param referenceIdColumnLength 引用列长度，必须大于 0
+         */
         public void setReferenceIdColumnLength(int referenceIdColumnLength) {
             this.referenceIdColumnLength = positive(referenceIdColumnLength, "referenceIdColumnLength");
         }

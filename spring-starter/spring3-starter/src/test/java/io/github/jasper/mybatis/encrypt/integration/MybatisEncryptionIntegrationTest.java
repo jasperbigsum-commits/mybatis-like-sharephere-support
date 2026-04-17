@@ -55,6 +55,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlg
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
+import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
@@ -547,6 +548,21 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldDecryptPlainDtoWithoutEncryptFieldUsingEncryptResultHint() throws Exception {
+        insertEncryptedUserRow(53L, "Sia", "13200132053", "320101199001010153");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            PlainUserProjectionDto dto = mapper.selectPlainProjectionDtoWithHint(53L);
+            assertNotNull(dto);
+            assertEquals(53L, dto.getId());
+            assertEquals("Sia", dto.getDisplayName());
+            assertEquals("13200132053", dto.getPhone());
+            assertEquals("320101199001010153", dto.getIdCard());
+        }
+    }
+
+    @Test
     void shouldReadNestedDtoAssociationListAcrossStorageModes() throws Exception {
         UserRecord owner = user(61L, "Rita", "13300133061", "320101199001010161");
         UserRecord reviewer = user(62L, "Sam", "13300133062", "320101199001010162");
@@ -575,6 +591,117 @@ class MybatisEncryptionIntegrationTest {
             assertEquals("Sam", view.getParticipants().getReviewer().getDisplayName());
             assertEquals("13300133062", view.getParticipants().getReviewer().getPhone());
             assertEquals("320101199001010162", view.getParticipants().getReviewer().getIdCard());
+        }
+    }
+
+    @Test
+    void shouldDecryptPlainNestedDtoUsingEncryptResultHintTablesOnly() throws Exception {
+        UserRecord owner = user(63L, "Tori", "13300133063", "320101199001010163");
+        UserRecord reviewer = user(64L, "Ugo", "13300133064", "320101199001010164");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(owner));
+            assertEquals(1, mapper.insertUser(reviewer));
+        }
+
+        insertOrderAccountRow(302L, 63L, 64L, 3002L, "nested-plain-hint", "grid-k", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<PlainOrderNestedDto> views = mapper.selectPlainNestedOrderAssociationsWithTableHint();
+            assertEquals(1, views.size());
+
+            PlainOrderNestedDto view = views.get(0);
+            assertEquals(302L, view.getOrderId());
+            assertNotNull(view.getParticipants());
+            assertNotNull(view.getParticipants().getOwner());
+            assertEquals("Tori", view.getParticipants().getOwner().getDisplayName());
+            assertEquals("13300133063", view.getParticipants().getOwner().getPhone());
+            assertEquals("320101199001010163", view.getParticipants().getOwner().getIdCard());
+            assertNotNull(view.getParticipants().getReviewer());
+            assertEquals("Ugo", view.getParticipants().getReviewer().getDisplayName());
+            assertEquals("13300133064", view.getParticipants().getReviewer().getPhone());
+            assertEquals("320101199001010164", view.getParticipants().getReviewer().getIdCard());
+        }
+    }
+
+    @Test
+    void shouldDecryptPlainResultTypeForComplexJoinUsingEncryptResultHintTablesOnly() throws Exception {
+        UserRecord owner = user(65L, "Vita", "13300133065", "320101199001010165");
+        UserRecord reviewer = user(66L, "Will", "13300133066", "320101199001010166");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(owner));
+            assertEquals(1, mapper.insertUser(reviewer));
+        }
+
+        insertOrderAccountRow(303L, 65L, 66L, 3003L, "plain-result-type", "grid-r", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<PlainOrderJoinResultDto> views = mapper.selectPlainOrderJoinResultDtosWithTableHint();
+            assertEquals(1, views.size());
+
+            PlainOrderJoinResultDto view = views.get(0);
+            assertEquals(303L, view.getOrderId());
+            assertEquals("Vita", view.getOwnerDisplayName());
+            assertEquals("13300133065", view.getOwnerPhone());
+            assertEquals("320101199001010165", view.getOwnerIdCard());
+            assertEquals("Will", view.getReviewerDisplayName());
+            assertEquals("13300133066", view.getReviewerPhone());
+            assertEquals("320101199001010166", view.getReviewerIdCard());
+        }
+    }
+
+    @Test
+    void shouldDecryptPlainResultTypeForUnionNestedSubqueryUsingEncryptResultHintTablesOnly() throws Exception {
+        UserRecord first = user(94L, "Pia", "13600136094", "320101199001010194");
+        UserRecord second = user(95L, "Quill", "13600136095", "320101199001010195");
+        UserRecord third = user(96L, "Rune", "13600136096", "320101199001010196");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(first));
+            assertEquals(1, mapper.insertUser(second));
+            assertEquals(1, mapper.insertUser(third));
+        }
+
+        insertOrderAccountRow(904L, 94L, null, 9004L, "plain-union-a", "grid-u4", 0);
+        insertOrderAccountRow(905L, 94L, 95L, 9005L, "plain-union-b", "grid-u5", 0);
+        insertOrderAccountRow(906L, 96L, null, 9006L, "plain-union-c", "grid-u6", 0);
+        insertOrderParticipantRow(994L, 904L, 94L, 1);
+        insertOrderParticipantRow(995L, 905L, 95L, 2);
+        insertOrderParticipantRow(996L, 906L, 96L, 1);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<PlainUserProjectionDto> users = mapper.selectPlainByMultiUnionNestedSubqueryWithTableHint(
+                    "13600136094",
+                    "320101199001010195",
+                    "%6096",
+                    "%0196"
+            );
+            assertEquals(3, users.size());
+
+            PlainUserProjectionDto loadedFirst = users.get(0);
+            assertEquals(94L, loadedFirst.getId());
+            assertEquals("Pia", loadedFirst.getDisplayName());
+            assertEquals("13600136094", loadedFirst.getPhone());
+            assertEquals("320101199001010194", loadedFirst.getIdCard());
+
+            PlainUserProjectionDto loadedSecond = users.get(1);
+            assertEquals(95L, loadedSecond.getId());
+            assertEquals("Quill", loadedSecond.getDisplayName());
+            assertEquals("13600136095", loadedSecond.getPhone());
+            assertEquals("320101199001010195", loadedSecond.getIdCard());
+
+            PlainUserProjectionDto loadedThird = users.get(2);
+            assertEquals(96L, loadedThird.getId());
+            assertEquals("Rune", loadedThird.getDisplayName());
+            assertEquals("13600136096", loadedThird.getPhone());
+            assertEquals("320101199001010196", loadedThird.getIdCard());
         }
     }
 
@@ -1058,6 +1185,35 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    private void insertEncryptedUserRow(long id, String name, String phone, String idCard) throws Exception {
+        Sm4CipherAlgorithm cipherAlgorithm = new Sm4CipherAlgorithm("integration-test-key");
+        Sm3AssistedQueryAlgorithm assistedQueryAlgorithm = new Sm3AssistedQueryAlgorithm();
+        NormalizedLikeQueryAlgorithm likeQueryAlgorithm = new NormalizedLikeQueryAlgorithm();
+        String phoneHash = assistedQueryAlgorithm.transform(phone);
+        String idCardHash = assistedQueryAlgorithm.transform(idCard);
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement userStatement = connection.prepareStatement(
+                     "insert into user_account (id, name, phone_cipher, phone_hash, phone_like, id_card) "
+                             + "values (?, ?, ?, ?, ?, ?)");
+             PreparedStatement idCardStatement = connection.prepareStatement(
+                     "insert into user_id_card_encrypt (id, id_card_cipher, id_card_hash, id_card_like) "
+                             + "values (?, ?, ?, ?)")) {
+            userStatement.setLong(1, id);
+            userStatement.setString(2, name);
+            userStatement.setString(3, cipherAlgorithm.encrypt(phone));
+            userStatement.setString(4, phoneHash);
+            userStatement.setString(5, likeQueryAlgorithm.transform(phone));
+            userStatement.setString(6, idCardHash);
+            userStatement.executeUpdate();
+
+            idCardStatement.setLong(1, id);
+            idCardStatement.setString(2, cipherAlgorithm.encrypt(idCard));
+            idCardStatement.setString(3, idCardHash);
+            idCardStatement.setString(4, likeQueryAlgorithm.transform(idCard));
+            idCardStatement.executeUpdate();
+        }
+    }
+
     private void assertReadableUser(UserMapper mapper, UserRecord expected) {
         UserRecord byId = mapper.selectById(expected.getId());
         assertNotNull(byId);
@@ -1296,6 +1452,133 @@ class MybatisEncryptionIntegrationTest {
                 where id = #{id}
                 """)
         PlainUserProjectionDto selectPlainProjectionDto(@Param("id") Long id);
+
+        @EncryptResultHint(entities = UserRecord.class)
+        @Select("""
+                select id,
+                       name as display_name,
+                       phone,
+                       id_card
+                from user_account
+                where id = #{id}
+                """)
+        PlainUserProjectionDto selectPlainProjectionDtoWithHint(@Param("id") Long id);
+
+        @EncryptResultHint(tables = "user_account")
+        @Select("""
+                select o.id as order_id,
+                       owner.id as owner_id,
+                       owner.name as owner_display_name,
+                       owner.phone as owner_phone,
+                       owner.id_card as owner_id_card,
+                       reviewer.id as reviewer_id,
+                       reviewer.name as reviewer_display_name,
+                       reviewer.phone as reviewer_phone,
+                       reviewer.id_card as reviewer_id_card
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                join user_account reviewer on o.related_user_id = reviewer.id
+                where o.deleted = 0
+                order by o.id
+                """)
+        @Results(id = "plainOrderNestedDtoMap", value = {
+                @Result(property = "orderId", column = "order_id"),
+                @Result(property = "participants.owner.id", column = "owner_id"),
+                @Result(property = "participants.owner.displayName", column = "owner_display_name"),
+                @Result(property = "participants.owner.phone", column = "owner_phone"),
+                @Result(property = "participants.owner.idCard", column = "owner_id_card"),
+                @Result(property = "participants.reviewer.id", column = "reviewer_id"),
+                @Result(property = "participants.reviewer.displayName", column = "reviewer_display_name"),
+                @Result(property = "participants.reviewer.phone", column = "reviewer_phone"),
+                @Result(property = "participants.reviewer.idCard", column = "reviewer_id_card")
+        })
+        List<PlainOrderNestedDto> selectPlainNestedOrderAssociationsWithTableHint();
+
+        @EncryptResultHint(tables = "user_account")
+        @Select("""
+                select o.id as order_id,
+                       owner.name as owner_display_name,
+                       owner.phone as owner_phone,
+                       owner.id_card as owner_id_card,
+                       reviewer.name as reviewer_display_name,
+                       reviewer.phone as reviewer_phone,
+                       reviewer.id_card as reviewer_id_card
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                join user_account reviewer on o.related_user_id = reviewer.id
+                where o.deleted = 0
+                order by o.id
+                """)
+        List<PlainOrderJoinResultDto> selectPlainOrderJoinResultDtosWithTableHint();
+
+        @EncryptResultHint(tables = "user_account")
+        @Select("""
+                select t.id,
+                       t.display_name,
+                       t.phone,
+                       t.id_card
+                from (
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card
+                    from user_account u
+                    where u.phone = #{phoneEq}
+                      and exists (
+                          select 1
+                          from order_account o
+                          where o.user_id = u.id
+                            and o.id in (
+                                select p.order_id
+                                from order_participant p
+                                where p.seq_no = 1
+                            )
+                      )
+                    union
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card
+                    from user_account u
+                    where u.id_card = #{idCardEq}
+                      and u.id in (
+                          select o.related_user_id
+                          from order_account o
+                          where o.related_user_id is not null
+                            and o.id in (
+                                select p.order_id
+                                from order_participant p
+                                where p.seq_no = 2
+                            )
+                      )
+                    union
+                    select u.id as id,
+                           u.name as display_name,
+                           u.phone as phone,
+                           u.id_card as id_card
+                    from user_account u
+                    where u.phone like #{phoneLike}
+                      and u.id_card like #{idCardLike}
+                      and exists (
+                          select 1
+                          from order_account o
+                          where o.user_id = u.id
+                            and exists (
+                                select 1
+                                from order_participant p
+                                where p.order_id = o.id
+                                  and p.user_id = u.id
+                            )
+                      )
+                ) t
+                order by t.id
+                """)
+        List<PlainUserProjectionDto> selectPlainByMultiUnionNestedSubqueryWithTableHint(
+                @Param("phoneEq") String phoneEq,
+                @Param("idCardEq") String idCardEq,
+                @Param("phoneLike") String phoneLike,
+                @Param("idCardLike") String idCardLike
+        );
 
         @Select("""
                 select o.id as order_id,
@@ -1862,6 +2145,117 @@ class MybatisEncryptionIntegrationTest {
 
         public void setParticipants(ParticipantBundleDto participants) {
             this.participants = participants;
+        }
+    }
+
+    static class PlainOrderNestedDto {
+
+        private Long orderId;
+        private PlainParticipantBundleDto participants;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public PlainParticipantBundleDto getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(PlainParticipantBundleDto participants) {
+            this.participants = participants;
+        }
+    }
+
+    static class PlainParticipantBundleDto {
+
+        private PlainUserProjectionDto owner;
+        private PlainUserProjectionDto reviewer;
+
+        public PlainUserProjectionDto getOwner() {
+            return owner;
+        }
+
+        public void setOwner(PlainUserProjectionDto owner) {
+            this.owner = owner;
+        }
+
+        public PlainUserProjectionDto getReviewer() {
+            return reviewer;
+        }
+
+        public void setReviewer(PlainUserProjectionDto reviewer) {
+            this.reviewer = reviewer;
+        }
+    }
+
+    static class PlainOrderJoinResultDto {
+
+        private Long orderId;
+        private String ownerDisplayName;
+        private String ownerPhone;
+        private String ownerIdCard;
+        private String reviewerDisplayName;
+        private String reviewerPhone;
+        private String reviewerIdCard;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getOwnerDisplayName() {
+            return ownerDisplayName;
+        }
+
+        public void setOwnerDisplayName(String ownerDisplayName) {
+            this.ownerDisplayName = ownerDisplayName;
+        }
+
+        public String getOwnerPhone() {
+            return ownerPhone;
+        }
+
+        public void setOwnerPhone(String ownerPhone) {
+            this.ownerPhone = ownerPhone;
+        }
+
+        public String getOwnerIdCard() {
+            return ownerIdCard;
+        }
+
+        public void setOwnerIdCard(String ownerIdCard) {
+            this.ownerIdCard = ownerIdCard;
+        }
+
+        public String getReviewerDisplayName() {
+            return reviewerDisplayName;
+        }
+
+        public void setReviewerDisplayName(String reviewerDisplayName) {
+            this.reviewerDisplayName = reviewerDisplayName;
+        }
+
+        public String getReviewerPhone() {
+            return reviewerPhone;
+        }
+
+        public void setReviewerPhone(String reviewerPhone) {
+            this.reviewerPhone = reviewerPhone;
+        }
+
+        public String getReviewerIdCard() {
+            return reviewerIdCard;
+        }
+
+        public void setReviewerIdCard(String reviewerIdCard) {
+            this.reviewerIdCard = reviewerIdCard;
         }
     }
 

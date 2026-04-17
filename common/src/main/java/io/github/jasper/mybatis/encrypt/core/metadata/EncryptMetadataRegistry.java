@@ -1,5 +1,6 @@
 package io.github.jasper.mybatis.encrypt.core.metadata;
 
+import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
@@ -8,6 +9,9 @@ import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ResultMap;
 
+import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -106,6 +110,7 @@ public class EncryptMetadataRegistry {
      * @param parameterObject 当前 MyBatis 参数对象
      */
     public void warmUp(MappedStatement mappedStatement, Object parameterObject) {
+        preloadResultHintMetadata(mappedStatement);
         mappedStatement.getResultMaps().stream()
                 .map(ResultMap::getType)
                 .filter(this::isCandidateType)
@@ -125,6 +130,38 @@ public class EncryptMetadataRegistry {
             map.values().stream()
                     .filter(value -> value != null && isCandidateType(value.getClass()))
                     .forEach(value -> findByEntity(value.getClass()));
+        }
+    }
+
+    /**
+     * 按 mapper 方法上的 {@link EncryptResultHint} 预热来源实体或来源表规则。
+     *
+     * @param mappedStatement 当前 mapped statement
+     */
+    public void preloadResultHintMetadata(MappedStatement mappedStatement) {
+        if (mappedStatement == null || StringUtils.isBlank(mappedStatement.getId())) {
+            return;
+        }
+        int separator = mappedStatement.getId().lastIndexOf('.');
+        if (separator <= 0 || separator >= mappedStatement.getId().length() - 1) {
+            return;
+        }
+        String mapperClassName = mappedStatement.getId().substring(0, separator);
+        String methodName = mappedStatement.getId().substring(separator + 1);
+        try {
+            Class<?> mapperType = Class.forName(mapperClassName);
+            for (java.lang.reflect.Method method : mapperType.getMethods()) {
+                if (!methodName.equals(method.getName())) {
+                    continue;
+                }
+                EncryptResultHint hint = method.getAnnotation(EncryptResultHint.class);
+                if (hint == null) {
+                    continue;
+                }
+                preloadHintEntities(hint);
+                preloadHintTables(hint, mapperType);
+            }
+        } catch (ClassNotFoundException ignore) {
         }
     }
 
@@ -293,6 +330,75 @@ public class EncryptMetadataRegistry {
                 "jakarta.persistence.Column", "name",
                 "javax.persistence.Column", "name");
         return StringUtils.isNotBlank(explicit) ? explicit : NameUtils.camelToSnake(field.getName());
+    }
+
+    private void preloadHintEntities(EncryptResultHint hint) {
+        for (Class<?> entityType : hint.entities()) {
+            if (entityType != null && entityType != void.class && entityType != Void.class) {
+                registerEntityType(entityType);
+            }
+        }
+    }
+
+    private void preloadHintTables(EncryptResultHint hint, Class<?> mapperType) {
+        for (String table : hint.tables()) {
+            if (StringUtils.isBlank(table)) {
+                continue;
+            }
+            if (findByTable(table).isPresent()) {
+                continue;
+            }
+            preloadMapperRelatedEntitiesForTable(mapperType, table);
+            findByTable(table);
+        }
+    }
+
+    private void preloadMapperRelatedEntitiesForTable(Class<?> mapperType, String tableName) {
+        if (mapperType == null || StringUtils.isBlank(tableName)) {
+            return;
+        }
+        String normalizedTable = NameUtils.normalizeIdentifier(tableName);
+        Set<Class<?>> candidates = new LinkedHashSet<Class<?>>();
+        for (java.lang.reflect.Method method : mapperType.getMethods()) {
+            collectTypes(method.getGenericReturnType(), candidates);
+            for (Type parameterType : method.getGenericParameterTypes()) {
+                collectTypes(parameterType, candidates);
+            }
+        }
+        for (Class<?> candidate : candidates) {
+            if (!isCandidateType(candidate)) {
+                continue;
+            }
+            if (!normalizedTable.equals(NameUtils.normalizeIdentifier(resolveEntityTableName(candidate)))) {
+                continue;
+            }
+            registerEntityType(candidate);
+        }
+    }
+
+    private void collectTypes(Type type, Set<Class<?>> candidates) {
+        if (type == null) {
+            return;
+        }
+        if (type instanceof Class<?>) {
+            Class<?> candidate = (Class<?>) type;
+            candidates.add(candidate);
+            if (candidate.isArray()) {
+                candidates.add(candidate.getComponentType());
+            }
+            return;
+        }
+        if (type instanceof ParameterizedType) {
+            ParameterizedType parameterizedType = (ParameterizedType) type;
+            collectTypes(parameterizedType.getRawType(), candidates);
+            for (Type actualTypeArgument : parameterizedType.getActualTypeArguments()) {
+                collectTypes(actualTypeArgument, candidates);
+            }
+            return;
+        }
+        if (type instanceof GenericArrayType) {
+            collectTypes(((GenericArrayType) type).getGenericComponentType(), candidates);
+        }
     }
 
     private String annotationValue(java.lang.reflect.AnnotatedElement element, String... annotationSpecs) {

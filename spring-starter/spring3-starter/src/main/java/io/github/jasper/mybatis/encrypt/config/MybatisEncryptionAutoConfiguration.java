@@ -16,10 +16,13 @@ import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionMana
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableRowPersister;
 import io.github.jasper.mybatis.encrypt.migration.AllowAllMigrationConfirmationPolicy;
 import io.github.jasper.mybatis.encrypt.migration.DefaultGlobalMigrationTaskFactory;
+import io.github.jasper.mybatis.encrypt.migration.DefaultGlobalMigrationSchemaSqlGeneratorFactory;
 import io.github.jasper.mybatis.encrypt.migration.DefaultMigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.migration.FileMigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.GlobalMigrationTaskFactory;
+import io.github.jasper.mybatis.encrypt.migration.GlobalMigrationSchemaSqlGeneratorFactory;
 import io.github.jasper.mybatis.encrypt.migration.MigrationConfirmationPolicy;
+import io.github.jasper.mybatis.encrypt.migration.MigrationSchemaSqlGenerator;
 import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
@@ -381,6 +384,24 @@ public class MybatisEncryptionAutoConfiguration {
     }
 
     /**
+     * 创建全局 DDL 生成工厂，便于多数据源场景按路由批量输出 schema 变更 SQL。
+     *
+     * @param dataSources 数据源集合
+     * @param metadataRegistry 加密元数据注册中心
+     * @param properties 插件配置属性
+     * @return 全局 DDL 生成工厂
+     */
+    @Bean
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnMissingBean(GlobalMigrationSchemaSqlGeneratorFactory.class)
+    public GlobalMigrationSchemaSqlGeneratorFactory globalMigrationSchemaSqlGeneratorFactory(
+            Map<String, DataSource> dataSources,
+            EncryptMetadataRegistry metadataRegistry,
+            DatabaseEncryptionProperties properties) {
+        return new DefaultGlobalMigrationSchemaSqlGeneratorFactory(dataSources, metadataRegistry, properties);
+    }
+
+    /**
      * 创建迁移任务工厂，简化 Spring 场景下的任务构建。
      *
      * @param dataSource 数据源
@@ -406,6 +427,28 @@ public class MybatisEncryptionAutoConfiguration {
         String dataSourceName = dataSourceNameResolver == null ? null : dataSourceNameResolver.resolve(dataSource);
         return new DefaultMigrationTaskFactory(dataSource, dataSourceName, metadataRegistry, algorithmRegistry, properties,
                 stateStore, confirmationPolicy);
+    }
+
+    /**
+     * 创建单数据源 DDL 生成器，便于直接按当前默认数据源输出 schema 变更 SQL。
+     *
+     * @param dataSource 数据源
+     * @param dataSourceNameResolver 数据源名称解析器
+     * @param metadataRegistry 加密元数据注册中心
+     * @param properties 插件配置属性
+     * @return 单数据源 DDL 生成器
+     */
+    @Bean
+    @ConditionalOnSingleCandidate(DataSource.class)
+    @ConditionalOnMissingBean(MigrationSchemaSqlGenerator.class)
+    public MigrationSchemaSqlGenerator migrationSchemaSqlGenerator(
+            DataSource dataSource,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            DataSourceNameResolver dataSourceNameResolver,
+            EncryptMetadataRegistry metadataRegistry,
+            DatabaseEncryptionProperties properties) {
+        String dataSourceName = dataSourceNameResolver == null ? null : dataSourceNameResolver.resolve(dataSource);
+        return new MigrationSchemaSqlGenerator(dataSource, dataSourceName, metadataRegistry, properties, null);
     }
 
 }

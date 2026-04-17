@@ -244,6 +244,10 @@ Auto-configuration provides these defaults:
   default: `AllowAllMigrationConfirmationPolicy`
 - `GlobalMigrationTaskFactory`
   routes to a concrete datasource-scoped migration factory in multi-datasource applications
+- `MigrationSchemaSqlGenerator`
+  emits DDL directly for the current default datasource
+- `GlobalMigrationSchemaSqlGeneratorFactory`
+  routes DDL generation by datasource name in multi-datasource applications
 
 If you want to change the default checkpoint directory or require explicit operator confirmation, override those beans and `MigrationTaskFactory` will reuse them automatically:
 
@@ -277,6 +281,42 @@ public class ArchiveMigrationRunner {
 
     public MigrationReport migrateArchive() {
         return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+If the goal is to prepare schema changes first and run the historical backfill later, inject the DDL generator directly:
+
+```java
+@Service
+public class UserAccountSchemaRunner {
+
+    private final MigrationSchemaSqlGenerator migrationSchemaSqlGenerator;
+
+    public UserAccountSchemaRunner(MigrationSchemaSqlGenerator migrationSchemaSqlGenerator) {
+        this.migrationSchemaSqlGenerator = migrationSchemaSqlGenerator;
+    }
+
+    public List<String> ddl() {
+        return migrationSchemaSqlGenerator.generateForEntity(UserAccount.class);
+    }
+}
+```
+
+For multi-datasource applications:
+
+```java
+@Service
+public class ArchiveSchemaRunner {
+
+    private final GlobalMigrationSchemaSqlGeneratorFactory ddlFactory;
+
+    public ArchiveSchemaRunner(GlobalMigrationSchemaSqlGeneratorFactory ddlFactory) {
+        this.ddlFactory = ddlFactory;
+    }
+
+    public Map<String, List<String>> ddl() {
+        return ddlFactory.generateAllRegisteredTablesGrouped("archiveDs");
     }
 }
 ```
@@ -335,6 +375,48 @@ For multi-datasource applications:
 ```java
 List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredTables("archiveDs");
 ```
+
+## Migration DDL Generation
+
+The migration module also ships with a standalone schema DDL generator. It is meant for producing the SQL required to add encrypted storage columns, equality-hash columns, LIKE columns, backup columns, and separate encrypted tables before the historical data backfill runs.
+
+Typical usage:
+
+- let DBAs review and apply the generated schema SQL first
+- then run `MigrationTaskFactory` / `GlobalMigrationTaskFactory` for data backfill
+- avoid mixing DDL rollout and historical data migration in one step
+
+Basic example:
+
+```java
+MigrationSchemaSqlGenerator generator =
+        new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, encryptionProperties);
+
+List<String> ddl = generator.generateForEntity(UserAccount.class);
+Map<String, List<String>> grouped = generator.generateAllRegisteredTablesGrouped();
+```
+
+Default sizing rules:
+
+- `hash` / `assistedQueryColumn`: fixed length `128`
+- `likeQueryColumn`: same length as the plaintext source column
+- `storageColumn`: `64 + source_length * 4`
+- the generator inspects live schema metadata from the bound datasource before deciding whether to emit `ADD COLUMN` or `MODIFY COLUMN`
+- when a separate table does not exist, it emits `CREATE TABLE`
+- when a separate table already exists, it does not auto-change `storageIdColumn`, which avoids mutating an existing external-table primary key unexpectedly
+
+Dialect compatibility:
+
+- the DDL generator reuses the same `sql-dialect` / `datasource-dialects` resolver as the runtime interceptor
+- `MYSQL` / `OCEANBASE`: emits MySQL-style `add column` / `modify column` / `varchar`
+- `DM` / `ORACLE12`: emits `add (...)` / `modify (...)` / `varchar2`
+- `CLICKHOUSE`: existing-table add/modify SQL is emitted in ClickHouse style, but auto-create is rejected because ClickHouse table creation still requires manual `ENGINE`, `ORDER BY`, and similar clauses
+
+Notes:
+
+- the generator only returns SQL; it does not execute it
+- advanced database objects such as indexes, comments, constraints, and ClickHouse engine clauses must still be added manually
+- if your separate-table primary key is not the default string reference id but a numeric or custom strategy, keep the existing table definition instead of blindly replacing it with auto-created DDL
 
 This entry deduplicates by physical table name, so the same table is migrated only once even if it is discovered from both annotation scanning and external table rules.
 Even when a checkpoint falls behind a committed batch, the writer replays idempotently and skips rows that already match the target state instead of inserting duplicate external rows or overwriting the main table again.

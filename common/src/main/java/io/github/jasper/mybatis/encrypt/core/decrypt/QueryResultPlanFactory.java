@@ -1,6 +1,5 @@
 package io.github.jasper.mybatis.encrypt.core.decrypt;
 
-import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
@@ -90,7 +89,7 @@ public final class QueryResultPlanFactory {
         if (mappedStatement.getResultMaps() == null || mappedStatement.getResultMaps().isEmpty()) {
             return QueryResultPlan.empty();
         }
-        preloadHintMetadata(mappedStatement);
+        metadataRegistry.preloadResultHintMetadata(mappedStatement);
         Configuration configuration = mappedStatement.getConfiguration();
         ResultProjectionRuleResolver projectionRuleResolver =
                 ResultProjectionRuleResolver.create(metadataRegistry, boundSql == null ? null : boundSql.getSql());
@@ -349,50 +348,6 @@ public final class QueryResultPlanFactory {
                 && !type.getName().startsWith("java.");
     }
 
-    private void preloadHintMetadata(MappedStatement mappedStatement) {
-        if (mappedStatement == null || StringUtils.isBlank(mappedStatement.getId())) {
-            return;
-        }
-        int separator = mappedStatement.getId().lastIndexOf('.');
-        if (separator <= 0 || separator >= mappedStatement.getId().length() - 1) {
-            return;
-        }
-        String mapperClassName = mappedStatement.getId().substring(0, separator);
-        String methodName = mappedStatement.getId().substring(separator + 1);
-        try {
-            Class<?> mapperType = Class.forName(mapperClassName);
-            for (java.lang.reflect.Method method : mapperType.getMethods()) {
-                if (!methodName.equals(method.getName())) {
-                    continue;
-                }
-                EncryptResultHint hint = method.getAnnotation(EncryptResultHint.class);
-                if (hint == null) {
-                    continue;
-                }
-                preloadHintEntities(hint);
-                preloadHintTables(hint);
-            }
-        } catch (ClassNotFoundException ignore) {
-        }
-    }
-
-    private void preloadHintEntities(EncryptResultHint hint) {
-        for (Class<?> entityType : hint.entities()) {
-            if (entityType != null && entityType != void.class && entityType != Void.class) {
-                metadataRegistry.registerEntityType(entityType);
-            }
-        }
-    }
-
-    private void preloadHintTables(EncryptResultHint hint) {
-        for (String table : hint.tables()) {
-            if (StringUtils.isBlank(table)) {
-                continue;
-            }
-            metadataRegistry.findByTable(table);
-        }
-    }
-
     private static final class ResultProjectionRuleResolver {
 
         private final EncryptMetadataRegistry metadataRegistry;
@@ -595,18 +550,23 @@ public final class QueryResultPlanFactory {
         }
 
         private EncryptColumnRule projectDerivedRule(String projectedColumn, EncryptColumnRule sourceRule) {
+            boolean storedInSeparateTable = sourceRule.isStoredInSeparateTable();
             return new EncryptColumnRule(
                     projectedColumn,
                     null,
                     projectedColumn,
                     sourceRule.cipherAlgorithm(),
-                    sourceRule.hasAssistedQueryColumn() ? HIDDEN_ASSISTED_PREFIX + projectedColumn : null,
+                    storedInSeparateTable
+                            ? sourceRule.assistedQueryColumn()
+                            : (sourceRule.hasAssistedQueryColumn() ? HIDDEN_ASSISTED_PREFIX + projectedColumn : null),
                     sourceRule.assistedQueryAlgorithm(),
-                    sourceRule.hasLikeQueryColumn() ? HIDDEN_LIKE_PREFIX + projectedColumn : null,
+                    storedInSeparateTable
+                            ? sourceRule.likeQueryColumn()
+                            : (sourceRule.hasLikeQueryColumn() ? HIDDEN_LIKE_PREFIX + projectedColumn : null),
                     sourceRule.likeQueryAlgorithm(),
-                    FieldStorageMode.SAME_TABLE,
-                    null,
-                    projectedColumn,
+                    sourceRule.storageMode(),
+                    sourceRule.storageTable(),
+                    storedInSeparateTable ? sourceRule.storageColumn() : projectedColumn,
                     sourceRule.storageIdColumn()
             );
         }

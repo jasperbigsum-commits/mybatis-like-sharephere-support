@@ -2,7 +2,9 @@ package io.github.jasper.mybatis.encrypt.autoconfigure;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.migration.FileMigrationStateStore;
+import io.github.jasper.mybatis.encrypt.migration.GlobalMigrationSchemaSqlGeneratorFactory;
 import io.github.jasper.mybatis.encrypt.migration.MigrationReport;
+import io.github.jasper.mybatis.encrypt.migration.MigrationSchemaSqlGenerator;
 import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
@@ -62,6 +64,12 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
     @Resource
     private MigrationStateStore migrationStateStore;
 
+    @Resource
+    private MigrationSchemaSqlGenerator migrationSchemaSqlGenerator;
+
+    @Resource
+    private GlobalMigrationSchemaSqlGeneratorFactory globalMigrationSchemaSqlGeneratorFactory;
+
     @BeforeEach
     void setUp() throws Exception {
         deleteIfExists(Paths.get("target/test-migration-state-spring3"));
@@ -96,8 +104,14 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
     void shouldAutoConfigurePluginBeansAndEntityScanning() {
         assertNotNull(interceptor);
         assertNotNull(migrationTaskFactory);
+        assertNotNull(migrationSchemaSqlGenerator);
+        assertNotNull(globalMigrationSchemaSqlGeneratorFactory);
         assertTrue(migrationStateStore instanceof FileMigrationStateStore);
         assertTrue(metadataRegistry.findByEntity(AutoConfiguredUserRecord.class).isPresent());
+        assertNotNull(migrationSchemaSqlGenerator.generateForEntity(AutoConfiguredUserRecord.class));
+        assertEquals(1, globalMigrationSchemaSqlGeneratorFactory.getDataSourceNames().size());
+        assertTrue(globalMigrationSchemaSqlGeneratorFactory.getDataSourceNames().contains("dataSource"));
+        assertNotNull(globalMigrationSchemaSqlGeneratorFactory.generateAllRegisteredTables("dataSource"));
         assertEquals(1, sqlSessionFactory.getConfiguration().getInterceptors().stream()
                 .filter(DatabaseEncryptionInterceptor.class::isInstance)
                 .count());

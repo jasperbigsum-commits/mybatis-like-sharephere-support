@@ -684,6 +684,10 @@ public class UserAccountMigrationRunner {
   默认是 `AllowAllMigrationConfirmationPolicy`
 - `GlobalMigrationTaskFactory`
   多数据源场景下按 datasource 名称路由到具体迁移工厂
+- `MigrationSchemaSqlGenerator`
+  单数据源场景下直接按当前数据源输出 DDL
+- `GlobalMigrationSchemaSqlGeneratorFactory`
+  多数据源场景下按 datasource 名称路由到具体 DDL 生成器
 
 如果你希望修改默认 checkpoint 目录，或要求上线前必须确认风险范围，只需覆写对应 Bean，`MigrationTaskFactory` 会自动复用：
 
@@ -717,6 +721,42 @@ public class ArchiveMigrationRunner {
 
     public MigrationReport migrateArchive() {
         return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+如果你的目标是先补齐迁移所需字段，再决定何时回填历史数据，可以直接注入 DDL 生成器：
+
+```java
+@Service
+public class UserAccountSchemaRunner {
+
+    private final MigrationSchemaSqlGenerator migrationSchemaSqlGenerator;
+
+    public UserAccountSchemaRunner(MigrationSchemaSqlGenerator migrationSchemaSqlGenerator) {
+        this.migrationSchemaSqlGenerator = migrationSchemaSqlGenerator;
+    }
+
+    public List<String> ddl() {
+        return migrationSchemaSqlGenerator.generateForEntity(UserAccount.class);
+    }
+}
+```
+
+多数据源场景对应：
+
+```java
+@Service
+public class ArchiveSchemaRunner {
+
+    private final GlobalMigrationSchemaSqlGeneratorFactory ddlFactory;
+
+    public ArchiveSchemaRunner(GlobalMigrationSchemaSqlGeneratorFactory ddlFactory) {
+        this.ddlFactory = ddlFactory;
+    }
+
+    public Map<String, List<String>> ddl() {
+        return ddlFactory.generateAllRegisteredTablesGrouped("archiveDs");
     }
 }
 ```
@@ -775,6 +815,48 @@ List<MigrationReport> reports = migrationTaskFactory.executeAllRegisteredTables(
 ```java
 List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredTables("archiveDs");
 ```
+
+## 迁移 DDL 生成
+
+迁移模块还提供了独立的 schema DDL 生成器，用于在执行历史数据回填前，先批量生成“加密密文列 / hash 列 / like 列 / 备份列 / 独立加密表”所需的 SQL。
+
+典型用途：
+
+- 先由 DBA 审核并执行建表 / 补字段 SQL
+- 再运行 `MigrationTaskFactory` / `GlobalMigrationTaskFactory` 做数据回填
+- 避免上线时把 DDL 和数据迁移混在一个步骤里
+
+基础示例：
+
+```java
+MigrationSchemaSqlGenerator generator =
+        new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, encryptionProperties);
+
+List<String> ddl = generator.generateForEntity(UserAccount.class);
+Map<String, List<String>> grouped = generator.generateAllRegisteredTablesGrouped();
+```
+
+生成规则：
+
+- `hash` / `assistedQueryColumn` 默认长度固定为 `128`
+- `likeQueryColumn` 默认跟原字段等长
+- `storageColumn` 默认长度为 `64 + 原字段长度 * 4`
+- 自动读取当前数据源里主表源字段的实际结构，再决定输出 `ADD COLUMN` 或 `MODIFY COLUMN`
+- 独立表不存在时会输出 `CREATE TABLE`
+- 独立表已存在时不会自动修改 `storageIdColumn`，避免误改外表主键类型
+
+方言兼容性：
+
+- DDL 生成器和运行时拦截器共用同一套 `sql-dialect` / `datasource-dialects` 解析逻辑
+- `MYSQL` / `OCEANBASE`：输出 MySQL 风格 `add column` / `modify column` / `varchar`
+- `DM` / `ORACLE12`：输出 `add (...)` / `modify (...)` / `varchar2`
+- `CLICKHOUSE`：已存在表的补列 / 扩容 SQL 按 ClickHouse 风格输出；如果需要自动建表，生成器会直接拒绝，因为 ClickHouse 建表还需要业务自己补 `ENGINE`、`ORDER BY` 等语义
+
+注意：
+
+- 生成器只负责输出 DDL，不会自动执行
+- 复杂数据库对象例如索引、约束、注释、ClickHouse engine 子句仍需手工补充
+- 如果你的独立表主键不是默认字符串引用，而是数值或自定义主键策略，建议沿用现有表定义，不要直接拿自动建表 SQL 覆盖
 
 该入口按“物理表名”去重，同一张表即使同时来自注解扫描和外部表规则，也只会迁移一次。
 即使 checkpoint 回退到旧批次，writer 也会按当前目标态做幂等判断，已完成记录会跳过而不会重复插入外表或重复覆盖主表。

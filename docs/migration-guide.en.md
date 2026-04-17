@@ -72,6 +72,10 @@ Auto-configuration provides these beans by default:
   default implementation: `AllowAllMigrationConfirmationPolicy`
 - `GlobalMigrationTaskFactory`
   routes migration tasks by datasource name in multi-datasource applications
+- `MigrationSchemaSqlGenerator`
+  emits DDL for the current default datasource
+- `GlobalMigrationSchemaSqlGeneratorFactory`
+  routes DDL generation by datasource name in multi-datasource applications
 
 Minimal example:
 
@@ -115,6 +119,42 @@ public class ArchiveMigrationRunner {
 
     public MigrationReport migrateArchive() {
         return globalMigrationTaskFactory.executeForEntity("archiveDs", UserAccount.class, "id");
+    }
+}
+```
+
+If the goal is to prepare schema changes first and run the historical backfill later, inject the DDL generator directly:
+
+```java
+@Service
+public class UserAccountSchemaRunner {
+
+    private final MigrationSchemaSqlGenerator migrationSchemaSqlGenerator;
+
+    public UserAccountSchemaRunner(MigrationSchemaSqlGenerator migrationSchemaSqlGenerator) {
+        this.migrationSchemaSqlGenerator = migrationSchemaSqlGenerator;
+    }
+
+    public List<String> ddl() {
+        return migrationSchemaSqlGenerator.generateForEntity(UserAccount.class);
+    }
+}
+```
+
+For multi-datasource applications:
+
+```java
+@Service
+public class ArchiveSchemaRunner {
+
+    private final GlobalMigrationSchemaSqlGeneratorFactory ddlFactory;
+
+    public ArchiveSchemaRunner(GlobalMigrationSchemaSqlGeneratorFactory ddlFactory) {
+        this.ddlFactory = ddlFactory;
+    }
+
+    public Map<String, List<String>> ddl() {
+        return ddlFactory.generateAllRegisteredTablesGrouped("archiveDs");
     }
 }
 ```
@@ -177,6 +217,39 @@ This entry deduplicates by physical table name, so the same table is migrated on
 If a checkpoint falls behind a committed batch, the writer replays idempotently and skips rows that already match the target state instead of inserting duplicate external rows or overwriting the main table again.
 When the same `dataSource + entity/table` task starts concurrently, instances first compete for a checkpoint lock; the losers fail fast with `CHECKPOINT_LOCKED`.
 When troubleshooting cursor-related issues, enable `debug` logging. The migration module emits `migration-read-batch`, `migration-load-current-row`, `migration-update-main-row`, and `migration-verify-main-row`, including the SQL, cursor values, and Java types.
+
+## Migration DDL Generation
+
+The migration module also includes a standalone schema DDL generator for producing `CREATE TABLE` / `ALTER TABLE` SQL before the historical data backfill starts.
+
+```java
+MigrationSchemaSqlGenerator generator =
+        new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, encryptionProperties);
+
+List<String> ddl = generator.generateForEntity(UserAccount.class);
+Map<String, List<String>> grouped = generator.generateAllRegisteredTablesGrouped();
+```
+
+Default sizing rules:
+
+- `hash` / `assistedQueryColumn`: fixed length `128`
+- `likeQueryColumn`: same length as the plaintext source column
+- `storageColumn`: `64 + source_length * 4`
+- when a separate table is missing, the generator emits `CREATE TABLE`
+- when a separate table already exists, it does not auto-change `storageIdColumn`, which avoids mutating an existing external-table primary key unexpectedly
+
+Dialect compatibility:
+
+- the DDL generator reuses the same `sql-dialect` / `datasource-dialects` resolver as the runtime plugin
+- `MYSQL` / `OCEANBASE`: emits MySQL-style `add column` / `modify column` / `varchar`
+- `DM` / `ORACLE12`: emits `add (...)` / `modify (...)` / `varchar2`
+- `CLICKHOUSE`: existing-table add/modify SQL is emitted in ClickHouse style, but auto-create is rejected because ClickHouse table creation still requires manual `ENGINE`, `ORDER BY`, and related clauses
+
+Usage notes:
+
+- the generator only returns SQL; it does not execute it
+- advanced objects such as indexes, constraints, comments, and ClickHouse engine clauses must still be added manually
+- if your separate-table primary key is not the default string reference id but a numeric or custom strategy, keep the existing table definition instead of blindly replacing it with auto-created DDL
 
 If you want to build the task first and execute it later:
 

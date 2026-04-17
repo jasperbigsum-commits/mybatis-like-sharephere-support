@@ -61,7 +61,7 @@ If you publish locally with GPG, Maven also needs the standard GPG configuration
 
 ## GitHub Actions Release
 
-The repository already contains [publish-maven-central.yml](E:/IdeaProject/mybatis-like-sharephere-support/.github/workflows/publish-maven-central.yml).
+The repository already contains [publish-maven-central.yml](.github/workflows/publish-maven-central.yml).
 
 Current behavior:
 

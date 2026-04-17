@@ -11,10 +11,23 @@ public final class KeepFromXToYLikeQueryAlgorithm extends AbstractMaskLikeQueryA
     private final int toY;
     private final char replaceChar;
 
+    /**
+     * 创建仅保留闭区间 [X, Y] 的 LIKE 预处理算法。
+     *
+     * @param fromX 保留区间起点
+     * @param toY 保留区间终点
+     */
     public KeepFromXToYLikeQueryAlgorithm(int fromX, int toY) {
         this(fromX, toY, DEFAULT_REPLACE_CHAR);
     }
 
+    /**
+     * 创建仅保留闭区间 [X, Y] 的 LIKE 预处理算法。
+     *
+     * @param fromX 保留区间起点
+     * @param toY 保留区间终点
+     * @param replaceChar 区间外覆盖字符
+     */
     public KeepFromXToYLikeQueryAlgorithm(int fromX, int toY, char replaceChar) {
         requireNonNegative("fromX", fromX);
         requireNonNegative("toY", toY);

@@ -12,19 +12,21 @@ public final class MaskFromXToYLikeQueryAlgorithm extends AbstractMaskLikeQueryA
     private final char replaceChar;
 
     /**
-     * from x to y mask like query algorithm
-     * @param fromX from x
-     * @param toY to y
+     * 创建覆盖闭区间 [X, Y] 的 LIKE 预处理算法。
+     *
+     * @param fromX 覆盖区间起点
+     * @param toY 覆盖区间终点
      */
     public MaskFromXToYLikeQueryAlgorithm(int fromX, int toY) {
         this(fromX, toY, DEFAULT_REPLACE_CHAR);
     }
 
-    /**（
-     * from x to y mask like query algorithm
-     * @param fromX from x
-     * @param toY to y
-     * @param replaceChar replace character
+    /**
+     * 创建覆盖闭区间 [X, Y] 的 LIKE 预处理算法。
+     *
+     * @param fromX 覆盖区间起点
+     * @param toY 覆盖区间终点
+     * @param replaceChar 覆盖字符
      */
     public MaskFromXToYLikeQueryAlgorithm(int fromX, int toY, char replaceChar) {
         requireNonNegative("fromX", fromX);

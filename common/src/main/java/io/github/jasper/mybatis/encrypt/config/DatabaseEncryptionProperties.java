@@ -387,22 +387,48 @@ public class DatabaseEncryptionProperties {
          */
         private SqlDialect sqlDialect;
 
+        /**
+         * 返回数据源名称匹配模式。
+         *
+         * @return 数据源名称匹配模式
+         */
         public String getDatasourceNamePattern() {
             return datasourceNamePattern;
         }
 
+        /**
+         * 设置数据源名称匹配模式。
+         *
+         * @param datasourceNamePattern 数据源名称匹配模式
+         */
         public void setDatasourceNamePattern(String datasourceNamePattern) {
             this.datasourceNamePattern = datasourceNamePattern;
         }
 
+        /**
+         * 返回命中后的 SQL 方言。
+         *
+         * @return SQL 方言
+         */
         public SqlDialect getSqlDialect() {
             return sqlDialect;
         }
 
+        /**
+         * 设置命中后的 SQL 方言。
+         *
+         * @param sqlDialect SQL 方言
+         */
         public void setSqlDialect(SqlDialect sqlDialect) {
             this.sqlDialect = sqlDialect;
         }
 
+        /**
+         * 判断当前数据源名称是否命中该规则。
+         *
+         * @param dataSourceName 数据源名称
+         * @return 命中时返回 {@code true}
+         */
         public boolean matches(String dataSourceName) {
             return matchesPipePattern(datasourceNamePattern, dataSourceName);
         }
@@ -443,50 +469,110 @@ public class DatabaseEncryptionProperties {
          */
         private List<BackupColumnTemplateRuleProperties> backupColumnTemplates = new ArrayList<>();
 
+        /**
+         * 返回默认迁移游标列。
+         *
+         * @return 默认迁移游标列
+         */
         public List<String> getDefaultCursorColumns() {
             return defaultCursorColumns;
         }
 
+        /**
+         * 设置默认迁移游标列。
+         *
+         * @param defaultCursorColumns 默认迁移游标列
+         */
         public void setDefaultCursorColumns(List<String> defaultCursorColumns) {
             this.defaultCursorColumns = defaultCursorColumns;
         }
 
+        /**
+         * 返回 checkpoint 持久化目录。
+         *
+         * @return checkpoint 持久化目录
+         */
         public String getCheckpointDirectory() {
             return checkpointDirectory;
         }
 
+        /**
+         * 设置 checkpoint 持久化目录。
+         *
+         * @param checkpointDirectory checkpoint 持久化目录
+         */
         public void setCheckpointDirectory(String checkpointDirectory) {
             this.checkpointDirectory = checkpointDirectory;
         }
 
+        /**
+         * 返回默认迁移批大小。
+         *
+         * @return 默认迁移批大小
+         */
         public int getBatchSize() {
             return batchSize;
         }
 
+        /**
+         * 设置默认迁移批大小。
+         *
+         * @param batchSize 默认迁移批大小
+         */
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
         }
 
+        /**
+         * 返回默认是否启用写后校验。
+         *
+         * @return 写后校验开关
+         */
         public boolean isVerifyAfterWrite() {
             return verifyAfterWrite;
         }
 
+        /**
+         * 设置默认是否启用写后校验。
+         *
+         * @param verifyAfterWrite 写后校验开关
+         */
         public void setVerifyAfterWrite(boolean verifyAfterWrite) {
             this.verifyAfterWrite = verifyAfterWrite;
         }
 
+        /**
+         * 返回全局排除的迁移表规则。
+         *
+         * @return 全局排除的迁移表规则
+         */
         public List<String> getExcludeTables() {
             return excludeTables;
         }
 
+        /**
+         * 设置全局排除的迁移表规则。
+         *
+         * @param excludeTables 全局排除的迁移表规则
+         */
         public void setExcludeTables(List<String> excludeTables) {
             this.excludeTables = excludeTables;
         }
 
+        /**
+         * 返回备份列模板规则。
+         *
+         * @return 备份列模板规则
+         */
         public List<BackupColumnTemplateRuleProperties> getBackupColumnTemplates() {
             return backupColumnTemplates;
         }
 
+        /**
+         * 设置备份列模板规则。
+         *
+         * @param backupColumnTemplates 备份列模板规则
+         */
         public void setBackupColumnTemplates(List<BackupColumnTemplateRuleProperties> backupColumnTemplates) {
             this.backupColumnTemplates = backupColumnTemplates;
         }
@@ -538,26 +624,56 @@ public class DatabaseEncryptionProperties {
          */
         private String template = "${column}_backup";
 
+        /**
+         * 返回匹配主表名的 pipe 模式。
+         *
+         * @return 主表匹配模式
+         */
         public String getTablePattern() {
             return tablePattern;
         }
 
+        /**
+         * 设置匹配主表名的 pipe 模式。
+         *
+         * @param tablePattern 主表匹配模式
+         */
         public void setTablePattern(String tablePattern) {
             this.tablePattern = tablePattern;
         }
 
+        /**
+         * 返回匹配字段选择器的 pipe 模式。
+         *
+         * @return 字段匹配模式
+         */
         public String getFieldPattern() {
             return fieldPattern;
         }
 
+        /**
+         * 设置匹配字段选择器的 pipe 模式。
+         *
+         * @param fieldPattern 字段匹配模式
+         */
         public void setFieldPattern(String fieldPattern) {
             this.fieldPattern = fieldPattern;
         }
 
+        /**
+         * 返回备份列模板。
+         *
+         * @return 备份列模板
+         */
         public String getTemplate() {
             return template;
         }
 
+        /**
+         * 设置备份列模板。
+         *
+         * @param template 备份列模板
+         */
         public void setTemplate(String template) {
             this.template = template;
         }

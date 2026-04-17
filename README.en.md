@@ -4,6 +4,7 @@
 
 - Chinese migration guide: [docs/migration-guide.zh-CN.md](docs/migration-guide.zh-CN.md)
 - English migration guide: [docs/migration-guide.en.md](docs/migration-guide.en.md)
+- Release guide: [RELEASE.md](RELEASE.md)
 
 `mybatis-like-sharephere-support` is a lightweight field-encryption extension for MyBatis and MyBatis-Plus. It focuses on transparent field encryption, assisted equality lookup, LIKE lookup support, SQL rewrite, and automatic result decryption with a conservative fail-fast strategy.
 
@@ -68,12 +69,64 @@ This is closer to common domestic commercial-crypto expectations, but using thes
 - Algorithm SPI extension points
 - Standalone migration and verification tasks for historical data
 
+## DTO Result Inference
+
+When the returned DTO does not declare `@EncryptField` / `@EncryptTable`, you can add
+`@EncryptResultHint` to the mapper method. The framework preloads the source entity or table rules first,
+then reuses ResultMap mappings, column aliases, and auto camel-case mapping to infer which DTO properties need decryption.
+
+```java
+@EncryptResultHint(entities = UserRecord.class)
+@Select("""
+    select u.id, u.name, u.phone
+    from user_account u
+    where u.id = #{id}
+    """)
+PlainUserProjectionDto selectPlainUser(@Param("id") Long id);
+```
+
+Single-table `select *` / `select t.*` is also supported:
+
+```java
+@EncryptResultHint(entities = UserRecord.class)
+@Select("select * from user_account where id = #{id}")
+PlainUserProjectionDto selectPlainUserByWildcard(@Param("id") Long id);
+```
+
+Notes:
+
+- `select *` is recommended only for single-table queries or explicit `t.*`
+- for multi-table joins with bare `select *`, inference stays conservative because source columns are ambiguous
+- `@EncryptResultHint` only preloads source rules; it does not redefine field encryption metadata
+
 ## Known limits
 
 - No support for encrypted-field `ORDER BY`
 - No support for range predicates on encrypted fields such as `BETWEEN`, `>`, `<`
 - No promise of correct rewrite for arbitrary deeply nested or highly dynamic SQL
 - Conservative failure is preferred over silent corruption
+
+## Build And Release
+
+Use this for normal local builds:
+
+```bash
+mvn -Dmaven.repo.local=.m2repo install
+```
+
+By default, GPG signing and Central publishing plugins are not activated, which keeps local development and normal CI builds lightweight.
+
+Enable the release profile only for real publishing:
+
+```bash
+mvn -Dmaven.repo.local=.m2repo -Drelease.publish=true deploy
+```
+
+Notes:
+
+- GPG signing and Central Publishing are activated only when `release.publish=true`
+- without that flag, `package` / `install` performs only local build and local repository installation
+- the examples use the project-local `.m2repo` to keep dependency resolution isolated and reproducible
 
 ## Runtime error model
 

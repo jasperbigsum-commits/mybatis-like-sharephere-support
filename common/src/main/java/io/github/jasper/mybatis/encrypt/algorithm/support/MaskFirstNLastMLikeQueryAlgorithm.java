@@ -11,10 +11,23 @@ public final class MaskFirstNLastMLikeQueryAlgorithm extends AbstractMaskLikeQue
     private final int lastM;
     private final char replaceChar;
 
+    /**
+     * 创建覆盖前 N 位和后 M 位的 LIKE 预处理算法。
+     *
+     * @param firstN 覆盖前 N 位
+     * @param lastM 覆盖后 M 位
+     */
     public MaskFirstNLastMLikeQueryAlgorithm(int firstN, int lastM) {
         this(firstN, lastM, DEFAULT_REPLACE_CHAR);
     }
 
+    /**
+     * 创建覆盖前 N 位和后 M 位的 LIKE 预处理算法。
+     *
+     * @param firstN 覆盖前 N 位
+     * @param lastM 覆盖后 M 位
+     * @param replaceChar 覆盖字符
+     */
     public MaskFirstNLastMLikeQueryAlgorithm(int firstN, int lastM, char replaceChar) {
         requireNonNegative("firstN", firstN);
         requireNonNegative("lastM", lastM);

@@ -5,6 +5,9 @@ package io.github.jasper.mybatis.encrypt.migration;
  */
 public interface MigrationCheckpointLock extends AutoCloseable {
 
+    /**
+     * Release the current checkpoint lock.
+     */
     @Override
     void close();
 }

@@ -10,6 +10,7 @@
     </parent>
 
     <artifactId>mybatis-like-sharephere-support-bom</artifactId>
+    <packaging>pom</packaging>
     <name>mybatis-like-sharephere-support-bom</name>
     <description>BOM for mybatis-like-sharephere-support starter and migration modules.</description>
     <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>

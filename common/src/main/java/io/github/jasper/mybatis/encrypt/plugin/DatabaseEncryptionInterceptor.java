@@ -64,6 +64,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
      * @param properties 插件配置属性
      * @param separateTableEncryptionManager 独立表加密管理器
      * @param metadataRegistry 加密元数据注册中心
+     * @param dataSourceNameResolver 数据源名称解析器
      */
     public DatabaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
                                          ResultDecryptor resultDecryptor,

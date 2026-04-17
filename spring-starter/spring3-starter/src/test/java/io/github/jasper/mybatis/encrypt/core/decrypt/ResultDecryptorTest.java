@@ -23,6 +23,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlg
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
+import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 
 class ResultDecryptorTest {
@@ -129,6 +130,46 @@ class ResultDecryptorTest {
         assertEquals("zoe", dto.getName());
     }
 
+    @Test
+    void shouldDecryptPlainDtoWithoutEncryptFieldByMethodHintAndAutoMappedProjection() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13400134000"));
+        dto.setName("maya");
+        MappedStatement mappedStatement = hintedAutoMappedDtoStatement();
+
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(dto));
+        } finally {
+            decryptor.endQueryScope();
+        }
+
+        assertEquals("13400134000", dto.getPhone());
+        assertEquals("maya", dto.getName());
+    }
+
+    @Test
+    void shouldDecryptPlainDtoWithoutEncryptFieldByMethodHintAndSelectAll() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13300133000"));
+        dto.setName("wildcard");
+        MappedStatement mappedStatement = hintedSelectAllDtoStatement();
+
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(dto));
+        } finally {
+            decryptor.endQueryScope();
+        }
+
+        assertEquals("13300133000", dto.getPhone());
+        assertEquals("wildcard", dto.getName());
+    }
+
     private ResultDecryptor createDecryptor(Sm4CipherAlgorithm sm4, DatabaseEncryptionProperties properties) {
         return new ResultDecryptor(
                 new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
@@ -186,6 +227,32 @@ class ResultDecryptorTest {
                 "select u.id, u.name, u.phone as phone from user_account u", List.of(), parameterObject);
         return new MappedStatement.Builder(configuration, "test.selectAutoMappedConfiguredDto", sqlSource,
                 SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement hintedAutoMappedDtoStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.hintedAutoMappedDto", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id, u.name, u.phone as phone from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, HintMapper.class.getName() + ".selectPlainUserProjection",
+                sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement hintedSelectAllDtoStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.hintedSelectAllDto", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select * from user_account", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, HintMapper.class.getName() + ".selectPlainUserByWildcard",
+                sqlSource, SqlCommandType.SELECT)
                 .resultMaps(List.of(resultMap))
                 .build();
     }
@@ -300,5 +367,14 @@ class ResultDecryptorTest {
         public String getProblematic() {
             throw new IllegalStateException("unmapped getter should not be traversed");
         }
+    }
+
+    interface HintMapper {
+
+        @EncryptResultHint(entities = UserEntity.class)
+        PlainUserProjectionDto selectPlainUserProjection();
+
+        @EncryptResultHint(entities = UserEntity.class)
+        PlainUserProjectionDto selectPlainUserByWildcard();
     }
 }

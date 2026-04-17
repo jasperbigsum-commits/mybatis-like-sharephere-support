@@ -4,6 +4,7 @@
 
 - 中文迁移指南：[docs/migration-guide.zh-CN.md](docs/migration-guide.zh-CN.md)
 - English migration guide: [docs/migration-guide.en.md](docs/migration-guide.en.md)
+- 发布指南：[RELEASE.md](RELEASE.md)
 
 一个面向 MyBatis / MyBatis-Plus 的数据库字段加密插件，目标是在尽量不侵入业务代码的前提下，为敏感字段提供透明加密、辅助等值查询、LIKE 查询列改写以及结果自动解密能力。
 
@@ -471,6 +472,35 @@ UserAccount selectByPhone(@Param("phone") String phone);
 
 业务层仍然传明文手机号，插件会自动改写到辅助列查询并在结果返回时解密。
 
+## DTO 结果推断
+
+如果返回 DTO 本身没有 `@EncryptField` / `@EncryptTable`，可以在 Mapper 方法上补
+`@EncryptResultHint`，让框架先预热来源实体或来源表规则，再结合 ResultMap、列别名和自动驼峰映射完成结果解密推断。
+
+```java
+@EncryptResultHint(entities = UserRecord.class)
+@Select("""
+    select u.id, u.name, u.phone
+    from user_account u
+    where u.id = #{id}
+    """)
+PlainUserProjectionDto selectPlainUser(@Param("id") Long id);
+```
+
+也支持单表场景的 `select *` / `select t.*`：
+
+```java
+@EncryptResultHint(entities = UserRecord.class)
+@Select("select * from user_account where id = #{id}")
+PlainUserProjectionDto selectPlainUserByWildcard(@Param("id") Long id);
+```
+
+注意：
+
+- `select *` 只建议用于单表或显式 `t.*` 的场景
+- 多表 join 下如果直接写裸 `select *`，由于来源列存在歧义，推断会保持保守
+- `@EncryptResultHint` 只负责预热来源规则，不重复定义字段加密元数据
+
 ## 独立加密表示例
 
 当不希望把敏感字段落在业务主表中时，可以把字段改为独立加密表存储。
@@ -557,6 +587,26 @@ mybatis-like-sharephere-support
 - Spring Boot 自动装配 + MyBatis + H2 集成测试
 
 本仓库当前没有 `mvnw`，本地开发需自行提供 Maven 环境。
+
+日常本地构建可直接使用：
+
+```bash
+mvn -Dmaven.repo.local=.m2repo install
+```
+
+默认不会触发 GPG 签名和 Central 发布插件，适合本地开发与普通 CI。
+
+如果需要正式发布，再显式开启发布 profile：
+
+```bash
+mvn -Dmaven.repo.local=.m2repo -Drelease.publish=true deploy
+```
+
+说明：
+
+- `release.publish=true` 时才会启用 GPG 签名和 Central Publishing 插件
+- 未开启该参数时，`package` / `install` 只做本地构建和本地仓库安装
+- 示例里统一使用项目内 `.m2repo`，便于隔离依赖和复现构建环境
 
 ## 后续建议
 

@@ -98,7 +98,7 @@ public class SqlRewriteEngine {
      * @return 改写结果；当没有命中加密规则时返回未变更结果
      */
     public RewriteResult rewrite(MappedStatement mappedStatement, BoundSql boundSql) {
-        metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject());
+        metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject(), boundSql.getSql());
         try {
             Statement statement = CCJSqlParserUtil.parse(boundSql.getSql());
             SqlRewriteContext context = new SqlRewriteContext(

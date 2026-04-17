@@ -706,6 +706,156 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldDecryptPlainResultTypeWithXmlMapperWithoutHint() throws Exception {
+        insertEncryptedUserRow(67L, "Xiom", "13300133067", "320101199001010167");
+        insertEncryptedUserRow(68L, "Yale", "13300133068", "320101199001010168");
+
+        insertOrderAccountRow(304L, 67L, 68L, 3004L, "xml-flat-auto", "grid-x", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<XmlAliasedOrderJoinResultDto> views = mapper.selectPlainOrderJoinResultDtosByXmlWithoutHint();
+            assertEquals(1, views.size());
+
+            XmlAliasedOrderJoinResultDto view = views.get(0);
+            assertEquals(304L, view.getOrderId());
+            assertEquals("Xiom", view.getCaptainName());
+            assertEquals("13300133067", view.getCaptainContactToken());
+            assertEquals("320101199001010167", view.getCaptainCredentialToken());
+            assertEquals("Yale", view.getViceName());
+            assertEquals("13300133068", view.getViceContactToken());
+            assertEquals("320101199001010168", view.getViceCredentialToken());
+        }
+    }
+
+    @Test
+    void shouldCompareXmlMapperDecryptBehaviorWithAndWithoutEncryptResultHint() throws Exception {
+        insertEncryptedUserRow(69L, "Zed", "13300133069", "320101199001010169");
+        insertEncryptedUserRow(70L, "Ava", "13300133070", "320101199001010170");
+
+        insertOrderAccountRow(305L, 69L, 70L, 3005L, "xml-flat-compare", "grid-y", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            XmlAliasedOrderJoinResultDto withoutHint = mapper.selectPlainOrderJoinResultDtosByXmlWithoutHint().get(0);
+            XmlAliasedOrderJoinResultDto withHint = mapper.selectPlainOrderJoinResultDtosByXmlWithEntityHint().get(0);
+
+            assertEquals(withoutHint.getOrderId(), withHint.getOrderId());
+            assertEquals(withoutHint.getCaptainName(), withHint.getCaptainName());
+            assertEquals(withoutHint.getCaptainContactToken(), withHint.getCaptainContactToken());
+            assertEquals(withoutHint.getCaptainCredentialToken(), withHint.getCaptainCredentialToken());
+            assertEquals(withoutHint.getViceName(), withHint.getViceName());
+            assertEquals(withoutHint.getViceContactToken(), withHint.getViceContactToken());
+            assertEquals(withoutHint.getViceCredentialToken(), withHint.getViceCredentialToken());
+
+            assertEquals(305L, withHint.getOrderId());
+            assertEquals("Zed", withHint.getCaptainName());
+            assertEquals("13300133069", withHint.getCaptainContactToken());
+            assertEquals("320101199001010169", withHint.getCaptainCredentialToken());
+            assertEquals("Ava", withHint.getViceName());
+            assertEquals("13300133070", withHint.getViceContactToken());
+            assertEquals("320101199001010170", withHint.getViceCredentialToken());
+        }
+    }
+
+    @Test
+    void shouldReturnPlainTextInsteadOfStoredCipherForXmlResultType() throws Exception {
+        insertEncryptedUserRow(77L, "Ione", "13400134077", "320101199001010177");
+        insertEncryptedUserRow(78L, "Jace", "13400134078", "320101199001010178");
+        insertOrderAccountRow(307L, 77L, 78L, 3007L, "xml-flat-cipher-check", "grid-check", 0);
+
+        String ownerPhoneCipher = loadPhoneCipher(77L);
+        String ownerIdCardCipher = loadSeparateTableCipher(77L);
+        String reviewerPhoneCipher = loadPhoneCipher(78L);
+        String reviewerIdCardCipher = loadSeparateTableCipher(78L);
+        Sm4CipherAlgorithm cipherAlgorithm = new Sm4CipherAlgorithm("integration-test-key");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            XmlAliasedOrderJoinResultDto view = mapper.selectPlainOrderJoinResultDtosByXmlWithoutHint().stream()
+                    .filter(each -> Long.valueOf(307L).equals(each.getOrderId()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNotEquals(ownerPhoneCipher, view.getCaptainContactToken());
+            assertEquals(cipherAlgorithm.decrypt(ownerPhoneCipher), view.getCaptainContactToken());
+
+            assertNotEquals(ownerIdCardCipher, view.getCaptainCredentialToken());
+            assertEquals(cipherAlgorithm.decrypt(ownerIdCardCipher), view.getCaptainCredentialToken());
+
+            assertNotEquals(reviewerPhoneCipher, view.getViceContactToken());
+            assertEquals(cipherAlgorithm.decrypt(reviewerPhoneCipher), view.getViceContactToken());
+
+            assertNotEquals(reviewerIdCardCipher, view.getViceCredentialToken());
+            assertEquals(cipherAlgorithm.decrypt(reviewerIdCardCipher), view.getViceCredentialToken());
+        }
+    }
+
+    @Test
+    void shouldReturnPlainTextForComplexJoinResultTypeComparedWithStoredCipher() throws Exception {
+        insertEncryptedUserRow(79L, "Kira", "13400134079", "320101199001010179");
+        insertEncryptedUserRow(80L, "Lars", "13400134080", "320101199001010180");
+        insertOrderAccountRow(308L, 79L, 80L, 3008L, "complex-join-cipher-check", "grid-join", 0);
+
+        String ownerPhoneCipher = loadPhoneCipher(79L);
+        String ownerIdCardCipher = loadSeparateTableCipher(79L);
+        String reviewerPhoneCipher = loadPhoneCipher(80L);
+        String reviewerIdCardCipher = loadSeparateTableCipher(80L);
+        Sm4CipherAlgorithm cipherAlgorithm = new Sm4CipherAlgorithm("integration-test-key");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            PlainOrderJoinResultDto view = mapper.selectPlainOrderJoinResultDtosWithTableHint().stream()
+                    .filter(each -> Long.valueOf(308L).equals(each.getOrderId()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertNotEquals(ownerPhoneCipher, view.getOwnerPhone());
+            assertEquals(cipherAlgorithm.decrypt(ownerPhoneCipher), view.getOwnerPhone());
+
+            assertNotEquals(ownerIdCardCipher, view.getOwnerIdCard());
+            assertEquals(cipherAlgorithm.decrypt(ownerIdCardCipher), view.getOwnerIdCard());
+
+            assertNotEquals(reviewerPhoneCipher, view.getReviewerPhone());
+            assertEquals(cipherAlgorithm.decrypt(reviewerPhoneCipher), view.getReviewerPhone());
+
+            assertNotEquals(reviewerIdCardCipher, view.getReviewerIdCard());
+            assertEquals(cipherAlgorithm.decrypt(reviewerIdCardCipher), view.getReviewerIdCard());
+        }
+    }
+
+    @Test
+    void shouldReturnPlainTextForUnionNestedSubqueryResultTypeComparedWithStoredCipher() throws Exception {
+        insertEncryptedUserRow(97L, "Mira", "13600136097", "320101199001010197");
+        insertEncryptedUserRow(98L, "Nox", "13600136098", "320101199001010198");
+        insertEncryptedUserRow(99L, "Orin", "13600136099", "320101199001010199");
+
+        insertOrderAccountRow(907L, 97L, null, 9007L, "plain-union-check-a", "grid-u7", 0);
+        insertOrderAccountRow(908L, 97L, 98L, 9008L, "plain-union-check-b", "grid-u8", 0);
+        insertOrderAccountRow(909L, 99L, null, 9009L, "plain-union-check-c", "grid-u9", 0);
+        insertOrderParticipantRow(997L, 907L, 97L, 1);
+        insertOrderParticipantRow(998L, 908L, 98L, 2);
+        insertOrderParticipantRow(999L, 909L, 99L, 1);
+
+        Sm4CipherAlgorithm cipherAlgorithm = new Sm4CipherAlgorithm("integration-test-key");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<PlainUserProjectionDto> users = mapper.selectPlainByMultiUnionNestedSubqueryWithTableHint(
+                    "13600136097",
+                    "320101199001010198",
+                    "%6099",
+                    "%0199"
+            );
+
+            assertEquals(3, users.size());
+            assertPlainProjectionMatchesStoredCipher(users.get(0), 97L, cipherAlgorithm);
+            assertPlainProjectionMatchesStoredCipher(users.get(1), 98L, cipherAlgorithm);
+            assertPlainProjectionMatchesStoredCipher(users.get(2), 99L, cipherAlgorithm);
+        }
+    }
+
+    @Test
     void shouldReadParentListContainingChildDtoListAcrossStorageModes() throws Exception {
         UserRecord firstA = user(71L, "Tina", "13400134071", "320101199001010171");
         UserRecord firstB = user(72L, "Uma", "13400134072", "320101199001010172");
@@ -1282,6 +1432,44 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    private String loadPhoneCipher(long id) throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone_cipher from user_account where id = " + id)) {
+            resultSet.next();
+            return resultSet.getString(1);
+        }
+    }
+
+    private String loadSeparateTableCipher(long id) throws Exception {
+        String sql = """
+                select e.id_card_cipher
+                from user_account u
+                join user_id_card_encrypt e on e.id_card_hash = u.id_card
+                where u.id = ?
+                """;
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getString(1);
+            }
+        }
+    }
+
+    private void assertPlainProjectionMatchesStoredCipher(PlainUserProjectionDto dto,
+                                                          long userId,
+                                                          Sm4CipherAlgorithm cipherAlgorithm) throws Exception {
+        String phoneCipher = loadPhoneCipher(userId);
+        String idCardCipher = loadSeparateTableCipher(userId);
+        assertNotEquals(phoneCipher, dto.getPhone());
+        assertEquals(cipherAlgorithm.decrypt(phoneCipher), dto.getPhone());
+        assertNotEquals(idCardCipher, dto.getIdCard());
+        assertEquals(cipherAlgorithm.decrypt(idCardCipher), dto.getIdCard());
+    }
+
     private String loadPhoneHash(long id) throws Exception {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
@@ -1579,6 +1767,14 @@ class MybatisEncryptionIntegrationTest {
                 @Param("phoneLike") String phoneLike,
                 @Param("idCardLike") String idCardLike
         );
+
+        @EncryptResultHint(tables = "user_account")
+        List<XmlAliasedOrderJoinResultDto> selectPlainOrderJoinResultDtosByXmlWithTableHint();
+
+        @EncryptResultHint(entities = UserRecord.class)
+        List<XmlAliasedOrderJoinResultDto> selectPlainOrderJoinResultDtosByXmlWithEntityHint();
+
+        List<XmlAliasedOrderJoinResultDto> selectPlainOrderJoinResultDtosByXmlWithoutHint();
 
         @Select("""
                 select o.id as order_id,
@@ -2256,6 +2452,73 @@ class MybatisEncryptionIntegrationTest {
 
         public void setReviewerIdCard(String reviewerIdCard) {
             this.reviewerIdCard = reviewerIdCard;
+        }
+    }
+
+    static class XmlAliasedOrderJoinResultDto {
+
+        private Long orderId;
+        private String captainName;
+        private String captainContactToken;
+        private String captainCredentialToken;
+        private String viceName;
+        private String viceContactToken;
+        private String viceCredentialToken;
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getCaptainName() {
+            return captainName;
+        }
+
+        public void setCaptainName(String captainName) {
+            this.captainName = captainName;
+        }
+
+        public String getCaptainContactToken() {
+            return captainContactToken;
+        }
+
+        public void setCaptainContactToken(String captainContactToken) {
+            this.captainContactToken = captainContactToken;
+        }
+
+        public String getCaptainCredentialToken() {
+            return captainCredentialToken;
+        }
+
+        public void setCaptainCredentialToken(String captainCredentialToken) {
+            this.captainCredentialToken = captainCredentialToken;
+        }
+
+        public String getViceName() {
+            return viceName;
+        }
+
+        public void setViceName(String viceName) {
+            this.viceName = viceName;
+        }
+
+        public String getViceContactToken() {
+            return viceContactToken;
+        }
+
+        public void setViceContactToken(String viceContactToken) {
+            this.viceContactToken = viceContactToken;
+        }
+
+        public String getViceCredentialToken() {
+            return viceCredentialToken;
+        }
+
+        public void setViceCredentialToken(String viceCredentialToken) {
+            this.viceCredentialToken = viceCredentialToken;
         }
     }
 

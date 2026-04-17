@@ -1,11 +1,24 @@
 package io.github.jasper.mybatis.encrypt.core.metadata;
 
+import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
+import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.schema.Table;
+import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.insert.Insert;
+import net.sf.jsqlparser.statement.select.FromItem;
+import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.ParenthesedSelect;
+import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SetOperationList;
+import net.sf.jsqlparser.statement.update.Update;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ResultMap;
 
@@ -110,7 +123,23 @@ public class EncryptMetadataRegistry {
      * @param parameterObject 当前 MyBatis 参数对象
      */
     public void warmUp(MappedStatement mappedStatement, Object parameterObject) {
+        warmUp(mappedStatement, parameterObject, null);
+    }
+
+    /**
+     * 预加载当前 mapped statement 执行可能用到的元数据。
+     *
+     * <p>除了参数与结果类型本身，还会尝试根据当前 SQL 中出现的表名，
+     * 反查同 mapper 相关的方法签名里已经声明过的实体类型，
+     * 让 XML {@code resultType} 这类纯 DTO 查询也能建立来源表规则。</p>
+     *
+     * @param mappedStatement 当前 mapped statement
+     * @param parameterObject 当前 MyBatis 参数对象
+     * @param sql 当前待执行 SQL
+     */
+    public void warmUp(MappedStatement mappedStatement, Object parameterObject, String sql) {
         preloadResultHintMetadata(mappedStatement);
+        preloadStatementTableMetadata(mappedStatement, sql);
         mappedStatement.getResultMaps().stream()
                 .map(ResultMap::getType)
                 .filter(this::isCandidateType)
@@ -134,22 +163,43 @@ public class EncryptMetadataRegistry {
     }
 
     /**
+     * 根据当前 statement SQL 中出现的物理表名预热表规则。
+     *
+     * <p>当 mapper 方法返回的是不带加密注解的 DTO，且又没有显式的
+     * {@link EncryptResultHint} 时，仍然可以通过 SQL 里出现的表名，
+     * 结合同 mapper 中已有的实体签名，补装载来源表规则。</p>
+     *
+     * @param mappedStatement 当前 mapped statement
+     * @param sql 当前待执行 SQL
+     */
+    public void preloadStatementTableMetadata(MappedStatement mappedStatement, String sql) {
+        Class<?> mapperType = resolveMapperType(mappedStatement);
+        if (mapperType == null || StringUtils.isBlank(sql)) {
+            return;
+        }
+        for (String tableName : collectTableNames(sql)) {
+            if (findByTable(tableName).isPresent()) {
+                continue;
+            }
+            preloadMapperRelatedEntitiesForTable(mapperType, tableName);
+        }
+    }
+
+    /**
      * 按 mapper 方法上的 {@link EncryptResultHint} 预热来源实体或来源表规则。
      *
      * @param mappedStatement 当前 mapped statement
      */
     public void preloadResultHintMetadata(MappedStatement mappedStatement) {
-        if (mappedStatement == null || StringUtils.isBlank(mappedStatement.getId())) {
+        Class<?> mapperType = resolveMapperType(mappedStatement);
+        if (mapperType == null) {
             return;
         }
-        int separator = mappedStatement.getId().lastIndexOf('.');
-        if (separator <= 0 || separator >= mappedStatement.getId().length() - 1) {
+        String methodName = resolveMappedMethodName(mappedStatement);
+        if (StringUtils.isBlank(methodName)) {
             return;
         }
-        String mapperClassName = mappedStatement.getId().substring(0, separator);
-        String methodName = mappedStatement.getId().substring(separator + 1);
         try {
-            Class<?> mapperType = Class.forName(mapperClassName);
             for (java.lang.reflect.Method method : mapperType.getMethods()) {
                 if (!methodName.equals(method.getName())) {
                     continue;
@@ -161,7 +211,7 @@ public class EncryptMetadataRegistry {
                 preloadHintEntities(hint);
                 preloadHintTables(hint, mapperType);
             }
-        } catch (ClassNotFoundException ignore) {
+        } catch (RuntimeException ignore) {
         }
     }
 
@@ -298,6 +348,10 @@ public class EncryptMetadataRegistry {
     }
 
     private String resolveEntityTableName(Class<?> entityType) {
+        EncryptTable encryptTable = entityType.getAnnotation(EncryptTable.class);
+        if (encryptTable != null && StringUtils.isNotBlank(encryptTable.value())) {
+            return encryptTable.value();
+        }
         String explicit = annotationValue(entityType,
                 "com.baomidou.mybatisplus.annotation.TableName", "value",
                 "jakarta.persistence.Table", "name",
@@ -399,6 +453,123 @@ public class EncryptMetadataRegistry {
         if (type instanceof GenericArrayType) {
             collectTypes(((GenericArrayType) type).getGenericComponentType(), candidates);
         }
+    }
+
+    private Class<?> resolveMapperType(MappedStatement mappedStatement) {
+        if (mappedStatement == null || StringUtils.isBlank(mappedStatement.getId())) {
+            return null;
+        }
+        int separator = mappedStatement.getId().lastIndexOf('.');
+        if (separator <= 0 || separator >= mappedStatement.getId().length() - 1) {
+            return null;
+        }
+        String mapperClassName = mappedStatement.getId().substring(0, separator);
+        try {
+            return Class.forName(mapperClassName);
+        } catch (ClassNotFoundException ignore) {
+            return null;
+        }
+    }
+
+    private String resolveMappedMethodName(MappedStatement mappedStatement) {
+        if (mappedStatement == null || StringUtils.isBlank(mappedStatement.getId())) {
+            return null;
+        }
+        int separator = mappedStatement.getId().lastIndexOf('.');
+        if (separator <= 0 || separator >= mappedStatement.getId().length() - 1) {
+            return null;
+        }
+        return mappedStatement.getId().substring(separator + 1);
+    }
+
+    private Set<String> collectTableNames(String sql) {
+        Set<String> tables = new LinkedHashSet<String>();
+        try {
+            Statement statement = CCJSqlParserUtil.parse(sql);
+            collectTables(statement, tables);
+        } catch (Exception ignore) {
+            return tables;
+        }
+        return tables;
+    }
+
+    private void collectTables(Statement statement, Set<String> tables) {
+        if (statement instanceof Select) {
+            collectTables((Select) statement, tables);
+            return;
+        }
+        if (statement instanceof Update) {
+            Update update = (Update) statement;
+            registerTableName(update.getTable(), tables);
+            if (update.getFromItem() != null) {
+                collectTables(update.getFromItem(), tables);
+            }
+            if (update.getJoins() != null) {
+                for (Join join : update.getJoins()) {
+                    collectTables(join.getRightItem(), tables);
+                }
+            }
+            return;
+        }
+        if (statement instanceof Delete) {
+            Delete delete = (Delete) statement;
+            registerTableName(delete.getTable(), tables);
+            return;
+        }
+        if (statement instanceof Insert) {
+            Insert insert = (Insert) statement;
+            registerTableName(insert.getTable(), tables);
+            if (insert.getSelect() != null) {
+                collectTables(insert.getSelect(), tables);
+            }
+        }
+    }
+
+    private void collectTables(Select select, Set<String> tables) {
+        if (select instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) select;
+            if (parenthesedSelect.getSelect() != null) {
+                collectTables(parenthesedSelect.getSelect(), tables);
+            }
+            return;
+        }
+        if (select instanceof SetOperationList) {
+            SetOperationList setOperationList = (SetOperationList) select;
+            for (Select child : setOperationList.getSelects()) {
+                collectTables(child, tables);
+            }
+            return;
+        }
+        if (!(select instanceof PlainSelect)) {
+            return;
+        }
+        PlainSelect plainSelect = (PlainSelect) select;
+        collectTables(plainSelect.getFromItem(), tables);
+        if (plainSelect.getJoins() != null) {
+            for (Join join : plainSelect.getJoins()) {
+                collectTables(join.getRightItem(), tables);
+            }
+        }
+    }
+
+    private void collectTables(FromItem fromItem, Set<String> tables) {
+        if (fromItem instanceof Table) {
+            registerTableName((Table) fromItem, tables);
+            return;
+        }
+        if (fromItem instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            if (parenthesedSelect.getSelect() != null) {
+                collectTables(parenthesedSelect.getSelect(), tables);
+            }
+        }
+    }
+
+    private void registerTableName(Table table, Set<String> tables) {
+        if (table == null || StringUtils.isBlank(table.getName())) {
+            return;
+        }
+        tables.add(NameUtils.stripIdentifier(table.getName()));
     }
 
     private String annotationValue(java.lang.reflect.AnnotatedElement element, String... annotationSpecs) {

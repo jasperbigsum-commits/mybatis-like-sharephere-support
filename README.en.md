@@ -94,11 +94,58 @@ Single-table `select *` / `select t.*` is also supported:
 PlainUserProjectionDto selectPlainUserByWildcard(@Param("id") Long id);
 ```
 
+If you use XML mappers and aliases that are completely different from the original column names,
+flat `resultType` DTO decryption can still work with `@EncryptResultHint` alone:
+
+```java
+public interface OrderQueryMapper {
+
+    @EncryptResultHint(tables = "user_account")
+    List<XmlAliasedOrderDto> selectFlatOrders();
+}
+```
+
+```xml
+<select id="selectFlatOrders"
+        resultType="com.example.XmlAliasedOrderDto">
+    select o.id as order_id,
+           owner.name as captain_name,
+           owner.phone as captain_contact_token,
+           owner.id_card as captain_credential_token,
+           reviewer.name as vice_name,
+           reviewer.phone as vice_contact_token,
+           reviewer.id_card as vice_credential_token
+    from order_account o
+    join user_account owner on o.user_id = owner.id
+    join user_account reviewer on o.related_user_id = reviewer.id
+    where o.deleted = 0
+</select>
+```
+
+```java
+public class XmlAliasedOrderDto {
+    private Long orderId;
+    private String captainName;
+    private String captainContactToken;
+    private String captainCredentialToken;
+    private String viceName;
+    private String viceContactToken;
+    private String viceCredentialToken;
+}
+```
+
+In this example aliases such as `captain_contact_token` and `vice_credential_token`
+no longer resemble the original encrypted column names. The framework still resolves the
+source table relationships from the SQL projection, matches the correct encryption rules,
+and decrypts the values back into the camel-case DTO properties.
+
 Notes:
 
 - `select *` is recommended only for single-table queries or explicit `t.*`
 - for multi-table joins with bare `select *`, inference stays conservative because source columns are ambiguous
 - `@EncryptResultHint` only preloads source rules; it does not redefine field encryption metadata
+- for flat `resultType` DTOs, complex join / union / derived-table queries can rely on hint-based inference alone
+- for nested object graphs, you still need `@Results` / `resultMap` so MyBatis can build the object structure first
 
 ## Known limits
 

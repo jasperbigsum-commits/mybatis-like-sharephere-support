@@ -170,6 +170,26 @@ class ResultDecryptorTest {
         assertEquals("wildcard", dto.getName());
     }
 
+    @Test
+    void shouldDecryptPlainDtoWithoutEncryptFieldByAutoDetectedSqlSourceTable() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13200132000"));
+        dto.setName("auto");
+        MappedStatement mappedStatement = autoDetectedDtoStatement();
+
+        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
+        try {
+            decryptor.decrypt(List.of(dto));
+        } finally {
+            decryptor.endQueryScope();
+        }
+
+        assertEquals("13200132000", dto.getPhone());
+        assertEquals("auto", dto.getName());
+    }
+
     private ResultDecryptor createDecryptor(Sm4CipherAlgorithm sm4, DatabaseEncryptionProperties properties) {
         return new ResultDecryptor(
                 new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
@@ -253,6 +273,19 @@ class ResultDecryptorTest {
                 "select * from user_account", List.of(), parameterObject);
         return new MappedStatement.Builder(configuration, HintMapper.class.getName() + ".selectPlainUserByWildcard",
                 sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement autoDetectedDtoStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.autoDetectedDto", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id, u.name, u.phone as phone from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration,
+                AutoDetectedMapper.class.getName() + ".selectPlainUserProjection", sqlSource, SqlCommandType.SELECT)
                 .resultMaps(List.of(resultMap))
                 .build();
     }
@@ -376,5 +409,12 @@ class ResultDecryptorTest {
 
         @EncryptResultHint(entities = UserEntity.class)
         PlainUserProjectionDto selectPlainUserByWildcard();
+    }
+
+    interface AutoDetectedMapper {
+
+        PlainUserProjectionDto selectPlainUserProjection();
+
+        int insertUser(UserEntity user);
     }
 }

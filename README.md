@@ -496,11 +496,56 @@ PlainUserProjectionDto selectPlainUser(@Param("id") Long id);
 PlainUserProjectionDto selectPlainUserByWildcard(@Param("id") Long id);
 ```
 
+如果你使用的是 XML mapper，且投影别名完全不同于原字段名，也可以仅通过
+`@EncryptResultHint` 配合 `resultType` 做扁平 DTO 解密：
+
+```java
+public interface OrderQueryMapper {
+
+    @EncryptResultHint(tables = "user_account")
+    List<XmlAliasedOrderDto> selectFlatOrders();
+}
+```
+
+```xml
+<select id="selectFlatOrders"
+        resultType="com.example.XmlAliasedOrderDto">
+    select o.id as order_id,
+           owner.name as captain_name,
+           owner.phone as captain_contact_token,
+           owner.id_card as captain_credential_token,
+           reviewer.name as vice_name,
+           reviewer.phone as vice_contact_token,
+           reviewer.id_card as vice_credential_token
+    from order_account o
+    join user_account owner on o.user_id = owner.id
+    join user_account reviewer on o.related_user_id = reviewer.id
+    where o.deleted = 0
+</select>
+```
+
+```java
+public class XmlAliasedOrderDto {
+    private Long orderId;
+    private String captainName;
+    private String captainContactToken;
+    private String captainCredentialToken;
+    private String viceName;
+    private String viceContactToken;
+    private String viceCredentialToken;
+}
+```
+
+这里的别名 `captain_contact_token` / `vice_credential_token` 与原列名已经完全不同，
+框架仍会先根据 SQL 投影和表来源关系找到对应加密规则，再通过驼峰映射把结果解密回 DTO 属性。
+
 注意：
 
 - `select *` 只建议用于单表或显式 `t.*` 的场景
 - 多表 join 下如果直接写裸 `select *`，由于来源列存在歧义，推断会保持保守
 - `@EncryptResultHint` 只负责预热来源规则，不重复定义字段加密元数据
+- 对于扁平 `resultType` DTO，复杂 join / union / derived table 场景可以只靠 hint 推断
+- 对于嵌套对象图 DTO，仍然需要 `@Results` / `resultMap` 先完成对象装配
 
 ## 独立加密表示例
 

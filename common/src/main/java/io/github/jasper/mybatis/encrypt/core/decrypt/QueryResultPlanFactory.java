@@ -90,6 +90,7 @@ public final class QueryResultPlanFactory {
             return QueryResultPlan.empty();
         }
         metadataRegistry.preloadResultHintMetadata(mappedStatement);
+        metadataRegistry.preloadStatementTableMetadata(mappedStatement, boundSql == null ? null : boundSql.getSql());
         Configuration configuration = mappedStatement.getConfiguration();
         ResultProjectionRuleResolver projectionRuleResolver =
                 ResultProjectionRuleResolver.create(metadataRegistry, boundSql == null ? null : boundSql.getSql());

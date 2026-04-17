@@ -71,6 +71,7 @@ public class EntityMigrationPlanFactory {
                     "No encrypt fields available for migration target: "
                     + resolved.entityName());
         }
+        validateCursorColumns(definition.getCursorColumns(), columnPlans);
         return new EntityMigrationPlan(dataSourceName, resolved.entityType(), resolved.entityName(), normalizedTable,
                 definition.getCursorColumns(),
                 definition.getBatchSize(), definition.isVerifyAfterWrite(), columnPlans);
@@ -177,6 +178,18 @@ public class EntityMigrationPlanFactory {
         if (properties.isMigrationTableExcluded(tableName)) {
             throw new MigrationDefinitionException(MigrationErrorCode.TABLE_EXCLUDED,
                     "Migration target table is excluded by global configuration: " + tableName);
+        }
+    }
+
+    private void validateCursorColumns(List<String> cursorColumns, List<EntityMigrationColumnPlan> columnPlans) {
+        for (String cursorColumn : cursorColumns) {
+            for (EntityMigrationColumnPlan columnPlan : columnPlans) {
+                if (columnPlan.mutatesMainTableColumn(cursorColumn)) {
+                    throw new MigrationDefinitionException(MigrationErrorCode.CURSOR_COLUMN_MUTABLE,
+                            "Migration cursor column will be mutated during migration: " + cursorColumn
+                                    + ", property=" + columnPlan.getProperty());
+                }
+            }
         }
     }
 

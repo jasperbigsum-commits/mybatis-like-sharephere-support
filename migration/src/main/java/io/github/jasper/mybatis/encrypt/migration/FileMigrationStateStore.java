@@ -41,6 +41,8 @@ public class FileMigrationStateStore implements MigrationStateStore {
             properties.load(inputStream);
             MigrationState state = new MigrationState();
             state.setDataSourceName(properties.getProperty("dataSourceName"));
+            state.setDataSourceFingerprint(properties.getProperty("dataSourceFingerprint"));
+            state.setPlanSignature(properties.getProperty("planSignature"));
             state.setEntityName(properties.getProperty("entityName"));
             state.setTableName(properties.getProperty("tableName"));
             state.setCursorColumns(readIndexedList(properties, "cursorColumns",
@@ -79,6 +81,8 @@ public class FileMigrationStateStore implements MigrationStateStore {
         }
         Properties properties = new Properties();
         writeIfPresent(properties, "dataSourceName", state.getDataSourceName());
+        writeIfPresent(properties, "dataSourceFingerprint", state.getDataSourceFingerprint());
+        writeIfPresent(properties, "planSignature", state.getPlanSignature());
         writeIfPresent(properties, "entityName", state.getEntityName());
         writeIfPresent(properties, "tableName", state.getTableName());
         writeIndexedList(properties, "cursorColumns", state.getCursorColumns());

@@ -1,5 +1,8 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
+import io.github.jasper.mybatis.encrypt.util.NameUtils;
+import io.github.jasper.mybatis.encrypt.util.StringUtils;
+
 /**
  * Column-level mapping between plaintext source and encrypted storage fields.
  */
@@ -191,5 +194,38 @@ public final class EntityMigrationColumnPlan {
      */
     public boolean shouldWriteBackup() {
         return backupColumn != null && !backupColumn.trim().isEmpty() && overwritesSourceColumn();
+    }
+
+    /**
+     * Return whether the given main-table column will be mutated during migration.
+     *
+     * @param column main-table column name
+     * @return {@code true} when the column is used as one write target during migration
+     */
+    public boolean mutatesMainTableColumn(String column) {
+        String normalized = NameUtils.normalizeIdentifier(column);
+        if (normalized == null) {
+            return false;
+        }
+        if (overwritesSourceColumn()
+                && normalized.equals(NameUtils.normalizeIdentifier(sourceColumn))) {
+            return true;
+        }
+        if (shouldWriteBackup()
+                && normalized.equals(NameUtils.normalizeIdentifier(backupColumn))) {
+            return true;
+        }
+        if (!storedInSeparateTable
+                && normalized.equals(NameUtils.normalizeIdentifier(storageColumn))) {
+            return true;
+        }
+        if (!storedInSeparateTable
+                && StringUtils.isNotBlank(assistedQueryColumn)
+                && normalized.equals(NameUtils.normalizeIdentifier(assistedQueryColumn))) {
+            return true;
+        }
+        return !storedInSeparateTable
+                && StringUtils.isNotBlank(likeQueryColumn)
+                && normalized.equals(NameUtils.normalizeIdentifier(likeQueryColumn));
     }
 }

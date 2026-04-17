@@ -51,6 +51,8 @@ public class InMemoryMigrationStateStore implements MigrationStateStore {
     private MigrationState copyOf(MigrationState source) {
         MigrationState target = new MigrationState();
         target.setDataSourceName(source.getDataSourceName());
+        target.setDataSourceFingerprint(source.getDataSourceFingerprint());
+        target.setPlanSignature(source.getPlanSignature());
         target.setEntityName(source.getEntityName());
         target.setTableName(source.getTableName());
         target.setCursorColumns(source.getCursorColumns());

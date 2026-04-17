@@ -251,4 +251,190 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals(1L, report.getMigratedRows());
         assertEquals("1", report.getLastProcessedCursor());
     }
+
+    @Test
+    void shouldMigrateUsingTimestampCursorColumn() throws Exception {
+        DataSource dataSource = newDataSource("timestamp_cursor");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "created_at timestamp not null, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, created_at, phone) values (1, TIMESTAMP '2026-04-17 09:00:00', '13800138000')",
+                "insert into user_account (id, created_at, phone) values (2, TIMESTAMP '2026-04-17 09:00:01', '13900139000')");
+
+        DatabaseEncryptionProperties properties = configuredProperties();
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder("user_account", "created_at").batchSize(1).build(),
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                algorithmRegistry(),
+                properties,
+                new FileMigrationStateStore(createTempDirectory("migration-state-timestamp-cursor"))
+        );
+
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        assertEquals(2L, report.getMigratedRows());
+        assertEquals(2L, report.getVerifiedRows());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
+            assertTrue(resultSet.getString("phone_hash") != null && !resultSet.getString("phone_hash").isEmpty());
+            assertTrue(resultSet.getString("phone_like") != null && !resultSet.getString("phone_like").isEmpty());
+        }
+    }
+
+    @Test
+    void shouldUseTableSpecificDefaultCursorColumns() throws Exception {
+        DataSource dataSource = newDataSource("table_specific_cursor");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "record_no bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (record_no, phone) values (10, '13800138000')",
+                "insert into user_account (record_no, phone) values (11, '13900139000')");
+
+        DatabaseEncryptionProperties properties = configuredProperties();
+        DatabaseEncryptionProperties.TableCursorRuleProperties cursorRule =
+                new DatabaseEncryptionProperties.TableCursorRuleProperties();
+        cursorRule.setTablePattern("user_account");
+        cursorRule.setCursorColumns(java.util.Collections.singletonList("record_no"));
+        properties.getMigration().getCursorRules().add(cursorRule);
+
+        DefaultMigrationTaskFactory taskFactory = new DefaultMigrationTaskFactory(
+                dataSource,
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                algorithmRegistry(),
+                properties,
+                new FileMigrationStateStore(createTempDirectory("migration-state-table-specific-cursor")),
+                AllowAllMigrationConfirmationPolicy.INSTANCE);
+
+        MigrationReport report = taskFactory.executeForTable("user_account");
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        assertEquals(2L, report.getMigratedRows());
+        assertEquals("11", report.getLastProcessedCursor());
+    }
+
+    @Test
+    void shouldIgnoreStaleCompletedCheckpointWhenSignatureOrDatasourceFingerprintChanges() throws Exception {
+        DataSource dataSource = newDataSource("stale_checkpoint");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')",
+                "insert into user_account (id, phone) values (2, '13900139000')");
+
+        Path stateDir = createTempDirectory("migration-state-stale-checkpoint");
+        FileMigrationStateStore stateStore = new FileMigrationStateStore(stateDir);
+        EntityMigrationPlan plan = new io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory(metadataRegistry(), properties())
+                .create(EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build());
+        MigrationState staleState = new MigrationState();
+        staleState.setDataSourceName(plan.getDataSourceName());
+        staleState.setDataSourceFingerprint("legacy-db");
+        staleState.setPlanSignature("legacy-plan");
+        staleState.setEntityName(plan.getEntityName());
+        staleState.setTableName(plan.getTableName());
+        staleState.setCursorColumns(plan.getCursorColumns());
+        staleState.setStatus(MigrationStatus.COMPLETED);
+        staleState.setTotalRows(2L);
+        staleState.setRangeStartValues(java.util.Collections.singletonList("1"));
+        staleState.setRangeEndValues(java.util.Collections.singletonList("2"));
+        staleState.setLastProcessedCursorValues(java.util.Collections.singletonList("2"));
+        staleState.setScannedRows(99L);
+        staleState.setMigratedRows(99L);
+        staleState.setVerifiedRows(99L);
+        stateStore.save(plan, staleState);
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                stateStore
+        );
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        assertEquals(2L, report.getMigratedRows());
+        assertEquals(2L, report.getVerifiedRows());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
+            assertTrue(resultSet.getString("phone_hash") != null && !resultSet.getString("phone_hash").isEmpty());
+            assertTrue(resultSet.getString("phone_like") != null && !resultSet.getString("phone_like").isEmpty());
+        }
+    }
+
+    @Test
+    void shouldRebuildCompletedStateWhenDatabaseDataIsRolledBackToPlaintext() throws Exception {
+        DataSource dataSource = newDataSource("completed_state_plaintext_rollback");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')");
+
+        Path stateDir = createTempDirectory("migration-state-completed-recheck");
+        FileMigrationStateStore stateStore = new FileMigrationStateStore(stateDir);
+        MigrationTask firstTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                stateStore
+        );
+        MigrationReport firstReport = firstTask.execute();
+        assertEquals(1L, firstReport.getMigratedRows());
+
+        executeSql(dataSource,
+                "update user_account set phone_cipher = null, phone_hash = null, phone_like = null where id = 1");
+
+        MigrationTask rerunTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                stateStore
+        );
+        MigrationReport rerunReport = rerunTask.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, rerunReport.getStatus());
+        assertEquals(1L, rerunReport.getMigratedRows());
+        assertEquals(1L, rerunReport.getVerifiedRows());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone, phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            assertEquals("13800138000", resultSet.getString("phone"));
+            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
+            assertTrue(resultSet.getString("phone_hash") != null && !resultSet.getString("phone_hash").isEmpty());
+            assertTrue(resultSet.getString("phone_like") != null && !resultSet.getString("phone_like").isEmpty());
+        }
+    }
 }

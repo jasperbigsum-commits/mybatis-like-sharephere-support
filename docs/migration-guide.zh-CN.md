@@ -126,6 +126,14 @@ mybatis:
     migration:
       default-cursor-columns:
         - id
+      cursor-rules:
+        - table-pattern: "user_account"
+          cursor-columns:
+            - record_no
+        - table-pattern: "order_*"
+          cursor-columns:
+            - tenant_id
+            - biz_no
       checkpoint-directory: migration-state
       batch-size: 500
       verify-after-write: true
@@ -142,8 +150,15 @@ mybatis:
 - `exclude-tables` 支持 `|` 分隔多个表名或通配模式，命中后直接抛出 `TABLE_EXCLUDED`
 - `backup-column-templates` 仅在字段会覆盖主表原列、且当前任务未显式指定 `backupColumn(...)` 时生效
 - `default-cursor-columns` 会被 `createForTable("user_account")`、`executeForEntity(UserAccount.class)` 和一键迁移入口自动复用
+- `cursor-rules` 允许少数表按表名覆盖默认游标列
 - `checkpoint-directory` 是默认 checkpoint 持久化目录，starter 会直接落盘保存状态，不再使用内存状态
 - 模板支持 `${table}`、`${property}`、`${column}`
+
+游标约束：
+
+- 游标列必须稳定、可排序、不会在迁移过程中被更新
+- 如果游标列命中了迁移时会写入的主表列，计划构建阶段会直接抛出 `CURSOR_COLUMN_MUTABLE`
+- 如果单列游标不能保证唯一性，建议改成复合游标，例如 `record_no + id`
 
 如果想做到最简配置一键迁移，在规则已注册完成后可直接调用：
 
@@ -160,6 +175,7 @@ List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredT
 该入口按物理表名去重，同一张表即使同时来自注解扫描和外部表规则，也只会迁移一次。
 如果 checkpoint 回退到旧批次，writer 会按当前目标态做幂等判断，已完成记录会跳过而不会重复插入外表或再次覆盖主表。
 同一 `dataSource + entity/table` 任务并发启动时，会先争抢 checkpoint lock；未拿到锁的实例会直接以 `CHECKPOINT_LOCKED` 失败。
+排查游标相关问题时，可打开 `debug` 日志。迁移模块会输出 `migration-read-batch`、`migration-load-current-row`、`migration-update-main-row`、`migration-verify-main-row`，同时带上 SQL、游标值和 Java 类型。
 
 如果你希望先构建任务，再决定执行时机：
 
@@ -178,6 +194,20 @@ MigrationReport report = task.execute();
 - Spring 应用内优先使用 `MigrationTaskFactory`
 - 非 Spring 场景、独立脚本或测试桩场景再使用 `JdbcMigrationTasks.create(...)`
 - 如果表没有单一 `id`，可以传入稳定有序的游标列组合，例如 `List.of("tenant_id", "created_at", "biz_no")`
+
+推荐游标设计示例：
+
+- 单列主键表：直接使用 `id`
+- 单列业务主键表：使用不可变且唯一的业务键，例如 `record_no`
+- 多租户业务表：优先使用复合游标，例如 `tenant_id + biz_no` 或 `tenant_id + created_at + id`
+- 只有时间列不足以保证唯一时：不要只用 `created_at`，应改成 `created_at + id`
+
+不推荐作为游标的字段：
+
+- 会被迁移覆盖的源列，例如 `phone`、`id_card`
+- 派生写入列，例如 `phone_hash`、`phone_like`、`storageColumn`
+- 可能被业务更新的状态列、排序列、名称列
+- 纯字符串但实际按数值语义递增的字段，例如未补零的 `order_no`
 
 如果你希望修改默认 checkpoint 目录，或者要求上线前必须确认风险范围，只需覆写对应 Bean：
 

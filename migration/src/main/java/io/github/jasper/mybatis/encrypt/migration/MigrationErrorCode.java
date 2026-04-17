@@ -25,6 +25,10 @@ public enum MigrationErrorCode {
      */
     BACKUP_COLUMN_CONFLICT,
     /**
+     * 游标列会被迁移过程改写
+     */
+    CURSOR_COLUMN_MUTABLE,
+    /**
      * 迁移目标表被全局排除
      */
     TABLE_EXCLUDED,

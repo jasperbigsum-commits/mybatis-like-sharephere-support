@@ -10,6 +10,8 @@ import java.util.List;
 public class MigrationState {
 
     private String dataSourceName;
+    private String dataSourceFingerprint;
+    private String planSignature;
     private String entityName;
     private String tableName;
     private List<String> cursorColumns = Collections.emptyList();
@@ -33,6 +35,42 @@ public class MigrationState {
      */
     public String getEntityName() {
         return entityName;
+    }
+
+    /**
+     * Return the datasource fingerprint captured for the current checkpoint file.
+     *
+     * @return datasource fingerprint
+     */
+    public String getDataSourceFingerprint() {
+        return dataSourceFingerprint;
+    }
+
+    /**
+     * Set the datasource fingerprint captured for the current checkpoint file.
+     *
+     * @param dataSourceFingerprint datasource fingerprint
+     */
+    public void setDataSourceFingerprint(String dataSourceFingerprint) {
+        this.dataSourceFingerprint = dataSourceFingerprint;
+    }
+
+    /**
+     * Return the current migration plan signature.
+     *
+     * @return plan signature
+     */
+    public String getPlanSignature() {
+        return planSignature;
+    }
+
+    /**
+     * Set the current migration plan signature.
+     *
+     * @param planSignature plan signature
+     */
+    public void setPlanSignature(String planSignature) {
+        this.planSignature = planSignature;
     }
 
     /**

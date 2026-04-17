@@ -329,6 +329,19 @@ public class DatabaseEncryptionProperties {
         return migration.resolveBackupColumn(tableName, property, column);
     }
 
+    /**
+     * 解析某张表默认应使用的迁移游标列。
+     *
+     * @param tableName 物理表名
+     * @return 迁移游标列
+     */
+    public List<String> resolveMigrationCursorColumns(String tableName) {
+        if (migration == null) {
+            return Collections.singletonList("id");
+        }
+        return migration.resolveCursorColumns(tableName);
+    }
+
     private static boolean matchesPipePattern(String pipePattern, String candidate) {
         if (StringUtils.isBlank(pipePattern) || StringUtils.isBlank(candidate)) {
             return false;
@@ -470,6 +483,11 @@ public class DatabaseEncryptionProperties {
         private List<BackupColumnTemplateRuleProperties> backupColumnTemplates = new ArrayList<>();
 
         /**
+         * 按表覆盖默认游标列的规则。
+         */
+        private List<TableCursorRuleProperties> cursorRules = new ArrayList<>();
+
+        /**
          * 返回默认迁移游标列。
          *
          * @return 默认迁移游标列
@@ -577,6 +595,24 @@ public class DatabaseEncryptionProperties {
             this.backupColumnTemplates = backupColumnTemplates;
         }
 
+        /**
+         * 返回按表覆盖默认游标列的规则。
+         *
+         * @return 按表覆盖默认游标列的规则
+         */
+        public List<TableCursorRuleProperties> getCursorRules() {
+            return cursorRules;
+        }
+
+        /**
+         * 设置按表覆盖默认游标列的规则。
+         *
+         * @param cursorRules 按表覆盖默认游标列的规则
+         */
+        public void setCursorRules(List<TableCursorRuleProperties> cursorRules) {
+            this.cursorRules = cursorRules;
+        }
+
         boolean matchesExcludedTable(String tableName) {
             String normalizedTable = normalizeTableName(tableName);
             if (normalizedTable == null) {
@@ -601,6 +637,77 @@ public class DatabaseEncryptionProperties {
                 return rule.render(normalizedTable, normalizedProperty, normalizedColumn);
             }
             return null;
+        }
+
+        List<String> resolveCursorColumns(String tableName) {
+            String normalizedTable = normalizeTableName(tableName);
+            for (TableCursorRuleProperties rule : cursorRules) {
+                if (rule == null || !rule.matches(normalizedTable)) {
+                    continue;
+                }
+                if (rule.getCursorColumns() != null && !rule.getCursorColumns().isEmpty()) {
+                    return rule.getCursorColumns();
+                }
+            }
+            return defaultCursorColumns == null || defaultCursorColumns.isEmpty()
+                    ? Collections.singletonList("id")
+                    : defaultCursorColumns;
+        }
+    }
+
+    /**
+     * 按表覆盖默认游标列的规则。
+     */
+    public static class TableCursorRuleProperties {
+
+        /**
+         * 匹配主表名的 pipe 模式。
+         */
+        private String tablePattern = "*";
+
+        /**
+         * 命中后的游标列集合。
+         */
+        private List<String> cursorColumns = new ArrayList<String>();
+
+        /**
+         * 返回匹配主表名的 pipe 模式。
+         *
+         * @return 主表匹配模式
+         */
+        public String getTablePattern() {
+            return tablePattern;
+        }
+
+        /**
+         * 设置匹配主表名的 pipe 模式。
+         *
+         * @param tablePattern 主表匹配模式
+         */
+        public void setTablePattern(String tablePattern) {
+            this.tablePattern = tablePattern;
+        }
+
+        /**
+         * 返回命中后的游标列集合。
+         *
+         * @return 游标列集合
+         */
+        public List<String> getCursorColumns() {
+            return cursorColumns;
+        }
+
+        /**
+         * 设置命中后的游标列集合。
+         *
+         * @param cursorColumns 游标列集合
+         */
+        public void setCursorColumns(List<String> cursorColumns) {
+            this.cursorColumns = cursorColumns;
+        }
+
+        boolean matches(String tableName) {
+            return matchesPipePattern(tablePattern, tableName);
         }
     }
 

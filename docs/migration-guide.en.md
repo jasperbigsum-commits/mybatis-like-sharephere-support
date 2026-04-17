@@ -127,6 +127,14 @@ mybatis:
     migration:
       default-cursor-columns:
         - id
+      cursor-rules:
+        - table-pattern: "user_account"
+          cursor-columns:
+            - record_no
+        - table-pattern: "order_*"
+          cursor-columns:
+            - tenant_id
+            - biz_no
       checkpoint-directory: migration-state
       batch-size: 500
       verify-after-write: true
@@ -143,8 +151,15 @@ Rule notes:
 - `exclude-tables` supports pipe-separated table names or wildcard patterns and fails fast with `TABLE_EXCLUDED`
 - `backup-column-templates` apply only when a field overwrites the main-table source column and no explicit `backupColumn(...)` is present
 - `default-cursor-columns` are reused automatically by `createForTable("user_account")`, `executeForEntity(UserAccount.class)`, and the one-click entry
+- `cursor-rules` lets a few tables override the global default cursor columns by table name
 - `checkpoint-directory` is the default persistent checkpoint directory; the starter now stores migration state on disk instead of in memory
 - templates support `${table}`, `${property}`, and `${column}`
+
+Cursor constraints:
+
+- cursor columns must be stable, sortable, and must not be updated by the migration itself
+- if a cursor column matches one main-table write target, plan creation fails fast with `CURSOR_COLUMN_MUTABLE`
+- if a single cursor column is not unique enough, prefer a composite cursor such as `record_no + id`
 
 If you want the simplest one-click migration after rules are registered, call:
 
@@ -161,6 +176,7 @@ List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredT
 This entry deduplicates by physical table name, so the same table is migrated only once even when it comes from both annotation scanning and external table rules.
 If a checkpoint falls behind a committed batch, the writer replays idempotently and skips rows that already match the target state instead of inserting duplicate external rows or overwriting the main table again.
 When the same `dataSource + entity/table` task starts concurrently, instances first compete for a checkpoint lock; the losers fail fast with `CHECKPOINT_LOCKED`.
+When troubleshooting cursor-related issues, enable `debug` logging. The migration module emits `migration-read-batch`, `migration-load-current-row`, `migration-update-main-row`, and `migration-verify-main-row`, including the SQL, cursor values, and Java types.
 
 If you want to build the task first and execute it later:
 
@@ -179,6 +195,20 @@ Notes:
 - Prefer `MigrationTaskFactory` inside Spring applications
 - Use `JdbcMigrationTasks.create(...)` in standalone scripts, non-Spring programs, or focused tests
 - If a table has no single `id`, pass an ordered stable cursor set such as `List.of("tenant_id", "created_at", "biz_no")`
+
+Recommended cursor design examples:
+
+- Single-column primary-key tables: use `id`
+- Single-column business-key tables: use one immutable and unique key such as `record_no`
+- Multi-tenant business tables: prefer composite cursors such as `tenant_id + biz_no` or `tenant_id + created_at + id`
+- If one timestamp column alone is not unique enough: do not use only `created_at`; use `created_at + id`
+
+Fields that should not be used as cursors:
+
+- source columns that will be overwritten during migration, such as `phone` or `id_card`
+- derived write targets such as `phone_hash`, `phone_like`, or any `storageColumn`
+- status, ordering, display-name, or other business fields that can still be updated
+- plain string fields that are compared lexicographically while the business meaning is numeric, such as non-zero-padded `order_no`
 
 If you want to change the default checkpoint directory or require mandatory operator confirmation, override the corresponding beans:
 

@@ -137,13 +137,13 @@ public class DefaultMigrationTaskFactory implements MigrationTaskFactory {
     @Override
     public MigrationTask createForEntity(Class<?> entityType,
                                          Consumer<EntityMigrationDefinition.Builder> builderCustomizer) {
-        return createForEntity(entityType, defaultCursorColumns(), builderCustomizer);
+        return createForEntity(entityType, defaultCursorColumns(resolveEntityTableName(entityType)), builderCustomizer);
     }
 
     @Override
     public MigrationTask createForTable(String tableName,
                                         Consumer<EntityMigrationDefinition.Builder> builderCustomizer) {
-        return createForTable(tableName, defaultCursorColumns(), builderCustomizer);
+        return createForTable(tableName, defaultCursorColumns(tableName), builderCustomizer);
     }
 
     @Override
@@ -225,9 +225,8 @@ public class DefaultMigrationTaskFactory implements MigrationTaskFactory {
                 cursorColumns.size() <= 1 ? new String[0] : cursorColumns.subList(1, cursorColumns.size()).toArray(new String[0]));
     }
 
-    private List<String> defaultCursorColumns() {
-        DatabaseEncryptionProperties.MigrationProperties migrationProperties = properties.getMigration();
-        List<String> cursorColumns = migrationProperties == null ? null : migrationProperties.getDefaultCursorColumns();
+    private List<String> defaultCursorColumns(String tableName) {
+        List<String> cursorColumns = properties.resolveMigrationCursorColumns(tableName);
         if (cursorColumns == null || cursorColumns.isEmpty()) {
             throw new IllegalArgumentException("migration.defaultCursorColumns must not be empty");
         }
@@ -236,5 +235,11 @@ public class DefaultMigrationTaskFactory implements MigrationTaskFactory {
 
     private Set<String> registeredTableNames() {
         return new LinkedHashSet<String>(metadataRegistry.getRegisteredTableNames());
+    }
+
+    private String resolveEntityTableName(Class<?> entityType) {
+        io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule tableRule =
+                metadataRegistry.findByEntity(entityType).orElse(null);
+        return tableRule == null ? null : tableRule.getTableName();
     }
 }

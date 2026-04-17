@@ -22,11 +22,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * JDBC reader that pages source rows by ordered stable cursor columns.
  */
 public class JdbcMigrationRecordReader implements MigrationRecordReader, MigrationRangeReader {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcMigrationRecordReader.class);
 
     private final DatabaseEncryptionProperties properties;
 
@@ -63,6 +67,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int parameterIndex = bindCheckpoint(statement, lastProcessedCursor);
             statement.setInt(parameterIndex, plan.getBatchSize());
+            logCursorDebug("migration-read-batch", sql, lastProcessedCursor);
             try (ResultSet resultSet = statement.executeQuery()) {
                 List<MigrationRecord> records = new ArrayList<>();
                 while (resultSet.next()) {
@@ -204,9 +209,9 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
         List<Object> values = new ArrayList<>(checkpoint.getValues().values());
         for (int index = 0; index < values.size(); index++) {
             for (int equalIndex = 0; equalIndex < index; equalIndex++) {
-                statement.setObject(parameterIndex++, values.get(equalIndex));
+                MigrationJdbcParameterBinder.bind(statement, parameterIndex++, values.get(equalIndex));
             }
-            statement.setObject(parameterIndex++, values.get(index));
+            MigrationJdbcParameterBinder.bind(statement, parameterIndex++, values.get(index));
         }
         return parameterIndex;
     }
@@ -241,5 +246,36 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
 
     private String quote(String identifier) {
         return properties.getSqlDialect().quote(identifier);
+    }
+
+    private void logCursorDebug(String stage, String sql, MigrationCursor cursor) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        log.debug("Migration cursor stage={} sql={} cursor={}", stage, compactSql(sql), describeCursor(cursor));
+    }
+
+    private String describeCursor(MigrationCursor cursor) {
+        if (cursor == null) {
+            return "<null>";
+        }
+        StringBuilder builder = new StringBuilder("{");
+        int index = 0;
+        for (Map.Entry<String, Object> entry : cursor.getValues().entrySet()) {
+            if (index++ > 0) {
+                builder.append(", ");
+            }
+            Object value = entry.getValue();
+            builder.append(entry.getKey()).append('=').append(value)
+                    .append('(')
+                    .append(value == null ? "null" : value.getClass().getSimpleName())
+                    .append(')');
+        }
+        builder.append('}');
+        return builder.toString();
+    }
+
+    private String compactSql(String sql) {
+        return sql == null ? null : sql.replaceAll("\\s+", " ").trim();
     }
 }

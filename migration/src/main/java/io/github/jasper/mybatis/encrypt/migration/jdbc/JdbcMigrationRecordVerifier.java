@@ -19,11 +19,15 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Default JDBC verifier that validates migrated values within the same transaction.
  */
 public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcMigrationRecordVerifier.class);
 
     private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
@@ -128,8 +132,9 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             int parameterIndex = 1;
             for (Object cursorValue : rowCursor.getValues().values()) {
-                statement.setObject(parameterIndex++, cursorValue);
+                MigrationJdbcParameterBinder.bind(statement, parameterIndex++, cursorValue);
             }
+            logCursorDebug("migration-verify-main-row", sql.toString(), rowCursor);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
                     throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_MAIN_ROW_MISSING,
@@ -156,7 +161,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         sql.append(" from ").append(quote(columnPlan.getStorageTable()))
                 .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            statement.setObject(1, referenceId);
+            MigrationJdbcParameterBinder.bind(statement, 1, referenceId);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
                     throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_EXTERNAL_ROW_MISSING,
@@ -196,5 +201,36 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
 
     private String quote(String identifier) {
         return properties.getSqlDialect().quote(identifier);
+    }
+
+    private void logCursorDebug(String stage, String sql, MigrationCursor cursor) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        log.debug("Migration cursor stage={} sql={} cursor={}", stage, compactSql(sql), describeCursor(cursor));
+    }
+
+    private String describeCursor(MigrationCursor cursor) {
+        if (cursor == null) {
+            return "<null>";
+        }
+        StringBuilder builder = new StringBuilder("{");
+        int index = 0;
+        for (Map.Entry<String, Object> entry : cursor.getValues().entrySet()) {
+            if (index++ > 0) {
+                builder.append(", ");
+            }
+            Object value = entry.getValue();
+            builder.append(entry.getKey()).append('=').append(value)
+                    .append('(')
+                    .append(value == null ? "null" : value.getClass().getSimpleName())
+                    .append(')');
+        }
+        builder.append('}');
+        return builder.toString();
+    }
+
+    private String compactSql(String sql) {
+        return sql == null ? null : sql.replaceAll("\\s+", " ").trim();
     }
 }

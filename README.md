@@ -4,6 +4,7 @@
 
 - 中文迁移指南：[docs/migration-guide.zh-CN.md](docs/migration-guide.zh-CN.md)
 - English migration guide: [docs/migration-guide.en.md](docs/migration-guide.en.md)
+- 游标设计指南：[docs/migration-cursor-design.zh-CN.md](docs/migration-cursor-design.zh-CN.md)
 - 发布指南：[RELEASE.md](RELEASE.md)
 
 一个面向 MyBatis / MyBatis-Plus 的数据库字段加密插件，目标是在尽量不侵入业务代码的前提下，为敏感字段提供透明加密、辅助等值查询、LIKE 查询列改写以及结果自动解密能力。
@@ -728,6 +729,14 @@ mybatis:
     migration:
       default-cursor-columns:
         - id
+      cursor-rules:
+        - table-pattern: "user_account"
+          cursor-columns:
+            - record_no
+        - table-pattern: "order_*"
+          cursor-columns:
+            - tenant_id
+            - biz_no
       checkpoint-directory: migration-state
       batch-size: 500
       verify-after-write: true
@@ -744,8 +753,16 @@ mybatis:
 - `exclude-tables` 命中后，迁移计划会直接失败并返回 `TABLE_EXCLUDED`
 - `backup-column-templates` 仅在字段会覆盖原主表明文列、且没有显式 `backupColumn(...)` 时生效
 - `default-cursor-columns` 会作为 `MigrationTaskFactory.createForTable("user_account")`、`executeForEntity(UserAccount.class)` 和一键迁移入口的默认游标
+- `cursor-rules` 允许按表覆盖默认游标列，适合少数不走 `id` 的表
 - `checkpoint-directory` 是默认 checkpoint 持久化目录，starter 会直接使用文件状态存储，不再使用内存状态
 - 模板支持 `${table}`、`${property}`、`${column}`
+
+游标约束：
+
+- 游标列必须稳定、可排序、不会在迁移过程中被更新
+- 如果游标列命中了会被迁移写入的主表列，计划构建阶段会直接抛出 `CURSOR_COLUMN_MUTABLE`
+- 单列游标若不能保证唯一性，建议显式改成复合游标，例如 `record_no + id`
+- 推荐优先顺序：`id` > 不可变业务键 > `created_at + id` 这类复合游标
 
 如果只是想最简配置直接迁移全部已注册表，可以在实体扫描或配置规则准备完成后直接调用：
 
@@ -762,6 +779,15 @@ List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredT
 该入口按“物理表名”去重，同一张表即使同时来自注解扫描和外部表规则，也只会迁移一次。
 即使 checkpoint 回退到旧批次，writer 也会按当前目标态做幂等判断，已完成记录会跳过而不会重复插入外表或重复覆盖主表。
 同一 `dataSource + entity/table` 迁移任务并发启动时，会先争抢 checkpoint lock；未抢到锁的实例会直接以 `CHECKPOINT_LOCKED` 失败，避免重复执行。
+
+排查游标相关问题时，可打开 `debug` 日志，迁移模块会输出：
+
+- `migration-read-batch`
+- `migration-load-current-row`
+- `migration-update-main-row`
+- `migration-verify-main-row`
+
+这些日志会同时打印 SQL、游标值和对应的 Java 类型，便于确认 JDBC 绑定是否和数据库手工执行时一致。
 
 状态文件包含：
 

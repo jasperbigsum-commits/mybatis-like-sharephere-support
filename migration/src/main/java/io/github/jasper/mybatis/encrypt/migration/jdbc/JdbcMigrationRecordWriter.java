@@ -8,6 +8,7 @@ import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
 import io.github.jasper.mybatis.encrypt.migration.MigrationExecutionException;
 import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecordStateInspector;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecordWriter;
 import io.github.jasper.mybatis.encrypt.migration.ReferenceIdGenerator;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
@@ -22,11 +23,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Default JDBC writer for both same-table and separate-table migration modes.
  */
-public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
+public class JdbcMigrationRecordWriter implements MigrationRecordWriter, MigrationRecordStateInspector {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcMigrationRecordWriter.class);
 
     private final DatabaseEncryptionProperties properties;
     private final ReferenceIdGenerator referenceIdGenerator;
@@ -89,6 +94,25 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         return true;
     }
 
+    @Override
+    public boolean requiresMigration(Connection connection, EntityMigrationPlan plan, MigrationRecord record) throws SQLException {
+        Map<String, Object> currentRow = loadCurrentMainRow(connection, plan, record.getCursor());
+        for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
+            if (isAlreadyMigratedWithoutPlaintext(connection, columnPlan, currentRow)) {
+                continue;
+            }
+            Object plainValue = resolvePlainValue(columnPlan, record, currentRow);
+            MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
+            if (derivedFieldValues.isEmpty()) {
+                continue;
+            }
+            if (!isAlreadyInTargetState(connection, columnPlan, currentRow, plainValue, derivedFieldValues)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Map<String, Object> loadCurrentMainRow(Connection connection,
                                                    EntityMigrationPlan plan,
                                                    MigrationCursor rowCursor) throws SQLException {
@@ -121,8 +145,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             int parameterIndex = 1;
             for (Object cursorValue : rowCursor.getValues().values()) {
-                statement.setObject(parameterIndex++, cursorValue);
+                MigrationJdbcParameterBinder.bind(statement, parameterIndex++, cursorValue);
             }
+            logCursorDebug("migration-load-current-row", sql.toString(), rowCursor);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
                     throw new MigrationExecutionException(MigrationErrorCode.EXECUTION_FAILED,
@@ -245,11 +270,12 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             int parameterIndex = 1;
             for (Object value : updates.values()) {
-                statement.setObject(parameterIndex++, value);
+                MigrationJdbcParameterBinder.bind(statement, parameterIndex++, value);
             }
             for (Object cursorValue : rowCursor.getValues().values()) {
-                statement.setObject(parameterIndex++, cursorValue);
+                MigrationJdbcParameterBinder.bind(statement, parameterIndex++, cursorValue);
             }
+            logCursorDebug("migration-update-main-row", sql.toString(), rowCursor);
             statement.executeUpdate();
         }
     }
@@ -345,7 +371,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
         sql.append(")");
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             for (int index = 0; index < bindValues.size(); index++) {
-                statement.setObject(index + 1, bindValues.get(index));
+                MigrationJdbcParameterBinder.bind(statement, index + 1, bindValues.get(index));
             }
             statement.executeUpdate();
         }
@@ -392,5 +418,36 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter {
             return derivedFieldValues.getHashValue();
         }
         return null;
+    }
+
+    private void logCursorDebug(String stage, String sql, MigrationCursor cursor) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        log.debug("Migration cursor stage={} sql={} cursor={}", stage, compactSql(sql), describeCursor(cursor));
+    }
+
+    private String describeCursor(MigrationCursor cursor) {
+        if (cursor == null) {
+            return "<null>";
+        }
+        StringBuilder builder = new StringBuilder("{");
+        int index = 0;
+        for (Map.Entry<String, Object> entry : cursor.getValues().entrySet()) {
+            if (index++ > 0) {
+                builder.append(", ");
+            }
+            Object value = entry.getValue();
+            builder.append(entry.getKey()).append('=').append(value)
+                    .append('(')
+                    .append(value == null ? "null" : value.getClass().getSimpleName())
+                    .append(')');
+        }
+        builder.append('}');
+        return builder.toString();
+    }
+
+    private String compactSql(String sql) {
+        return sql == null ? null : sql.replaceAll("\\s+", " ").trim();
     }
 }

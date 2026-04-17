@@ -4,6 +4,7 @@
 
 - Chinese migration guide: [docs/migration-guide.zh-CN.md](docs/migration-guide.zh-CN.md)
 - English migration guide: [docs/migration-guide.en.md](docs/migration-guide.en.md)
+- Cursor design guide: [docs/migration-cursor-design.en.md](docs/migration-cursor-design.en.md)
 - Release guide: [RELEASE.md](RELEASE.md)
 
 `mybatis-like-sharephere-support` is a lightweight field-encryption extension for MyBatis and MyBatis-Plus. It focuses on transparent field encryption, assisted equality lookup, LIKE lookup support, SQL rewrite, and automatic result decryption with a conservative fail-fast strategy.
@@ -288,6 +289,14 @@ mybatis:
     migration:
       default-cursor-columns:
         - id
+      cursor-rules:
+        - table-pattern: "user_account"
+          cursor-columns:
+            - record_no
+        - table-pattern: "order_*"
+          cursor-columns:
+            - tenant_id
+            - biz_no
       checkpoint-directory: migration-state
       batch-size: 500
       verify-after-write: true
@@ -304,8 +313,16 @@ Notes:
 - tasks that hit `exclude-tables` fail fast with `TABLE_EXCLUDED`
 - `backup-column-templates` apply only when a field overwrites the source plaintext column and no explicit `backupColumn(...)` is provided
 - `default-cursor-columns` are reused by `MigrationTaskFactory.createForTable("user_account")`, `executeForEntity(UserAccount.class)`, and the one-click entry
+- `cursor-rules` lets specific tables override the global default cursor columns
 - `checkpoint-directory` is the default persistent checkpoint directory; the starter now uses file-backed state storage instead of in-memory state
 - templates support `${table}`, `${property}`, and `${column}`
+
+Cursor constraints:
+
+- cursor columns must be stable, sortable, and must not be updated by the migration itself
+- if a cursor column matches one main-table write target, plan creation fails fast with `CURSOR_COLUMN_MUTABLE`
+- if one single cursor column is not unique enough, prefer a composite cursor such as `record_no + id`
+- recommended preference order: `id` > immutable business key > composite cursors such as `created_at + id`
 
 If you want the simplest possible full migration after rules are registered, call:
 
@@ -322,6 +339,7 @@ List<MigrationReport> reports = globalMigrationTaskFactory.executeAllRegisteredT
 This entry deduplicates by physical table name, so the same table is migrated only once even if it is discovered from both annotation scanning and external table rules.
 Even when a checkpoint falls behind a committed batch, the writer replays idempotently and skips rows that already match the target state instead of inserting duplicate external rows or overwriting the main table again.
 When the same `dataSource + entity/table` migration task is started concurrently, instances compete for a checkpoint lock first; losers fail fast with `CHECKPOINT_LOCKED` so the task cannot run twice in parallel.
+When troubleshooting cursor-related issues, enable `debug` logging. The migration module emits `migration-read-batch`, `migration-load-current-row`, `migration-update-main-row`, and `migration-verify-main-row`, including the SQL, cursor values, and Java types.
 
 State files now persist general cursor fields such as `cursorColumns.*`, `cursorJavaTypes.*`,
 `rangeStartValues.*`, `rangeEndValues.*`, and `lastProcessedCursorValues.*`.

@@ -99,4 +99,14 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertEquals(MigrationErrorCode.TABLE_EXCLUDED, exception.getErrorCode());
         assertTrue(exception.getMessage().contains("excluded"));
     }
+
+    @Test
+    void shouldRejectMutableCursorColumn() {
+        MigrationDefinitionException exception = assertThrows(MigrationDefinitionException.class, () ->
+                new EntityMigrationPlanFactory(metadataRegistry(), properties()).create(
+                        EntityMigrationDefinition.builder(HashOverwriteUserEntity.class, "phone").build()));
+
+        assertEquals(MigrationErrorCode.CURSOR_COLUMN_MUTABLE, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("cursor column"));
+    }
 }

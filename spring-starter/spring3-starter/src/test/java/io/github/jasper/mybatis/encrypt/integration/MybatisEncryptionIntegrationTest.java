@@ -2228,25 +2228,8 @@ class MybatisEncryptionIntegrationTest {
         private Long id;
         private String displayName;
 
-        @EncryptField(
-                table = "user_account",
-                column = "phone",
-                storageColumn = "phone_cipher",
-                assistedQueryColumn = "phone_hash",
-                likeQueryColumn = "phone_like"
-        )
         private String phone;
 
-        @EncryptField(
-                table = "user_account",
-                column = "id_card",
-                storageMode = FieldStorageMode.SEPARATE_TABLE,
-                storageTable = "user_id_card_encrypt",
-                storageColumn = "id_card_cipher",
-                storageIdColumn = "id",
-                assistedQueryColumn = "id_card_hash",
-                likeQueryColumn = "id_card_like"
-        )
         private String idCard;
 
         public Long getId() {

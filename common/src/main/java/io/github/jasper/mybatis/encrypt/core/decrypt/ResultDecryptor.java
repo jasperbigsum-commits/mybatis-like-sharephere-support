@@ -11,7 +11,6 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
 
-import java.util.Deque;
 import java.util.Map;
 
 /**
@@ -25,7 +24,6 @@ public class ResultDecryptor {
     private final AlgorithmRegistry algorithmRegistry;
     private final SeparateTableEncryptionManager separateTableEncryptionManager;
     private final QueryResultPlanFactory queryResultPlanFactory;
-    private final ThreadLocal<QueryScope> queryScope = new ThreadLocal<>();
 
     /**
      * 结果解密器
@@ -42,46 +40,16 @@ public class ResultDecryptor {
     }
 
     /**
-     * 记录当前结果集处理上下文。
-     *
-     * @param mappedStatement 当前结果对应的 statement
-     * @param boundSql 当前最终执行 SQL
-     */
-    public void beginQueryScope(MappedStatement mappedStatement, BoundSql boundSql) {
-        QueryScope scope = queryScope.get();
-        if (scope == null) {
-            scope = new QueryScope();
-            queryScope.set(scope);
-        }
-        scope.incrementDepth();
-        scope.pushPlan(queryResultPlanFactory.resolve(mappedStatement, boundSql));
-    }
-
-    /**
-     * 关闭当前结果集处理上下文。
-     */
-    public void endQueryScope() {
-        QueryScope scope = queryScope.get();
-        if (scope == null) {
-            return;
-        }
-        scope.popPlan();
-        if (scope.decrementDepth() == 0) {
-            queryScope.remove();
-        }
-    }
-
-    /**
      * 对当前结果集对象执行回填和解密。
      *
      * @param resultObject MyBatis 已映射完成的结果对象
+     * @param queryResultPlan 当前查询对应的结果计划
      * @return 原结果对象本身
      */
-    public Object decrypt(Object resultObject) {
+    public Object decrypt(Object resultObject, QueryResultPlan queryResultPlan) {
         if (resultObject == null) {
             return null;
         }
-        QueryResultPlan queryResultPlan = currentPlan();
         if (queryResultPlan == null || queryResultPlan.isEmpty()) {
             return resultObject;
         }
@@ -92,9 +60,15 @@ public class ResultDecryptor {
         return resultObject;
     }
 
-    private QueryResultPlan currentPlan() {
-        QueryScope scope = queryScope.get();
-        return scope == null ? null : scope.currentPlan();
+    /**
+     * 解析当前查询对应的结果计划。
+     *
+     * @param mappedStatement 当前结果对应的 statement
+     * @param boundSql 当前最终执行 SQL
+     * @return 当前查询结果计划
+     */
+    public QueryResultPlan resolvePlan(MappedStatement mappedStatement, BoundSql boundSql) {
+        return queryResultPlanFactory.resolve(mappedStatement, boundSql);
     }
 
     private void decryptWithPlan(Object resultObject, QueryResultPlan queryResultPlan) {
@@ -127,35 +101,6 @@ public class ResultDecryptor {
             }
             metaObject.setValue(propertyPath,
                     algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt((String) value));
-        }
-    }
-
-    private static final class QueryScope {
-
-        private final Deque<QueryResultPlan> plans = new java.util.LinkedList<>();
-        private int depth;
-
-        private void pushPlan(QueryResultPlan queryResultPlan) {
-            plans.push(queryResultPlan);
-        }
-
-        private QueryResultPlan currentPlan() {
-            return plans.peek();
-        }
-
-        private void popPlan() {
-            if (!plans.isEmpty()) {
-                plans.pop();
-            }
-        }
-
-        private void incrementDepth() {
-            depth++;
-        }
-
-        private int decrementDepth() {
-            depth--;
-            return depth;
         }
     }
 }

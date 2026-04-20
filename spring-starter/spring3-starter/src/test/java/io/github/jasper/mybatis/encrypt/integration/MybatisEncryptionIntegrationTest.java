@@ -563,6 +563,23 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @Test
+    void shouldDecryptPlainResultTypeAliasFieldsUsingEncryptResultHint() throws Exception {
+        insertEncryptedUserRow(54L, "Tess", "13200132054", "320101199001010154");
+
+        insertOrderAccountRow(64L, 54L, 42L, 2001L, "assoc-a", "grid-a", 0);
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            PlainAliasedUserProjectionDto dto = mapper.selectPlainAliasedProjectionDtoWithHint(54L);
+            assertNotNull(dto);
+            assertEquals(54L, dto.getId());
+            assertEquals("Tess", dto.getDisplayName());
+            assertEquals("13200132054", dto.getDisplayOwnerPhone());
+            assertEquals("320101199001010154", dto.getDisplayOwnerNo());
+        }
+    }
+
+    @Test
     void shouldReadNestedDtoAssociationListAcrossStorageModes() throws Exception {
         UserRecord owner = user(61L, "Rita", "13300133061", "320101199001010161");
         UserRecord reviewer = user(62L, "Sam", "13300133062", "320101199001010162");
@@ -1641,7 +1658,6 @@ class MybatisEncryptionIntegrationTest {
                 """)
         PlainUserProjectionDto selectPlainProjectionDto(@Param("id") Long id);
 
-        @EncryptResultHint(entities = UserRecord.class)
         @Select("""
                 select id,
                        name as display_name,
@@ -1651,6 +1667,19 @@ class MybatisEncryptionIntegrationTest {
                 where id = #{id}
                 """)
         PlainUserProjectionDto selectPlainProjectionDtoWithHint(@Param("id") Long id);
+
+        @Select("""
+                select o.id as order_id,
+                       owner.id,
+                       o.remark as order_remark,
+                       owner.name as display_name,
+                       owner.phone as display_owner_phone,
+                       owner.id_card as display_owner_no
+                from order_account o
+                join user_account owner on o.user_id = owner.id
+                where owner.id = #{id}
+                """)
+        PlainAliasedUserProjectionDto selectPlainAliasedProjectionDtoWithHint(@Param("id") Long id);
 
         @EncryptResultHint(tables = "user_account")
         @Select("""
@@ -1771,7 +1800,6 @@ class MybatisEncryptionIntegrationTest {
         @EncryptResultHint(tables = "user_account")
         List<XmlAliasedOrderJoinResultDto> selectPlainOrderJoinResultDtosByXmlWithTableHint();
 
-        @EncryptResultHint(entities = UserRecord.class)
         List<XmlAliasedOrderJoinResultDto> selectPlainOrderJoinResultDtosByXmlWithEntityHint();
 
         List<XmlAliasedOrderJoinResultDto> selectPlainOrderJoinResultDtosByXmlWithoutHint();
@@ -2302,6 +2330,64 @@ class MybatisEncryptionIntegrationTest {
 
         public void setIdCard(String idCard) {
             this.idCard = idCard;
+        }
+    }
+
+    static class PlainAliasedUserProjectionDto {
+
+        private Long id;
+        private String orderId;
+        private String orderRemark;
+        private String displayName;
+        private String displayOwnerPhone;
+        private String displayOwnerNo;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public void setOrderId(String orderId) {
+            this.orderId = orderId;
+        }
+
+        public String getOrderId() {
+            return orderId;
+        }
+
+        public String getOrderRemark() {
+            return orderRemark;
+        }
+
+        public void setOrderRemark(String orderRemark) {
+            this.orderRemark = orderRemark;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String getDisplayOwnerNo() {
+            return displayOwnerNo;
+        }
+
+        public void setDisplayOwnerNo(String displayOwnerNo) {
+            this.displayOwnerNo = displayOwnerNo;
+        }
+
+        public String getDisplayOwnerPhone() {
+            return displayOwnerPhone;
+        }
+
+        public void setDisplayOwnerPhone(String displayOwnerPhone) {
+            this.displayOwnerPhone = displayOwnerPhone;
         }
     }
 

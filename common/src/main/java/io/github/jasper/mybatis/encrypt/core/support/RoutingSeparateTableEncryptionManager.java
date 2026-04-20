@@ -52,22 +52,6 @@ public class RoutingSeparateTableEncryptionManager extends SeparateTableEncrypti
         }
     }
 
-    @Override
-    public void beginQueryScope() {
-        SeparateTableEncryptionManager manager = currentManager();
-        if (manager != null) {
-            manager.beginQueryScope();
-        }
-    }
-
-    @Override
-    public void endQueryScope() {
-        SeparateTableEncryptionManager manager = currentManager();
-        if (manager != null) {
-            manager.endQueryScope();
-        }
-    }
-
     private SeparateTableEncryptionManager currentManager() {
         String dataSourceName = SqlDialectContextHolder.currentDataSourceName();
         if (dataSourceName != null) {

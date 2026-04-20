@@ -17,6 +17,7 @@ import org.apache.ibatis.cache.CacheKey;
 import org.apache.ibatis.cursor.Cursor;
 import org.apache.ibatis.executor.BatchResult;
 import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.executor.resultset.ResultSetHandler;
 import org.apache.ibatis.mapping.*;
 import org.apache.ibatis.plugin.Invocation;
 import org.apache.ibatis.reflection.MetaObject;
@@ -28,6 +29,8 @@ import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.sql.CallableStatement;
+import java.sql.Statement;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -104,7 +107,7 @@ class DatabaseEncryptionInterceptorTest {
     }
 
     @Test
-    void shouldNotOpenDecryptScopeDuringExecutorQueryInterception() throws Throwable {
+    void shouldNotResolvePlanDuringExecutorQueryInterception() throws Throwable {
         Configuration configuration = new Configuration();
         TestExecutor executor = new TestExecutor();
         RecordingResultDecryptor decryptor = recordingDecryptor();
@@ -126,7 +129,66 @@ class DatabaseEncryptionInterceptorTest {
 
         interceptor.intercept(invocation);
 
-        assertEquals(0, decryptor.beginScopeCalls);
+        assertEquals(0, decryptor.resolvePlanCalls);
+        assertEquals(0, decryptor.decryptWithPlanCalls);
+    }
+
+    @Test
+    void shouldResolvePlanAndDecryptDuringResultSetInterception() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingResultDecryptor decryptor = recordingDecryptor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, decryptor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.selectProjection",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id from user_account where id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build())
+        );
+        BoundSql boundSql = mappedStatement.getBoundSql(Map.of("id", 1L));
+        TestResultSetHandler handler = new TestResultSetHandler(mappedStatement, boundSql, List.of(Map.of("id", 1L)));
+
+        Invocation invocation = new Invocation(
+                handler,
+                resultSetHandlerMethod("handleResultSets", Statement.class),
+                new Object[]{null}
+        );
+
+        Object result = interceptor.intercept(invocation);
+
+        assertSame(handler.result, result);
+        assertEquals(1, decryptor.resolvePlanCalls);
+        assertEquals(1, decryptor.decryptWithPlanCalls);
+    }
+
+    @Test
+    void shouldBypassPlanResolutionForEmptyResultSetInterception() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingResultDecryptor decryptor = recordingDecryptor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, decryptor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.selectEmptyProjection",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id from user_account where id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build())
+        );
+        BoundSql boundSql = mappedStatement.getBoundSql(Map.of("id", 1L));
+        TestResultSetHandler handler = new TestResultSetHandler(mappedStatement, boundSql, Collections.emptyList());
+
+        Invocation invocation = new Invocation(
+                handler,
+                resultSetHandlerMethod("handleResultSets", Statement.class),
+                new Object[]{null}
+        );
+
+        Object result = interceptor.intercept(invocation);
+
+        assertSame(handler.result, result);
+        assertEquals(0, decryptor.resolvePlanCalls);
+        assertEquals(0, decryptor.decryptWithPlanCalls);
     }
 
     @Test
@@ -281,6 +343,10 @@ class DatabaseEncryptionInterceptorTest {
         return Executor.class.getMethod(name, parameterTypes);
     }
 
+    private Method resultSetHandlerMethod(String name, Class<?>... parameterTypes) throws NoSuchMethodException {
+        return ResultSetHandler.class.getMethod(name, parameterTypes);
+    }
+
     @EncryptTable("user_account")
     static class EncryptedUser {
 
@@ -364,7 +430,8 @@ class DatabaseEncryptionInterceptorTest {
 
     static class RecordingResultDecryptor extends ResultDecryptor {
 
-        private int beginScopeCalls;
+        private int resolvePlanCalls;
+        private int decryptWithPlanCalls;
 
         RecordingResultDecryptor(EncryptMetadataRegistry metadataRegistry,
                                  AlgorithmRegistry algorithmRegistry,
@@ -373,9 +440,16 @@ class DatabaseEncryptionInterceptorTest {
         }
 
         @Override
-        public void beginQueryScope(MappedStatement mappedStatement, BoundSql boundSql) {
-            beginScopeCalls++;
-            super.beginQueryScope(mappedStatement, boundSql);
+        public io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan resolvePlan(MappedStatement mappedStatement,
+                                                                                         BoundSql boundSql) {
+            resolvePlanCalls++;
+            return super.resolvePlan(mappedStatement, boundSql);
+        }
+
+        @Override
+        public Object decrypt(Object resultObject, io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan queryResultPlan) {
+            decryptWithPlanCalls++;
+            return super.decrypt(resultObject, queryResultPlan);
         }
     }
 
@@ -466,5 +540,44 @@ class DatabaseEncryptionInterceptorTest {
         @Override
         public void setExecutorWrapper(Executor executor) {
         }
+    }
+
+    static class TestResultSetHandler implements ResultSetHandler {
+
+        private final MappedStatement mappedStatement;
+        private final BoundSql boundSql;
+        private final Object result;
+
+        TestResultSetHandler(MappedStatement mappedStatement, BoundSql boundSql, Object result) {
+            this.mappedStatement = mappedStatement;
+            this.boundSql = boundSql;
+            this.result = result;
+        }
+
+        public MappedStatement getMappedStatement() {
+            return mappedStatement;
+        }
+
+        public BoundSql getBoundSql() {
+            return boundSql;
+        }
+
+        @Override
+        public <E> List<E> handleResultSets(Statement stmt) {
+            @SuppressWarnings("unchecked")
+            List<E> cast = (List<E>) result;
+            return cast;
+        }
+
+        @Override
+        public <E> Cursor<E> handleCursorResultSets(Statement stmt) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void handleOutputParameters(CallableStatement cs) {
+            throw new UnsupportedOperationException();
+        }
+
     }
 }

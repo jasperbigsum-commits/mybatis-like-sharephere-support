@@ -37,7 +37,6 @@ final class SeparateTableResultHydrator {
     private final EncryptMetadataRegistry metadataRegistry;
     private final AlgorithmRegistry algorithmRegistry;
     private final SeparateTableRuleSupport ruleSupport;
-    private final ThreadLocal<HydrationScope> hydrationScope = new ThreadLocal<>();
 
     SeparateTableResultHydrator(DataSource dataSource,
                                 EncryptMetadataRegistry metadataRegistry,
@@ -65,25 +64,6 @@ final class SeparateTableResultHydrator {
             return;
         }
         hydrateWithPlan(resultObject, queryResultPlan);
-    }
-
-    void beginQueryScope() {
-        HydrationScope scope = hydrationScope.get();
-        if (scope == null) {
-            scope = new HydrationScope();
-            hydrationScope.set(scope);
-        }
-        scope.incrementDepth();
-    }
-
-    void endQueryScope() {
-        HydrationScope scope = hydrationScope.get();
-        if (scope == null) {
-            return;
-        }
-        if (scope.decrementDepth() == 0) {
-            hydrationScope.remove();
-        }
     }
 
     private void hydrateCollection(Collection<?> results) {
@@ -115,9 +95,7 @@ final class SeparateTableResultHydrator {
 
     private List<Object> collectHydrationCandidates(Object resultObject) {
         List<Object> results = new ArrayList<>();
-        HydrationScope scope = hydrationScope.get();
-        Set<Object> visited = scope != null ? scope.visited()
-                : Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         collectHydrationCandidates(resultObject, results, visited);
         return results;
     }
@@ -280,25 +258,6 @@ final class SeparateTableResultHydrator {
     private void bind(PreparedStatement statement, List<Object> values) throws SQLException {
         for (int index = 0; index < values.size(); index++) {
             statement.setObject(index + 1, values.get(index));
-        }
-    }
-
-    private static final class HydrationScope {
-
-        private final Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
-        private int depth;
-
-        private Set<Object> visited() {
-            return visited;
-        }
-
-        private void incrementDepth() {
-            depth++;
-        }
-
-        private int decrementDepth() {
-            depth--;
-            return depth;
         }
     }
 

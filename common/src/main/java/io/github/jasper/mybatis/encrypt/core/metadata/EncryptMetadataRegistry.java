@@ -23,8 +23,10 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ResultMap;
 
 import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -138,7 +140,9 @@ public class EncryptMetadataRegistry {
      * @param sql 当前待执行 SQL
      */
     public void warmUp(MappedStatement mappedStatement, Object parameterObject, String sql) {
+        // 命中带有的
         preloadResultHintMetadata(mappedStatement);
+        // 命中不带有的
         preloadStatementTableMetadata(mappedStatement, sql);
         mappedStatement.getResultMaps().stream()
                 .map(ResultMap::getType)
@@ -200,7 +204,7 @@ public class EncryptMetadataRegistry {
             return;
         }
         try {
-            for (java.lang.reflect.Method method : mapperType.getMethods()) {
+            for (Method method : mapperMethods(mapperType)) {
                 if (!methodName.equals(method.getName())) {
                     continue;
                 }
@@ -412,8 +416,8 @@ public class EncryptMetadataRegistry {
             return;
         }
         String normalizedTable = NameUtils.normalizeIdentifier(tableName);
-        Set<Class<?>> candidates = new LinkedHashSet<Class<?>>();
-        for (java.lang.reflect.Method method : mapperType.getMethods()) {
+        Set<Class<?>> candidates = new LinkedHashSet<>();
+        for (java.lang.reflect.Method method : mapperMethods(mapperType)) {
             collectTypes(method.getGenericReturnType(), candidates);
             for (Type parameterType : method.getGenericParameterTypes()) {
                 collectTypes(parameterType, candidates);
@@ -428,6 +432,16 @@ public class EncryptMetadataRegistry {
             }
             registerEntityType(candidate);
         }
+    }
+
+    private Set<java.lang.reflect.Method> mapperMethods(Class<?> mapperType) {
+        Set<java.lang.reflect.Method> methods = new LinkedHashSet<>();
+        if (mapperType == null) {
+            return methods;
+        }
+        Collections.addAll(methods, mapperType.getMethods());
+        Collections.addAll(methods, mapperType.getDeclaredMethods());
+        return methods;
     }
 
     private void collectTypes(Type type, Set<Class<?>> candidates) {

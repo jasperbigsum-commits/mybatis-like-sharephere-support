@@ -38,12 +38,7 @@ class ResultDecryptorTest {
         entity.setName("jasper");
 
         MappedStatement mappedStatement = entityMappedStatement(UserEntity.class, "test.selectEntity");
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(entity));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(entity));
 
         assertEquals("13800138000", entity.getPhone());
         assertEquals("jasper", entity.getName());
@@ -59,12 +54,7 @@ class ResultDecryptorTest {
         dto.setName("nora");
 
         MappedStatement mappedStatement = entityMappedStatement(UserProjectionDto.class, "test.selectAnnotatedDto");
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(dto));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(dto));
 
         assertEquals("13900139000", dto.getPhone());
         assertEquals("nora", dto.getName());
@@ -80,12 +70,7 @@ class ResultDecryptorTest {
         wrapper.setUser(dto);
         MappedStatement mappedStatement = mappedStatement();
 
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            assertDoesNotThrow(() -> decryptor.decrypt(List.of(wrapper)));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        assertDoesNotThrow(() -> decrypt(decryptor, mappedStatement, List.of(wrapper)));
 
         assertEquals("13700137000", wrapper.getUser().getPhone());
     }
@@ -99,12 +84,7 @@ class ResultDecryptorTest {
         dto.setName("iris");
         MappedStatement mappedStatement = configuredDtoMappedStatement();
 
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(dto));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(dto));
 
         assertEquals("13600136000", dto.getPhone());
         assertEquals("iris", dto.getName());
@@ -119,12 +99,7 @@ class ResultDecryptorTest {
         dto.setName("zoe");
         MappedStatement mappedStatement = autoMappedConfiguredDtoStatement();
 
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(dto));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(dto));
 
         assertEquals("13500135000", dto.getPhone());
         assertEquals("zoe", dto.getName());
@@ -139,12 +114,7 @@ class ResultDecryptorTest {
         dto.setName("maya");
         MappedStatement mappedStatement = hintedAutoMappedDtoStatement();
 
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(dto));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(dto));
 
         assertEquals("13400134000", dto.getPhone());
         assertEquals("maya", dto.getName());
@@ -159,12 +129,7 @@ class ResultDecryptorTest {
         dto.setName("wildcard");
         MappedStatement mappedStatement = hintedSelectAllDtoStatement();
 
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(dto));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(dto));
 
         assertEquals("13300133000", dto.getPhone());
         assertEquals("wildcard", dto.getName());
@@ -179,15 +144,16 @@ class ResultDecryptorTest {
         dto.setName("auto");
         MappedStatement mappedStatement = autoDetectedDtoStatement();
 
-        decryptor.beginQueryScope(mappedStatement, mappedStatement.getBoundSql(null));
-        try {
-            decryptor.decrypt(List.of(dto));
-        } finally {
-            decryptor.endQueryScope();
-        }
+        decrypt(decryptor, mappedStatement, List.of(dto));
 
         assertEquals("13200132000", dto.getPhone());
         assertEquals("auto", dto.getName());
+    }
+
+    private void decrypt(ResultDecryptor decryptor, MappedStatement mappedStatement, Object resultObject) {
+        BoundSql boundSql = mappedStatement.getBoundSql(null);
+        QueryResultPlan queryResultPlan = decryptor.resolvePlan(mappedStatement, boundSql);
+        decryptor.decrypt(resultObject, queryResultPlan);
     }
 
     private ResultDecryptor createDecryptor(Sm4CipherAlgorithm sm4, DatabaseEncryptionProperties properties) {

@@ -102,20 +102,6 @@ public class SeparateTableEncryptionManager {
         resultHydrator.hydrateResults(resultObject, queryResultPlan);
     }
 
-    /**
-     * 打开一次查询结果回填作用域。
-     */
-    public void beginQueryScope() {
-        resultHydrator.beginQueryScope();
-    }
-
-    /**
-     * 关闭一次查询结果回填作用域。
-     */
-    public void endQueryScope() {
-        resultHydrator.endQueryScope();
-    }
-
     private boolean usesLegacyPrepareOverride() {
         try {
             return getClass()

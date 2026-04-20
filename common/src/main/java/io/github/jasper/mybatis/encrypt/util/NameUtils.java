@@ -103,6 +103,7 @@ public final class NameUtils {
                 .replace("\"", "")
                 .replace("[", "")
                 .replace("]", "")
+                .replace("'", "")
                 .trim();
     }
 }

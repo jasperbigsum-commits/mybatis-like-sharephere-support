@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.plugin;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.config.SqlDialectContextHolder;
+import io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
 import io.github.jasper.mybatis.encrypt.core.support.DataSourceNameResolver;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
@@ -26,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Statement;
+import java.util.Collection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -148,25 +150,23 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         MappedStatement mappedStatement = resolveResultSetMappedStatement(invocation.getTarget());
         BoundSql boundSql = resolveResultSetBoundSql(invocation.getTarget());
         try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolveDataSourceName(mappedStatement))) {
-            boolean queryScopeOpened = false;
-            if (mappedStatement != null) {
-                resultDecryptor.beginQueryScope(mappedStatement, boundSql);
-                if (separateTableEncryptionManager != null) {
-                    separateTableEncryptionManager.beginQueryScope();
-                }
-                queryScopeOpened = true;
+            Object result = invocation.proceed();
+            if (mappedStatement == null || shouldBypassResultDecryption(result)) {
+                return result;
             }
-            try {
-                return resultDecryptor.decrypt(invocation.proceed());
-            } finally {
-                if (queryScopeOpened) {
-                    resultDecryptor.endQueryScope();
-                    if (separateTableEncryptionManager != null) {
-                        separateTableEncryptionManager.endQueryScope();
-                    }
-                }
-            }
+            QueryResultPlan queryResultPlan = resultDecryptor.resolvePlan(mappedStatement, boundSql);
+            return resultDecryptor.decrypt(result, queryResultPlan);
         }
+    }
+
+    private boolean shouldBypassResultDecryption(Object result) {
+        if (result == null) {
+            return true;
+        }
+        if (result instanceof Collection<?>) {
+            return ((Collection<?>) result).isEmpty();
+        }
+        return result.getClass().isArray() && java.lang.reflect.Array.getLength(result) == 0;
     }
 
     /**

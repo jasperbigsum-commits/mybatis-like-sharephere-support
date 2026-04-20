@@ -320,7 +320,7 @@ public final class MigrationSchemaSqlGenerator {
     private ColumnType cipherType(ColumnMetadata sourceColumn) {
         int sourceLength = sourceColumn.resolveCharacterLength(sizingOptions.getFallbackCharacterLength());
         int length = sizingOptions.getCipherColumnBaseLength()
-                + sourceLength * sizingOptions.getCipherColumnLengthWeight();
+                + (sourceLength - sizingOptions.getCipherColumnMinCharLength()) * sizingOptions.getCipherColumnLengthWeight();
         return ColumnType.variableCharacter(length, dialect);
     }
 
@@ -431,10 +431,11 @@ public final class MigrationSchemaSqlGenerator {
      */
     public static final class SizingOptions {
 
-        private int hashColumnLength = 128;
+        private int hashColumnLength = 64;
         private int fallbackCharacterLength = 255;
         private int cipherColumnBaseLength = 64;
-        private int cipherColumnLengthWeight = 4;
+        private int cipherColumnMinCharLength = 18;
+        private int cipherColumnLengthWeight = 1;
         private int referenceIdColumnLength = 64;
 
         /**
@@ -489,6 +490,22 @@ public final class MigrationSchemaSqlGenerator {
          */
         public void setCipherColumnBaseLength(int cipherColumnBaseLength) {
             this.cipherColumnBaseLength = positive(cipherColumnBaseLength, "cipherColumnBaseLength");
+        }
+
+        /**
+         * 返回加密字段的最小参考基数生成
+         * @return 最小参考基数大小
+         */
+        public int getCipherColumnMinCharLength() {
+            return cipherColumnMinCharLength;
+        }
+
+        /**
+         * 设置加密字段的最小参考基数生成
+         * @param cipherColumnMinCharLength 最小参考基数大小
+         */
+        public void setCipherColumnMinCharLength(int cipherColumnMinCharLength) {
+            this.cipherColumnMinCharLength = cipherColumnMinCharLength;
         }
 
         /**

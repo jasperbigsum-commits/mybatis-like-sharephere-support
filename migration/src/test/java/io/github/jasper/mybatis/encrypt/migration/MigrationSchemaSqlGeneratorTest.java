@@ -28,8 +28,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 builder -> builder.backupColumn("phone", "phone_backup"));
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(320)",
-                "alter table `user_account` add column `phone_hash` varchar(128)",
+                "alter table `user_account` add column `phone_cipher` varchar(110)",
+                "alter table `user_account` add column `phone_hash` varchar(64)",
                 "alter table `user_account` add column `phone_like` varchar(64)"
         ), ddl);
     }
@@ -54,8 +54,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 builder -> builder.backupColumn("phone", "phone_backup"));
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` modify column `phone_cipher` varchar(320)",
-                "alter table `user_account` modify column `phone_hash` varchar(128)",
+                "alter table `user_account` modify column `phone_cipher` varchar(110)",
+                "alter table `user_account` modify column `phone_hash` varchar(64)",
                 "alter table `user_account` modify column `phone_like` varchar(64)"
         ), ddl);
     }
@@ -67,7 +67,7 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 "create table user_account (id bigint primary key, id_card varchar(80))",
                 "create table user_id_card_encrypt ("
                         + "id varchar(64) primary key, "
-                        + "id_card_cipher varchar(128), "
+                        + "id_card_cipher varchar(64), "
                         + "id_card_hash varchar(32))");
 
         MigrationSchemaSqlGenerator generator =
@@ -78,8 +78,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 builder -> builder.backupColumn("idCard", "id_card_backup"));
 
         assertEquals(Arrays.asList(
-                "alter table `user_id_card_encrypt` modify column `id_card_cipher` varchar(384)",
-                "alter table `user_id_card_encrypt` modify column `id_card_hash` varchar(128)",
+                "alter table `user_id_card_encrypt` modify column `id_card_cipher` varchar(126)",
+                "alter table `user_id_card_encrypt` modify column `id_card_hash` varchar(64)",
                 "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80)",
                 "alter table `user_account` add column `id_card_backup` varchar(80)"
         ), ddl);
@@ -98,8 +98,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
 
         assertEquals(Arrays.asList(
                 "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
-                        + "`id_card_cipher` varchar(384), "
-                        + "`id_card_hash` varchar(128), "
+                        + "`id_card_cipher` varchar(126), "
+                        + "`id_card_hash` varchar(64), "
                         + "`id_card_like` varchar(80))"
         ), ddl);
     }
@@ -118,8 +118,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         Map<String, List<String>> ddl = generator.generateAllRegisteredTablesGrouped();
 
         assertEquals(Collections.singletonMap("user_account", Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(320)",
-                "alter table `user_account` add column `phone_hash` varchar(128)",
+                "alter table `user_account` add column `phone_cipher` varchar(110)",
+                "alter table `user_account` add column `phone_hash` varchar(64)",
                 "alter table `user_account` add column `phone_like` varchar(64)"
         )), ddl);
     }

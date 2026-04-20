@@ -48,13 +48,13 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         List<String> archiveDdl = factory.generateAllRegisteredTables("archiveDs");
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(320)",
-                "alter table `user_account` add column `phone_hash` varchar(128)",
+                "alter table `user_account` add column `phone_cipher` varchar(110)",
+                "alter table `user_account` add column `phone_hash` varchar(64)",
                 "alter table `user_account` add column `phone_like` varchar(64)"
         ), primaryDdl);
         assertEquals(Arrays.asList(
-                "alter table \"user_account\" add (\"phone_cipher\" varchar2(320))",
-                "alter table \"user_account\" add (\"phone_hash\" varchar2(128))",
+                "alter table \"user_account\" add (\"phone_cipher\" varchar2(110))",
+                "alter table \"user_account\" add (\"phone_hash\" varchar2(64))",
                 "alter table \"user_account\" add (\"phone_like\" varchar2(64))"
         ), archiveDdl);
     }

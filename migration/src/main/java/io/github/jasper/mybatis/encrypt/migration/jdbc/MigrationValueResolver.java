@@ -5,7 +5,7 @@ import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 /**
- * Derives ciphertext, hash and like values from the original plaintext field.
+ * Derives ciphertext, hash, like and stored-masked values from the original plaintext field.
  */
 final class MigrationValueResolver {
 
@@ -28,21 +28,27 @@ final class MigrationValueResolver {
                 : algorithmRegistry.assisted(columnPlan.getAssistedQueryAlgorithm()).transform(plainText);
         String like = StringUtils.isBlank(columnPlan.getLikeQueryColumn()) ? null
                 : algorithmRegistry.like(columnPlan.getLikeQueryAlgorithm()).transform(plainText);
-        return new DerivedFieldValues(cipher, hash, like);
+        String masked = StringUtils.isBlank(columnPlan.getMaskedColumn()) ? null
+                : columnPlan.sharesLikeQueryAndMaskedColumn()
+                ? like
+                : algorithmRegistry.like(columnPlan.getEffectiveMaskedAlgorithm()).transform(plainText);
+        return new DerivedFieldValues(cipher, hash, like, masked);
     }
 
     static final class DerivedFieldValues {
 
-        private static final DerivedFieldValues EMPTY = new DerivedFieldValues(null, null, null);
+        private static final DerivedFieldValues EMPTY = new DerivedFieldValues(null, null, null, null);
 
         private final String cipherText;
         private final String hashValue;
         private final String likeValue;
+        private final String maskedValue;
 
-        private DerivedFieldValues(String cipherText, String hashValue, String likeValue) {
+        private DerivedFieldValues(String cipherText, String hashValue, String likeValue, String maskedValue) {
             this.cipherText = cipherText;
             this.hashValue = hashValue;
             this.likeValue = likeValue;
+            this.maskedValue = maskedValue;
         }
 
         static DerivedFieldValues empty() {
@@ -50,7 +56,7 @@ final class MigrationValueResolver {
         }
 
         boolean isEmpty() {
-            return cipherText == null && hashValue == null && likeValue == null;
+            return cipherText == null && hashValue == null && likeValue == null && maskedValue == null;
         }
 
         String getCipherText() {
@@ -63,6 +69,10 @@ final class MigrationValueResolver {
 
         String getLikeValue() {
             return likeValue;
+        }
+
+        String getMaskedValue() {
+            return maskedValue;
         }
     }
 }

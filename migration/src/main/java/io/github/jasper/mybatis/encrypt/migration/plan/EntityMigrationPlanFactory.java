@@ -132,9 +132,11 @@ public class EntityMigrationPlanFactory {
                 columnRule.storageColumn(),
                 columnRule.assistedQueryColumn(),
                 columnRule.likeQueryColumn(),
+                columnRule.maskedColumn(),
                 columnRule.cipherAlgorithm(),
                 columnRule.assistedQueryAlgorithm(),
                 columnRule.likeQueryAlgorithm(),
+                columnRule.maskedAlgorithm(),
                 columnRule.isStoredInSeparateTable(),
                 columnRule.storageTable(),
                 columnRule.storageIdColumn(),
@@ -150,7 +152,8 @@ public class EntityMigrationPlanFactory {
         if (normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.column()))
                 || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.storageColumn()))
                 || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.assistedQueryColumn()))
-                || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.likeQueryColumn()))) {
+                || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.likeQueryColumn()))
+                || normalizedBackup.equals(NameUtils.normalizeIdentifier(columnRule.maskedColumn()))) {
             throw new MigrationDefinitionException(MigrationErrorCode.BACKUP_COLUMN_CONFLICT,
                     "Backup column conflicts with migration target columns for property: "
                     + columnRule.property());
@@ -224,9 +227,11 @@ public class EntityMigrationPlanFactory {
         private final String storageColumn;
         private final String assistedQueryColumn;
         private final String likeQueryColumn;
+        private final String maskedColumn;
         private final String cipherAlgorithm;
         private final String assistedQueryAlgorithm;
         private final String likeQueryAlgorithm;
+        private final String maskedAlgorithm;
         private final boolean storedInSeparateTable;
         private final String storageTable;
         private final String storageIdColumn;
@@ -235,9 +240,11 @@ public class EntityMigrationPlanFactory {
                            String storageColumn,
                            String assistedQueryColumn,
                            String likeQueryColumn,
+                           String maskedColumn,
                            String cipherAlgorithm,
                            String assistedQueryAlgorithm,
                            String likeQueryAlgorithm,
+                           String maskedAlgorithm,
                            boolean storedInSeparateTable,
                            String storageTable,
                            String storageIdColumn) {
@@ -245,9 +252,11 @@ public class EntityMigrationPlanFactory {
             this.storageColumn = storageColumn;
             this.assistedQueryColumn = assistedQueryColumn;
             this.likeQueryColumn = likeQueryColumn;
+            this.maskedColumn = maskedColumn;
             this.cipherAlgorithm = cipherAlgorithm;
             this.assistedQueryAlgorithm = assistedQueryAlgorithm;
             this.likeQueryAlgorithm = likeQueryAlgorithm;
+            this.maskedAlgorithm = maskedAlgorithm;
             this.storedInSeparateTable = storedInSeparateTable;
             this.storageTable = storageTable;
             this.storageIdColumn = storageIdColumn;
@@ -259,9 +268,11 @@ public class EntityMigrationPlanFactory {
                     NameUtils.normalizeIdentifier(columnPlan.getStorageColumn()),
                     NameUtils.normalizeIdentifier(columnPlan.getAssistedQueryColumn()),
                     NameUtils.normalizeIdentifier(columnPlan.getLikeQueryColumn()),
+                    NameUtils.normalizeIdentifier(columnPlan.getMaskedColumn()),
                     columnPlan.getCipherAlgorithm(),
                     columnPlan.getAssistedQueryAlgorithm(),
                     columnPlan.getLikeQueryAlgorithm(),
+                    columnPlan.getEffectiveMaskedAlgorithm(),
                     columnPlan.isStoredInSeparateTable(),
                     NameUtils.normalizeIdentifier(columnPlan.getStorageTable()),
                     NameUtils.normalizeIdentifier(columnPlan.getStorageIdColumn())
@@ -282,17 +293,19 @@ public class EntityMigrationPlanFactory {
                     && Objects.equals(storageColumn, that.storageColumn)
                     && Objects.equals(assistedQueryColumn, that.assistedQueryColumn)
                     && Objects.equals(likeQueryColumn, that.likeQueryColumn)
+                    && Objects.equals(maskedColumn, that.maskedColumn)
                     && Objects.equals(cipherAlgorithm, that.cipherAlgorithm)
                     && Objects.equals(assistedQueryAlgorithm, that.assistedQueryAlgorithm)
                     && Objects.equals(likeQueryAlgorithm, that.likeQueryAlgorithm)
+                    && Objects.equals(maskedAlgorithm, that.maskedAlgorithm)
                     && Objects.equals(storageTable, that.storageTable)
                     && Objects.equals(storageIdColumn, that.storageIdColumn);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(sourceColumn, storageColumn, assistedQueryColumn, likeQueryColumn,
-                    cipherAlgorithm, assistedQueryAlgorithm, likeQueryAlgorithm,
+            return Objects.hash(sourceColumn, storageColumn, assistedQueryColumn, likeQueryColumn, maskedColumn,
+                    cipherAlgorithm, assistedQueryAlgorithm, likeQueryAlgorithm, maskedAlgorithm,
                     storedInSeparateTable, storageTable, storageIdColumn);
         }
     }

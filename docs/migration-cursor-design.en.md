@@ -2,6 +2,16 @@
 
 [中文](migration-cursor-design.zh-CN.md) | [English](migration-cursor-design.en.md)
 
+## When to read this
+
+Read this document only when you are already planning a migration and cannot simply use `id` as the cursor.
+
+If you are still in first-time integration, start with:
+
+- [Quick Start](quick-start.en.md)
+- [Persistence Encryption Guide](persistence-encryption-guide.en.md)
+- [Migration Guide](migration-guide.en.md)
+
 ## Goal
 
 The migration module uses cursor-based seek pagination to scan source rows in batches. Cursor design directly affects:

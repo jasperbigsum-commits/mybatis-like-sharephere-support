@@ -16,7 +16,9 @@ public class AutoConfiguredUserRecord {
             column = "phone",
             storageColumn = "phone_cipher",
             assistedQueryColumn = "phone_hash",
-            likeQueryColumn = "phone_like"
+            likeQueryColumn = "phone_like",
+            maskedColumn = "phone_masked",
+            maskedAlgorithm = "phoneMaskLike"
     )
     private String phone;
 
@@ -27,7 +29,9 @@ public class AutoConfiguredUserRecord {
             storageColumn = "id_card_cipher",
             storageIdColumn = "id",
             assistedQueryColumn = "id_card_hash",
-            likeQueryColumn = "id_card_like"
+            likeQueryColumn = "id_card_like",
+            maskedColumn = "id_card_masked",
+            maskedAlgorithm = "idCardMaskLike"
     )
     private String idCard;
 }

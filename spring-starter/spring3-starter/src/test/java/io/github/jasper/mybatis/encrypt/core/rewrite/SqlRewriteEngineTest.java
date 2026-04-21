@@ -56,9 +56,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_cipher`"));
         assertTrue(result.sql().contains("`phone_hash`"));
         assertTrue(result.sql().contains("`phone_like`"));
+        assertTrue(result.sql().contains("`phone_masked`"));
         assertFalse(result.sql().contains("INSERT INTO user_account (`phone`,"));
         result.applyTo(boundSql);
-        assertEquals(4, boundSql.getParameterMappings().size());
+        assertEquals(5, boundSql.getParameterMappings().size());
     }
 
     @Test
@@ -96,9 +97,39 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_cipher`"));
         assertTrue(result.sql().contains("`phone_hash`"));
         assertTrue(result.sql().contains("`phone_like`"));
+        assertTrue(result.sql().contains("`phone_masked`"));
         assertTrue(result.sql().contains("`id_card`") || result.sql().contains("id_card"));
         result.applyTo(boundSql);
-        assertEquals(6, boundSql.getParameterMappings().size());
+        assertEquals(7, boundSql.getParameterMappings().size());
+    }
+
+    @Test
+    void shouldRewriteInsertOnceWhenLikeAndMaskedShareColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithSharedLikeMaskedColumn();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "INSERT INTO user_account (phone, name) VALUES (?, ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "name", String.class).build()
+                ),
+                Map.of("phone", "13800138000", "name", "Alice")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.INSERT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_like`"));
+        assertFalse(result.sql().contains("`phone_masked`"));
+        result.applyTo(boundSql);
+        assertEquals(4, boundSql.getParameterMappings().size());
     }
 
     @Test
@@ -302,7 +333,7 @@ class SqlRewriteEngineTest {
 
         assertEquals(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN, ex.getErrorCode());
         assertEquals(
-                "Encrypted equality query requires assistedQueryColumn. property=phone, table=<entity-default-table>, column=phone",
+                "Encrypted equality query requires assistedQueryColumn. property=phone, table=user_account, column=phone",
                 ex.getMessage()
         );
     }
@@ -331,7 +362,7 @@ class SqlRewriteEngineTest {
 
         assertEquals(EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN, ex.getErrorCode());
         assertEquals(
-                "Encrypted LIKE query requires likeQueryColumn. property=phone, table=<entity-default-table>, column=phone",
+                "Encrypted LIKE query requires likeQueryColumn. property=phone, table=user_account, column=phone",
                 ex.getMessage()
         );
     }
@@ -373,7 +404,7 @@ class SqlRewriteEngineTest {
 
         assertEquals(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN, ex.getErrorCode());
         assertEquals(
-                "Separate-table encrypted field must define assistedQueryColumn. property=idCard, table=<entity-default-table>, column=id_card, storageTable=user_id_card_encrypt",
+                "Separate-table encrypted field must define assistedQueryColumn. property=idCard, table=user_account, column=id_card, storageTable=user_id_card_encrypt",
                 ex.getMessage()
         );
     }
@@ -1397,12 +1428,42 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_cipher` = ?") || result.sql().contains("phone_cipher = ?"));
         assertTrue(result.sql().contains("`phone_hash` = ?") || result.sql().contains("phone_hash = ?"));
         assertTrue(result.sql().contains("`phone_like` = ?") || result.sql().contains("phone_like = ?"));
+        assertTrue(result.sql().contains("`phone_masked` = ?") || result.sql().contains("phone_masked = ?"));
         assertTrue(result.sql().contains("`id_card` = ?") || result.sql().contains("id_card = ?"));
         assertTrue(result.sql().contains("WHERE `phone_hash` = ?") || result.sql().contains("WHERE phone_hash = ?"));
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
         result.applyTo(boundSql);
-        assertEquals(6, boundSql.getParameterMappings().size());
+        assertEquals(7, boundSql.getParameterMappings().size());
+    }
+
+    @Test
+    void shouldRewriteUpdateOnceWhenLikeAndMaskedShareColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithSharedLikeMaskedColumn();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "UPDATE user_account SET phone = ? WHERE id = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "id", Long.class).build()
+                ),
+                Map.of("phone", "13800138000", "id", 1L)
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.UPDATE, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_like` = ?"));
+        assertFalse(result.sql().contains("`phone_masked`"));
+        result.applyTo(boundSql);
+        assertEquals(4, boundSql.getParameterMappings().size());
     }
 
     @Test
@@ -1842,6 +1903,8 @@ class SqlRewriteEngineTest {
         fieldRule.setStorageColumn("phone_cipher");
         fieldRule.setAssistedQueryColumn("phone_hash");
         fieldRule.setLikeQueryColumn("phone_like");
+        fieldRule.setMaskedColumn("phone_masked");
+        fieldRule.setMaskedAlgorithm("phoneMaskLike");
         tableRule.getFields().add(fieldRule);
 
         DatabaseEncryptionProperties.FieldRuleProperties separateFieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
@@ -1853,6 +1916,8 @@ class SqlRewriteEngineTest {
         separateFieldRule.setStorageIdColumn("id");
         separateFieldRule.setAssistedQueryColumn("id_card_hash");
         separateFieldRule.setLikeQueryColumn("id_card_like");
+        separateFieldRule.setMaskedColumn("id_card_masked");
+        separateFieldRule.setMaskedAlgorithm("idCardMaskLike");
         tableRule.getFields().add(separateFieldRule);
         properties.getTables().add(tableRule);
 
@@ -1864,6 +1929,8 @@ class SqlRewriteEngineTest {
         archiveFieldRule.setStorageColumn("archive_phone_cipher");
         archiveFieldRule.setAssistedQueryColumn("archive_phone_hash");
         archiveFieldRule.setLikeQueryColumn("archive_phone_like");
+        archiveFieldRule.setMaskedColumn("archive_phone_masked");
+        archiveFieldRule.setMaskedAlgorithm("phoneMaskLike");
         archiveTableRule.getFields().add(archiveFieldRule);
         properties.getTables().add(archiveTableRule);
 
@@ -1874,6 +1941,15 @@ class SqlRewriteEngineTest {
     private DatabaseEncryptionProperties sampleProperties(SqlDialect sqlDialect) {
         DatabaseEncryptionProperties properties = sampleProperties();
         properties.setSqlDialect(sqlDialect);
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesWithSharedLikeMaskedColumn() {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        DatabaseEncryptionProperties.FieldRuleProperties phoneRule = properties.getTables().get(0).getFields().get(0);
+        phoneRule.setLikeQueryAlgorithm("phoneMaskLike");
+        phoneRule.setMaskedColumn("phone_like");
+        phoneRule.setMaskedAlgorithm("phoneMaskLike");
         return properties;
     }
 
@@ -1899,7 +1975,11 @@ class SqlRewriteEngineTest {
         return new AlgorithmRegistry(
                 Map.of("sm4", new Sm4CipherAlgorithm("unit-test-key")),
                 Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
-                Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
+                Map.of(
+                        "normalizedLike", new NormalizedLikeQueryAlgorithm(),
+                        "phoneMaskLike", new io.github.jasper.mybatis.encrypt.algorithm.support.PhoneNumberMaskLikeQueryAlgorithm(),
+                        "idCardMaskLike", new io.github.jasper.mybatis.encrypt.algorithm.support.IdCardMaskLikeQueryAlgorithm()
+                )
         );
     }
 
@@ -1911,5 +1991,15 @@ class SqlRewriteEngineTest {
                 .parameterMap(parameterMap)
                 .resultMaps(List.of(resultMap))
                 .build();
+    }
+
+    private int occurrences(String value, String token) {
+        int count = 0;
+        int index = 0;
+        while ((index = value.indexOf(token, index)) >= 0) {
+            count++;
+            index += token.length();
+        }
+        return count;
     }
 }

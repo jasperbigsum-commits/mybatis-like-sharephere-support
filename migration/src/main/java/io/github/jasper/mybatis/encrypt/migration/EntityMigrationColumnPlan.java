@@ -13,9 +13,11 @@ public final class EntityMigrationColumnPlan {
     private final String storageColumn;
     private final String assistedQueryColumn;
     private final String likeQueryColumn;
+    private final String maskedColumn;
     private final String cipherAlgorithm;
     private final String assistedQueryAlgorithm;
     private final String likeQueryAlgorithm;
+    private final String maskedAlgorithm;
     private final boolean storedInSeparateTable;
     private final String storageTable;
     private final String storageIdColumn;
@@ -29,9 +31,11 @@ public final class EntityMigrationColumnPlan {
      * @param storageColumn cipher storage column
      * @param assistedQueryColumn deterministic hash column for equality lookup and separate-table linkage
      * @param likeQueryColumn optional LIKE lookup column
+     * @param maskedColumn optional stored masked column
      * @param cipherAlgorithm cipher algorithm bean name
      * @param assistedQueryAlgorithm assisted query algorithm bean name
      * @param likeQueryAlgorithm like query algorithm bean name
+     * @param maskedAlgorithm stored masked algorithm bean name
      * @param storedInSeparateTable whether the field uses separate-table storage
      * @param storageTable separate-table name when enabled
      * @param storageIdColumn physical primary key column in the separate table
@@ -42,9 +46,11 @@ public final class EntityMigrationColumnPlan {
                                      String storageColumn,
                                      String assistedQueryColumn,
                                      String likeQueryColumn,
+                                     String maskedColumn,
                                      String cipherAlgorithm,
                                      String assistedQueryAlgorithm,
                                      String likeQueryAlgorithm,
+                                     String maskedAlgorithm,
                                      boolean storedInSeparateTable,
                                      String storageTable,
                                      String storageIdColumn,
@@ -54,9 +60,11 @@ public final class EntityMigrationColumnPlan {
         this.storageColumn = storageColumn;
         this.assistedQueryColumn = assistedQueryColumn;
         this.likeQueryColumn = likeQueryColumn;
+        this.maskedColumn = maskedColumn;
         this.cipherAlgorithm = cipherAlgorithm;
         this.assistedQueryAlgorithm = assistedQueryAlgorithm;
         this.likeQueryAlgorithm = likeQueryAlgorithm;
+        this.maskedAlgorithm = maskedAlgorithm;
         this.storedInSeparateTable = storedInSeparateTable;
         this.storageTable = storageTable;
         this.storageIdColumn = storageIdColumn;
@@ -109,6 +117,15 @@ public final class EntityMigrationColumnPlan {
     }
 
     /**
+     * Return the optional stored masked column.
+     *
+     * @return masked column, or {@code null}
+     */
+    public String getMaskedColumn() {
+        return maskedColumn;
+    }
+
+    /**
      * Return the cipher algorithm bean name.
      *
      * @return cipher algorithm bean name
@@ -133,6 +150,45 @@ public final class EntityMigrationColumnPlan {
      */
     public String getLikeQueryAlgorithm() {
         return likeQueryAlgorithm;
+    }
+
+    /**
+     * Return the stored masked algorithm bean name.
+     *
+     * @return stored masked algorithm bean name
+     */
+    public String getMaskedAlgorithm() {
+        return maskedAlgorithm;
+    }
+
+    /**
+     * Return the effective stored masked algorithm.
+     *
+     * <p>When the LIKE query column and masked column share the same physical column,
+     * migration must generate one value only, so the LIKE algorithm owns that column.</p>
+     *
+     * @return effective stored masked algorithm bean name
+     */
+    public String getEffectiveMaskedAlgorithm() {
+        return sharesLikeQueryAndMaskedColumn() ? likeQueryAlgorithm : maskedAlgorithm;
+    }
+
+    /**
+     * Return whether LIKE query and masked values share one physical column.
+     *
+     * @return {@code true} when both roles point to the same column
+     */
+    public boolean sharesLikeQueryAndMaskedColumn() {
+        return sameColumn(likeQueryColumn, maskedColumn);
+    }
+
+    /**
+     * Return whether the masked column needs an independent write target.
+     *
+     * @return {@code true} when masked column is configured and not shared with LIKE column
+     */
+    public boolean hasDistinctMaskedColumn() {
+        return StringUtils.isNotBlank(maskedColumn) && !sharesLikeQueryAndMaskedColumn();
     }
 
     /**
@@ -180,11 +236,18 @@ public final class EntityMigrationColumnPlan {
         return storedInSeparateTable
                 || matchesSourceColumn(storageColumn)
                 || matchesSourceColumn(assistedQueryColumn)
-                || matchesSourceColumn(likeQueryColumn);
+                || matchesSourceColumn(likeQueryColumn)
+                || matchesSourceColumn(maskedColumn);
     }
 
     private boolean matchesSourceColumn(String targetColumn) {
         return sourceColumn.equals(targetColumn);
+    }
+
+    private boolean sameColumn(String left, String right) {
+        String normalizedLeft = NameUtils.normalizeIdentifier(left);
+        String normalizedRight = NameUtils.normalizeIdentifier(right);
+        return normalizedLeft != null && normalizedLeft.equals(normalizedRight);
     }
 
     /**
@@ -224,8 +287,13 @@ public final class EntityMigrationColumnPlan {
                 && normalized.equals(NameUtils.normalizeIdentifier(assistedQueryColumn))) {
             return true;
         }
-        return !storedInSeparateTable
+        if (!storedInSeparateTable
                 && StringUtils.isNotBlank(likeQueryColumn)
-                && normalized.equals(NameUtils.normalizeIdentifier(likeQueryColumn));
+                && normalized.equals(NameUtils.normalizeIdentifier(likeQueryColumn))) {
+            return true;
+        }
+        return !storedInSeparateTable
+                && StringUtils.isNotBlank(maskedColumn)
+                && normalized.equals(NameUtils.normalizeIdentifier(maskedColumn));
     }
 }

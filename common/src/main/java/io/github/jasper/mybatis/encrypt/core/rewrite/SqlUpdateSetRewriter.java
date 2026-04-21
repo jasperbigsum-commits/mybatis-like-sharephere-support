@@ -98,5 +98,15 @@ final class SqlUpdateSetRewriter {
                             context
                     )));
         }
+        if (rule.hasDistinctMaskedColumn()) {
+            rewrittenUpdateSets.add(new UpdateSet(
+                    columnBuilder.apply(sourceColumn, rule.maskedColumn()),
+                    writeExpressionRewriter.buildShadow(
+                            writeValue,
+                            valueTransformer.transformMasked(rule, writeValue.plainValue()),
+                            MaskingMode.MASKED,
+                            context
+                    )));
+        }
     }
 }

@@ -99,6 +99,15 @@ final class SqlInsertRewriter {
                     context
             ));
         }
+        if (rule.hasDistinctMaskedColumn()) {
+            rewrittenColumns.add(buildColumn(rule.maskedColumn()));
+            rewrittenExpressions.add(writeExpressionRewriter.buildShadow(
+                    writeValue,
+                    valueTransformer.transformMasked(rule, writeValue.plainValue()),
+                    MaskingMode.MASKED,
+                    context
+            ));
+        }
     }
 
     private Column buildColumn(String columnName) {

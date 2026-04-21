@@ -1,5 +1,16 @@
 # 项目理念与需求
 
+## 这份文档解决什么问题
+
+这份文档不是接入手册，而是解释项目为什么这样设计、哪些能力是目标、哪些能力明确不是当前目标。
+
+如果你想直接使用项目，请优先阅读：
+
+- [快速使用指南](quick-start.zh-CN.md)
+- [持久层加密指南](persistence-encryption-guide.zh-CN.md)
+- [脱敏响应指南](sensitive-response-guide.zh-CN.md)
+- [存量迁移指南](migration-guide.zh-CN.md)
+
 ## 项目目标
 
 构建一个面向 MyBatis / MyBatis-Plus 的数据库字段加密增强插件，在尽量不改造业务 Mapper 和 Service 代码的前提下，实现敏感字段的透明加密、条件查询改写和结果自动解密。

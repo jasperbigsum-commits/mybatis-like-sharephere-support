@@ -45,6 +45,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>这个工厂把“结果类型 -> 需要处理的属性路径 -> 对应加密规则”收敛成可复用的
  * {@link QueryResultPlan}。这样结果解密阶段只需要顺序处理命中的属性，不必再遍历整个对象图。</p>
+ *
+ * <p>推断遵循保守原则：优先使用实体元数据、ResultMap、SQL 投影列和
+ * {@link io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint}；如果列来源在多表 join、
+ * set operation、复杂表达式或嵌套派生表中无法唯一确定，就返回更小的计划甚至空计划，而不是
+ * 进行高风险猜测。</p>
  */
 public final class QueryResultPlanFactory {
 
@@ -554,7 +559,7 @@ public final class QueryResultPlanFactory {
             boolean storedInSeparateTable = sourceRule.isStoredInSeparateTable();
             return new EncryptColumnRule(
                     projectedColumn,
-                    null,
+                    sourceRule.table(),
                     projectedColumn,
                     sourceRule.cipherAlgorithm(),
                     storedInSeparateTable
@@ -565,6 +570,8 @@ public final class QueryResultPlanFactory {
                             ? sourceRule.likeQueryColumn()
                             : (sourceRule.hasLikeQueryColumn() ? HIDDEN_LIKE_PREFIX + projectedColumn : null),
                     sourceRule.likeQueryAlgorithm(),
+                    sourceRule.maskedColumn(),
+                    sourceRule.maskedAlgorithm(),
                     sourceRule.storageMode(),
                     sourceRule.storageTable(),
                     storedInSeparateTable ? sourceRule.storageColumn() : projectedColumn,

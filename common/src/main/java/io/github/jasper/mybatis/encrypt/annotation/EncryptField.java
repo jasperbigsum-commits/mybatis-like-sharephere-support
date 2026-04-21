@@ -100,4 +100,18 @@ public @interface EncryptField {
      * @return LIKE 查询算法 bean 名称
      */
     String likeQueryAlgorithm() default "normalizedLike";
+
+    /**
+     * 用于对外返回的存储态脱敏列。
+     *
+     * @return 存储态脱敏列名
+     */
+    String maskedColumn() default "";
+
+    /**
+     * 计算存储态脱敏列时使用的算法 bean 名称。
+     *
+     * @return 脱敏存储算法 bean 名称
+     */
+    String maskedAlgorithm() default "normalizedLike";
 }

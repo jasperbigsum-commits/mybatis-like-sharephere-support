@@ -2,6 +2,16 @@
 
 [中文](migration-cursor-design.zh-CN.md) | [English](migration-cursor-design.en.md)
 
+## 这份文档适合什么时候看
+
+只有当你已经准备执行迁移，并且游标不想直接使用 `id` 时，再看这份文档。
+
+如果只是第一次接入，请先看：
+
+- [快速使用指南](quick-start.zh-CN.md)
+- [持久层加密指南](persistence-encryption-guide.zh-CN.md)
+- [存量迁移指南](migration-guide.zh-CN.md)
+
 ## 目标
 
 迁移模块使用基于游标的 seek 分页来分批扫描主表数据。游标配置是否合理，直接决定：

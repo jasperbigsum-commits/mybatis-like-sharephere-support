@@ -2,12 +2,14 @@ package io.github.jasper.mybatis.encrypt.core.support;
 
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.ObjectTraversalUtils;
+import io.github.jasper.mybatis.encrypt.util.PropertyValueAccessor;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
 
@@ -37,6 +39,7 @@ final class SeparateTableResultHydrator {
     private final EncryptMetadataRegistry metadataRegistry;
     private final AlgorithmRegistry algorithmRegistry;
     private final SeparateTableRuleSupport ruleSupport;
+    private final PropertyValueAccessor propertyValueAccessor = new PropertyValueAccessor();
 
     SeparateTableResultHydrator(DataSource dataSource,
                                 EncryptMetadataRegistry metadataRegistry,
@@ -139,32 +142,36 @@ final class SeparateTableResultHydrator {
     }
 
     private void hydrateRule(List<?> candidates, EncryptColumnRule rule) {
-        Map<Object, MetaObject> metaById = new LinkedHashMap<>();
+        Map<Object, PropertyValueAccessor.PropertyReference> propertyById = new LinkedHashMap<>();
         for (Object candidate : candidates) {
-            MetaObject metaObject = SystemMetaObject.forObject(candidate);
-            if (!metaObject.hasGetter(rule.property()) || !metaObject.hasSetter(rule.property())) {
+            PropertyValueAccessor.PropertyReference propertyReference =
+                    propertyValueAccessor.resolve(candidate, rule.property());
+            if (propertyReference == null || !propertyReference.canWrite()) {
                 continue;
             }
-            Object referenceId = metaObject.getValue(rule.property());
+            Object referenceId = propertyReference.getValue();
             if (referenceId != null) {
-                metaById.put(ruleSupport.normalizeReferenceId(referenceId), metaObject);
+                propertyById.put(ruleSupport.normalizeReferenceId(referenceId), propertyReference);
             }
         }
-        if (metaById.isEmpty()) {
+        if (propertyById.isEmpty()) {
             return;
         }
-        Map<Object, String> cipherById = loadCipherValues(rule, new ArrayList<>(metaById.keySet()));
+        Map<Object, String> cipherById = loadCipherValues(rule, new ArrayList<>(propertyById.keySet()));
         for (Map.Entry<Object, String> entry : cipherById.entrySet()) {
-            MetaObject metaObject = metaById.get(entry.getKey());
-            if (metaObject != null && entry.getValue() != null) {
-                metaObject.setValue(rule.property(), algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt(entry.getValue()));
+            PropertyValueAccessor.PropertyReference propertyReference = propertyById.get(entry.getKey());
+            if (propertyReference != null && entry.getValue() != null) {
+                String plainText = algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt(entry.getValue());
+                if (propertyReference.setValue(plainText) && SensitiveDataContext.isRecording()) {
+                    SensitiveDataContext.record(propertyReference.owner(), propertyReference.propertyName(), plainText, rule);
+                }
             }
         }
     }
 
     private boolean hydrateWithPlan(Object resultObject, QueryResultPlan queryResultPlan) {
         boolean handled = false;
-        Map<HydrationKey, Map<Object, List<MetaObject>>> grouped =
+        Map<HydrationKey, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped =
                 new LinkedHashMap<>();
         for (Object candidate : ObjectTraversalUtils.topLevelResults(resultObject)) {
             if (candidate == null || candidate instanceof Map<?, ?> || ObjectTraversalUtils.isSimpleValueType(candidate.getClass())) {
@@ -175,54 +182,52 @@ final class SeparateTableResultHydrator {
                 continue;
             }
             handled = true;
-            MetaObject metaObject = SystemMetaObject.forObject(candidate);
             for (QueryResultPlan.PropertyPlan propertyPlan : typePlan.getPropertyPlans()) {
                 EncryptColumnRule rule = propertyPlan.getRule();
                 if (!rule.isStoredInSeparateTable()) {
                     continue;
                 }
                 String propertyPath = propertyPlan.getPropertyPath();
-                if (!metaObject.hasGetter(propertyPath) || !metaObject.hasSetter(propertyPath)) {
+                PropertyValueAccessor.PropertyReference propertyReference =
+                        propertyValueAccessor.resolve(candidate, propertyPath);
+                if (propertyReference == null || !propertyReference.canWrite()) {
                     continue;
                 }
-                Object referenceId = metaObject.getValue(propertyPath);
+                Object referenceId = propertyReference.getValue();
                 if (referenceId == null) {
                     continue;
                 }
                 HydrationKey hydrationKey = new HydrationKey(rule, propertyPath);
-                Map<Object, List<MetaObject>> metaById = grouped.get(hydrationKey);
-                if (metaById == null) {
-                    metaById = new LinkedHashMap<>();
-                    grouped.put(hydrationKey, metaById);
-                }
+                Map<Object, List<PropertyValueAccessor.PropertyReference>> metaById = grouped.computeIfAbsent(hydrationKey, k -> new LinkedHashMap<>());
                 Object normalizedReferenceId = ruleSupport.normalizeReferenceId(referenceId);
-                List<MetaObject> metaObjects = metaById.get(normalizedReferenceId);
-                if (metaObjects == null) {
-                    metaObjects = new ArrayList<>();
-                    metaById.put(normalizedReferenceId, metaObjects);
-                }
-                metaObjects.add(metaObject);
+                List<PropertyValueAccessor.PropertyReference> propertyReferences =
+                        metaById.computeIfAbsent(normalizedReferenceId, k -> new ArrayList<>());
+                propertyReferences.add(propertyReference);
             }
         }
-        for (Map.Entry<HydrationKey, Map<Object, List<MetaObject>>> entry : grouped.entrySet()) {
+        for (Map.Entry<HydrationKey, Map<Object, List<PropertyValueAccessor.PropertyReference>>> entry : grouped.entrySet()) {
             hydratePlannedRule(entry.getKey(), entry.getValue());
         }
         return handled;
     }
 
-    private void hydratePlannedRule(HydrationKey hydrationKey, Map<Object, List<MetaObject>> metaById) {
-        if (metaById.isEmpty()) {
+    private void hydratePlannedRule(HydrationKey hydrationKey,
+                                    Map<Object, List<PropertyValueAccessor.PropertyReference>> propertyById) {
+        if (propertyById.isEmpty()) {
             return;
         }
-        Map<Object, String> cipherById = loadCipherValues(hydrationKey.rule(), new ArrayList<>(metaById.keySet()));
+        Map<Object, String> cipherById = loadCipherValues(hydrationKey.rule(), new ArrayList<>(propertyById.keySet()));
         for (Map.Entry<Object, String> entry : cipherById.entrySet()) {
-            List<MetaObject> metaObjects = metaById.get(entry.getKey());
-            if (metaObjects == null || entry.getValue() == null) {
+            List<PropertyValueAccessor.PropertyReference> propertyReferences = propertyById.get(entry.getKey());
+            if (propertyReferences == null || entry.getValue() == null) {
                 continue;
             }
             String plainText = algorithmRegistry.cipher(hydrationKey.rule().cipherAlgorithm()).decrypt(entry.getValue());
-            for (MetaObject metaObject : metaObjects) {
-                metaObject.setValue(hydrationKey.propertyPath(), plainText);
+            for (PropertyValueAccessor.PropertyReference propertyReference : propertyReferences) {
+                if (propertyReference.setValue(plainText) && SensitiveDataContext.isRecording()) {
+                    SensitiveDataContext.record(propertyReference.owner(), propertyReference.propertyName(),
+                            plainText, hydrationKey.rule());
+                }
             }
         }
     }
@@ -239,7 +244,7 @@ final class SeparateTableResultHydrator {
         String sql = "select " + ruleSupport.quote(rule.assistedQueryColumn()) + ", " + ruleSupport.quote(rule.storageColumn())
                 + " from " + ruleSupport.quote(rule.storageTable())
                 + " where " + ruleSupport.quote(rule.assistedQueryColumn()) + " in (" + placeholders + ")";
-        Map<Object, String> result = new LinkedHashMap<Object, String>();
+        Map<Object, String> result = new LinkedHashMap<>();
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             bind(statement, ids);

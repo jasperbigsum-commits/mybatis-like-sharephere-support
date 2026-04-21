@@ -34,6 +34,10 @@ final class EncryptionValueTransformer {
         return applyTransform(rule, plainValue, algorithmRegistry.like(rule.likeQueryAlgorithm()));
     }
 
+    String transformMasked(EncryptColumnRule rule, Object plainValue) {
+        return applyTransform(rule, plainValue, algorithmRegistry.like(rule.effectiveMaskedAlgorithm()));
+    }
+
     private String applyTransform(EncryptColumnRule rule, Object plainValue, Object algorithm) {
         if (plainValue == null) {
             return null;

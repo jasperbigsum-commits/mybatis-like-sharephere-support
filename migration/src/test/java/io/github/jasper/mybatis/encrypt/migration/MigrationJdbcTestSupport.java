@@ -1,7 +1,9 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
+import io.github.jasper.mybatis.encrypt.algorithm.support.IdCardMaskLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
+import io.github.jasper.mybatis.encrypt.algorithm.support.PhoneNumberMaskLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
@@ -118,6 +120,14 @@ abstract class MigrationJdbcTestSupport {
         return properties;
     }
 
+    protected DatabaseEncryptionProperties configuredMaskedProperties() {
+        DatabaseEncryptionProperties properties = configuredProperties();
+        DatabaseEncryptionProperties.FieldRuleProperties phoneRule = properties.getTables().get(0).getFields().get(0);
+        phoneRule.setMaskedColumn("phone_masked");
+        phoneRule.setMaskedAlgorithm("phoneMaskLike");
+        return properties;
+    }
+
     protected AlgorithmRegistry algorithmRegistry() {
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm> cipherAlgorithms =
                 new LinkedHashMap<>();
@@ -128,6 +138,8 @@ abstract class MigrationJdbcTestSupport {
         Map<String, io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm> likeAlgorithms =
                 new LinkedHashMap<>();
         likeAlgorithms.put("normalizedLike", new NormalizedLikeQueryAlgorithm());
+        likeAlgorithms.put("phoneMaskLike", new PhoneNumberMaskLikeQueryAlgorithm());
+        likeAlgorithms.put("idCardMaskLike", new IdCardMaskLikeQueryAlgorithm());
         return new AlgorithmRegistry(cipherAlgorithms, assistedAlgorithms, likeAlgorithms);
     }
 
@@ -158,6 +170,78 @@ abstract class MigrationJdbcTestSupport {
                 storageIdColumn = "id",
                 assistedQueryColumn = "id_card_hash",
                 likeQueryColumn = "id_card_like"
+        )
+        private String idCard;
+    }
+
+    @EncryptTable("user_account")
+    static class MaskedSameTableUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone_like",
+                maskedColumn = "phone_masked",
+                maskedAlgorithm = "phoneMaskLike"
+        )
+        private String phone;
+    }
+
+    @EncryptTable("user_account")
+    static class MaskedSeparateTableUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like",
+                maskedColumn = "id_card_masked",
+                maskedAlgorithm = "idCardMaskLike"
+        )
+        private String idCard;
+    }
+
+    @EncryptTable("user_account")
+    static class SharedLikeMaskedSameTableUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone_like",
+                likeQueryAlgorithm = "phoneMaskLike",
+                maskedColumn = "phone_like",
+                maskedAlgorithm = "phoneMaskLike"
+        )
+        private String phone;
+    }
+
+    @EncryptTable("user_account")
+    static class SharedLikeMaskedSeparateTableUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like",
+                likeQueryAlgorithm = "idCardMaskLike",
+                maskedColumn = "id_card_like",
+                maskedAlgorithm = "idCardMaskLike"
         )
         private String idCard;
     }

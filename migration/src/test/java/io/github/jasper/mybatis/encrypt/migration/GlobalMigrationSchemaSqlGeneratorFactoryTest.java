@@ -37,7 +37,7 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
         registry.registerEntityType(SameTableUserEntity.class);
 
-        Map<String, DataSource> dataSources = new LinkedHashMap<String, DataSource>();
+        Map<String, DataSource> dataSources = new LinkedHashMap<>();
         dataSources.put("primaryDs", primary);
         dataSources.put("archiveDs", archive);
 
@@ -57,5 +57,30 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
                 "alter table \"user_account\" add (\"phone_hash\" varchar2(64))",
                 "alter table \"user_account\" add (\"phone_like\" varchar2(64))"
         ), archiveDdl);
+    }
+
+    @Test
+    void shouldGenerateMaskedColumnDdlFromConfiguredRules() throws Exception {
+        DataSource primary = newDataSource("global_schema_masked_primary");
+        executeSql(primary,
+                "create table user_account (id bigint primary key, phone varchar(64))");
+
+        DatabaseEncryptionProperties properties = configuredMaskedProperties();
+        EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
+
+        Map<String, DataSource> dataSources = new LinkedHashMap<>();
+        dataSources.put("primaryDs", primary);
+
+        GlobalMigrationSchemaSqlGeneratorFactory factory =
+                new DefaultGlobalMigrationSchemaSqlGeneratorFactory(dataSources, registry, properties);
+
+        List<String> ddl = factory.generateAllRegisteredTables("primaryDs");
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` add column `phone_cipher` varchar(110)",
+                "alter table `user_account` add column `phone_hash` varchar(64)",
+                "alter table `user_account` add column `phone_like` varchar(64)",
+                "alter table `user_account` add column `phone_masked` varchar(64)"
+        ), ddl);
     }
 }

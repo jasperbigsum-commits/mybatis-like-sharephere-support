@@ -1,5 +1,16 @@
 # 数据库加密插件架构设计
 
+## 这份文档解决什么问题
+
+这份文档回答的是“系统为什么这么分层、边界在哪里、执行链路如何串起来”。
+
+如果你的目标是：
+
+- 先快速接入：看 [快速使用指南](quick-start.zh-CN.md)
+- 理解字段和持久层规则：看 [持久层加密指南](persistence-encryption-guide.zh-CN.md)
+- 理解 controller 脱敏：看 [脱敏响应指南](sensitive-response-guide.zh-CN.md)
+- 理解历史数据迁移：看 [存量迁移指南](migration-guide.zh-CN.md)
+
 ## 设计目标
 
 1. 不侵入业务层 Mapper/Service 代码，对 MyBatis 或 MyBatis-Plus 生成的 SQL 做透明增强。
@@ -22,6 +33,7 @@
 - `AssistedQueryAlgorithm`：负责等值查询的辅助列计算，适合哈希检索。
 - `LikeQueryAlgorithm`：负责模糊查询列生成。
 - `AlgorithmRegistry`：从 Spring Bean 容器按名称装配算法，允许用户扩展。
+- `SensitiveFieldMasker`：负责 controller 边界输出 DTO 的自定义脱敏。
 
 ### 3. SQL 改写层
 
@@ -41,12 +53,46 @@
 - `ResultDecryptor`：优先依据查询结果计划与元数据只处理命中的返回对象，避免对无关入参或未映射对象误解密。
 - `SeparateTableEncryptionManager`：处理独立加密表的回填和写后同步。
 
-### 5. Spring Boot 自动配置
+边界补充：
+
+- 解密边界与 MyBatis 结果装配边界一致，只处理已经映射到返回对象上的属性。
+- 对 `resultType` 无注解 DTO、列别名、派生表投影等场景，优先依赖 `QueryResultPlanFactory` 的保守推断与 `@EncryptResultHint` 预热来源元数据。
+- 对复杂表达式列、不可唯一判定来源的多表投影、业务代码二次查询覆盖字段等情况，不承诺自动纠偏，应由业务显式建模或直接返回脱敏列。
+
+### 5. 控制器边界脱敏层
+
+- `SensitiveResponseContextInterceptor`
+  - 在命中 `@SensitiveResponse` 的 controller 方法前打开请求级别 `SensitiveDataContext`
+- `SensitiveResponseBodyAdvice`
+  - 在响应写回前触发 `SensitiveDataMasker`
+- `SensitiveDataMasker`
+  - 优先使用数据库 `maskedColumn` 的存储态脱敏值替换已解密字段
+  - 再按 `maskedAlgorithm` / `@SensitiveField` 作为回退策略
+  - `@SensitiveField` 支持内置规则、复用 `LikeQueryAlgorithm` 和自定义 `SensitiveFieldMasker`
+- `JdbcStoredSensitiveValueResolver`
+  - 按数据源、表、规则批量查询 `maskedColumn`
+
+边界补充：
+
+- 脱敏是 controller 边界的最终输出决策，不回写数据库，也不反向影响 SQL 改写与结果解密。
+- `RECORDED_ONLY` 是标准查询接口的首选策略，因为它只处理真正被解密过的对象引用。
+- `ANNOTATED_FIELDS` / `RECORDED_THEN_ANNOTATED` 仅作为手工组装 DTO 的补充，不替代 MyBatis 结果映射。
+- 同一请求线程内允许多个嵌套 scope；异步 continuation 默认不传播当前 scope。
+
+详细设计见 [sensitive-response-guide.zh-CN.md](sensitive-response-guide.zh-CN.md)。
+
+### 6. Spring Boot 自动配置
 
 - `MybatisEncryptionAutoConfiguration`
   - 注册默认算法
   - 注册规则中心
   - 注册 `DatabaseEncryptionInterceptor` 并交由 MyBatis 自动装配链路接入
+- `SensitiveResponseAutoConfiguration`
+  - 注册 `SensitiveDataMasker`
+  - 注册 `SensitiveResponseContextInterceptor`
+  - 注册 `SensitiveResponseBodyAdvice`
+  - 在存在 `DataSource` 时注册 `JdbcStoredSensitiveValueResolver`
+  - 自动收集 `SensitiveFieldMasker` Bean 供 `@SensitiveField(masker=...)` 使用
 - `UserDatabaseEncryptionProperties`
   - starter 只负责外部配置绑定
   - 具体规则模型直接复用 `common` 模块中的 `DatabaseEncryptionProperties`，避免 Spring 2/3 各维护一套重复配置结构
@@ -58,6 +104,7 @@
 3. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
 4. 查询条件遇到等值或 LIKE 时，改写到对应辅助列，并对参数做算法转换。
 5. 查询结果返回后，按实体字段规则解密成业务可读值。
+6. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
 
 ## 风险控制
 

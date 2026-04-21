@@ -124,6 +124,122 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
     }
 
     @Test
+    void shouldPersistStoredMaskedColumnsDuringMigration() throws Exception {
+        DataSource dataSource = newDataSource("masked_columns_migration");
+        executeSql(dataSource,
+                "create table user_account ("
+                        + "id bigint primary key, "
+                        + "phone varchar(64), "
+                        + "phone_cipher varchar(512), "
+                        + "phone_hash varchar(128), "
+                        + "phone_like varchar(255), "
+                        + "phone_masked varchar(255), "
+                        + "id_card varchar(64))",
+                "create table user_id_card_encrypt ("
+                        + "id varchar(64) primary key, "
+                        + "id_card_cipher varchar(512), "
+                        + "id_card_hash varchar(128), "
+                        + "id_card_like varchar(255), "
+                        + "id_card_masked varchar(255))",
+                "insert into user_account (id, phone, id_card) values (1, '13800138000', '320101199001011234')");
+
+        MigrationTask sameTableTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(MaskedSameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-masked-same"))
+        );
+        MigrationTask separateTableTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(MaskedSeparateTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-masked-separate"))
+        );
+
+        assertEquals(MigrationStatus.COMPLETED, sameTableTask.execute().getStatus());
+        assertEquals(MigrationStatus.COMPLETED, separateTableTask.execute().getStatus());
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet sameTableResult = statement.executeQuery(
+                     "select phone_masked from user_account where id = 1")) {
+            assertTrue(sameTableResult.next());
+            assertEquals(algorithmRegistry().like("phoneMaskLike").transform("13800138000"),
+                    sameTableResult.getString("phone_masked"));
+        }
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet separateTableResult = statement.executeQuery(
+                     "select id_card_masked from user_id_card_encrypt")) {
+            assertTrue(separateTableResult.next());
+            assertEquals(algorithmRegistry().like("idCardMaskLike").transform("320101199001011234"),
+                    separateTableResult.getString("id_card_masked"));
+        }
+    }
+
+    @Test
+    void shouldReuseLikeColumnWhenMaskedColumnSharesSamePhysicalColumnDuringMigration() throws Exception {
+        DataSource dataSource = newDataSource("shared_like_masked_columns_migration");
+        executeSql(dataSource,
+                "create table user_account ("
+                        + "id bigint primary key, "
+                        + "phone varchar(64), "
+                        + "phone_cipher varchar(512), "
+                        + "phone_hash varchar(128), "
+                        + "phone_like varchar(255), "
+                        + "id_card varchar(64))",
+                "create table user_id_card_encrypt ("
+                        + "id varchar(64) primary key, "
+                        + "id_card_cipher varchar(512), "
+                        + "id_card_hash varchar(128), "
+                        + "id_card_like varchar(255))",
+                "insert into user_account (id, phone, id_card) values (1, '13800138000', '320101199001011234')");
+
+        MigrationTask sameTableTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SharedLikeMaskedSameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-shared-masked-same"))
+        );
+        MigrationTask separateTableTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SharedLikeMaskedSeparateTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-shared-masked-separate"))
+        );
+
+        assertEquals(MigrationStatus.COMPLETED, sameTableTask.execute().getStatus());
+        assertEquals(MigrationStatus.COMPLETED, separateTableTask.execute().getStatus());
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet sameTableResult = statement.executeQuery(
+                     "select phone_like from user_account where id = 1")) {
+            assertTrue(sameTableResult.next());
+            assertEquals(algorithmRegistry().like("phoneMaskLike").transform("13800138000"),
+                    sameTableResult.getString("phone_like"));
+        }
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet separateTableResult = statement.executeQuery(
+                     "select id_card_like from user_id_card_encrypt")) {
+            assertTrue(separateTableResult.next());
+            assertEquals(algorithmRegistry().like("idCardMaskLike").transform("320101199001011234"),
+                    separateTableResult.getString("id_card_like"));
+        }
+    }
+
+    @Test
     void shouldMigrateConfiguredTableRuleByTableName() throws Exception {
         DataSource dataSource = newDataSource("config_table_name");
         executeSql(dataSource,

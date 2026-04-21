@@ -204,18 +204,19 @@ final class SeparateTableReferencePreparer {
 
     private ExternalRowValues buildExternalRowValues(EncryptColumnRule rule, Object plainValue, String assignedHash) {
         ruleSupport.requireAssistedReferenceRule(rule, "build separate-table row");
-        List<String> columns = new ArrayList<String>();
-        List<Object> values = new ArrayList<Object>();
+        LinkedHashMap<String, Object> columnValues = new LinkedHashMap<String, Object>();
         String plainText = String.valueOf(plainValue);
-        columns.add(rule.storageColumn());
-        values.add(algorithmRegistry.cipher(rule.cipherAlgorithm()).encrypt(plainText));
-        columns.add(rule.assistedQueryColumn());
-        values.add(assignedHash);
+        columnValues.put(rule.storageColumn(), algorithmRegistry.cipher(rule.cipherAlgorithm()).encrypt(plainText));
+        columnValues.put(rule.assistedQueryColumn(), assignedHash);
         if (rule.hasLikeQueryColumn()) {
-            columns.add(rule.likeQueryColumn());
-            values.add(algorithmRegistry.like(rule.likeQueryAlgorithm()).transform(plainText));
+            columnValues.put(rule.likeQueryColumn(),
+                    algorithmRegistry.like(rule.likeQueryAlgorithm()).transform(plainText));
         }
-        return new ExternalRowValues(columns, values);
+        if (rule.hasDistinctMaskedColumn()) {
+            columnValues.put(rule.maskedColumn(),
+                    algorithmRegistry.like(rule.effectiveMaskedAlgorithm()).transform(plainText));
+        }
+        return new ExternalRowValues(new ArrayList<String>(columnValues.keySet()), new ArrayList<Object>(columnValues.values()));
     }
 
     private List<Object> unwrapCandidates(Object parameterObject) {

@@ -1,5 +1,17 @@
 # SQL Support Matrix
 
+## When to read this
+
+Use this document as a boundary reference, not as a getting-started guide.
+
+Recommended reading order:
+
+1. [快速使用指南](quick-start.zh-CN.md) / [Quick Start](quick-start.en.md)
+2. [持久层加密指南](persistence-encryption-guide.zh-CN.md) / [Persistence Encryption Guide](persistence-encryption-guide.en.md)
+3. this SQL support matrix when you need to judge whether one SQL shape is safe
+
+This matrix is especially useful during code review, SQL design review, and production rollout checks.
+
 ## Scope
 
 This matrix describes the current runtime behavior of the encryption plugin after SQL rewrite,
@@ -29,6 +41,29 @@ through real MyBatis execution tests.
 | `UNION` / `UNION ALL` | Supported | Each branch is rewritten recursively. |
 | Same-table decryption | Supported | Query results are decrypted back into entity properties. |
 | Separate-table hydration | Supported | Separate-table ciphertext is synchronized on write and hydrated on read by entity id. |
+
+## Common SQL Shapes
+
+Use these examples as low-cost templates during mapper review.
+
+| Goal | Recommended SQL shape | Why |
+| --- | --- | --- |
+| exact lookup by phone | `where phone = #{phone}` | rewritten to `assistedQueryColumn` when configured |
+| lookup by multiple IDs / phones | `where phone in (...)` | each value can be transformed through the same helper path |
+| fuzzy lookup | `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm` |
+| return decrypted entity | `select id, phone from user_account` | logical projection can be mapped back to the entity property |
+| return flat DTO | explicit aliases plus `@EncryptResultHint` | keeps projected source columns traceable |
+| return only masked display value | select `maskedColumn` directly | avoids unnecessary decrypt-then-mask work |
+
+Avoid these if the field is encrypted:
+
+| Goal | Avoid | Safer alternative |
+| --- | --- | --- |
+| sort by encrypted field | `order by phone` | sort by a non-sensitive business column |
+| range query | `where phone > ?` / `between` | redesign query or add a safe business index field |
+| aggregate encrypted value | `max(phone)` / `count(distinct phone)` | aggregate on non-sensitive semantics |
+| derive encrypted expression | `substr(phone, 1, 3)` | query plaintext in trusted code path or use stored masked values |
+| ambiguous multi-table wildcard | `select * from a join b ...` | use explicit columns and aliases |
 
 ## Fail Fast By Design
 

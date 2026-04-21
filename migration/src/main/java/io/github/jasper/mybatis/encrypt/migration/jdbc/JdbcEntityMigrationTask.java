@@ -264,6 +264,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                     .append(columnPlan.getStorageColumn()).append(':')
                     .append(columnPlan.getAssistedQueryColumn()).append(':')
                     .append(columnPlan.getLikeQueryColumn()).append(':')
+                    .append(columnPlan.getMaskedColumn()).append(':')
                     .append(columnPlan.getStorageTable()).append(':')
                     .append(columnPlan.getBackupColumn()).append(';');
         }

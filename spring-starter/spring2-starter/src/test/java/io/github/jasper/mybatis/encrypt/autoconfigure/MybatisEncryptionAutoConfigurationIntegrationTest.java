@@ -8,6 +8,8 @@ import io.github.jasper.mybatis.encrypt.migration.MigrationSchemaSqlGenerator;
 import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
+import io.github.jasper.mybatis.encrypt.algorithm.support.IdCardMaskLikeQueryAlgorithm;
+import io.github.jasper.mybatis.encrypt.algorithm.support.PhoneNumberMaskLikeQueryAlgorithm;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,13 +89,15 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
                     "phone_cipher varchar(512)," +
                     "phone_hash varchar(128)," +
                     "phone_like varchar(255)," +
+                    "phone_masked varchar(255)," +
                     "id_card varchar(128)," +
                     "id_card_backup varchar(128))");
             statement.execute("create table user_id_card_encrypt (" +
                     "id bigint primary key," +
                     "id_card_cipher varchar(512)," +
                     "id_card_hash varchar(128)," +
-                    "id_card_like varchar(255))");
+                    "id_card_like varchar(255)," +
+                    "id_card_masked varchar(255))");
         }
     }
 
@@ -171,21 +175,25 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
              ResultSet mainResult = statement.executeQuery(
-                     "select phone_cipher, phone_hash, phone_like from user_account where id = 11")) {
+                     "select phone_cipher, phone_hash, phone_like, phone_masked from user_account where id = 11")) {
             assertTrue(mainResult.next());
             assertNotEquals("13800138000", mainResult.getString("phone_cipher"));
             assertNotNull(mainResult.getString("phone_hash"));
             assertEquals("13800138000", mainResult.getString("phone_like"));
+            assertEquals(new PhoneNumberMaskLikeQueryAlgorithm().transform("13800138000"),
+                    mainResult.getString("phone_masked"));
         }
 
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
              ResultSet separateResult = statement.executeQuery(
-                     "select id, id_card_cipher, id_card_hash from user_id_card_encrypt")) {
+                     "select id, id_card_cipher, id_card_hash, id_card_masked from user_id_card_encrypt")) {
             assertTrue(separateResult.next());
             assertTrue(separateResult.getLong("id") > 0L);
             assertNotEquals("320101199001011234", separateResult.getString("id_card_cipher"));
             assertNotNull(separateResult.getString("id_card_hash"));
+            assertEquals(new IdCardMaskLikeQueryAlgorithm().transform("320101199001011234"),
+                    separateResult.getString("id_card_masked"));
         }
     }
 

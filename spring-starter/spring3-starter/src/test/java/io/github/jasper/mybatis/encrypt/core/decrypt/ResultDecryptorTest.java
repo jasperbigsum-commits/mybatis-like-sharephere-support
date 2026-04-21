@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Map;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import org.apache.ibatis.mapping.BoundSql;
@@ -25,6 +28,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
+import io.github.jasper.mybatis.encrypt.annotation.SensitiveField;
 
 class ResultDecryptorTest {
 
@@ -148,6 +152,23 @@ class ResultDecryptorTest {
 
         assertEquals("13200132000", dto.getPhone());
         assertEquals("auto", dto.getName());
+    }
+
+    @Test
+    void shouldUseBackingFieldAndRecordSensitiveValueWhenGetterHasSideEffect() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        SideEffectGetterDto dto = new SideEffectGetterDto();
+        dto.setPhone(sm4.encrypt("13800138000"));
+        MappedStatement mappedStatement = entityMappedStatement(SideEffectGetterDto.class, "test.selectSideEffectDto");
+
+        try (SensitiveDataContext.Scope ignored =
+                     SensitiveDataContext.open(false, SensitiveResponseStrategy.RECORDED_ONLY)) {
+            decrypt(decryptor, mappedStatement, List.of(dto));
+            new SensitiveDataMasker().mask(dto);
+        }
+
+        assertEquals("*******8000", dto.rawPhone());
     }
 
     private void decrypt(ResultDecryptor decryptor, MappedStatement mappedStatement, Object resultObject) {
@@ -317,6 +338,25 @@ class ResultDecryptorTest {
 
         public void setName(String name) {
             this.name = name;
+        }
+    }
+
+    static class SideEffectGetterDto {
+
+        @EncryptField(table = "user_account", column = "phone")
+        @SensitiveField
+        private String phone;
+
+        public String getPhone() {
+            return "business-side-effect-value";
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        String rawPhone() {
+            return phone;
         }
     }
 

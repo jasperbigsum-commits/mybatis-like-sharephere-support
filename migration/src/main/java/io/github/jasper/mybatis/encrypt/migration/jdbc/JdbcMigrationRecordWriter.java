@@ -86,6 +86,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                 mainTableUpdates.put(columnPlan.getLikeQueryColumn(), derivedFieldValues.getLikeValue());
             }
+            if (columnPlan.hasDistinctMaskedColumn()) {
+                mainTableUpdates.put(columnPlan.getMaskedColumn(), derivedFieldValues.getMaskedValue());
+            }
         }
         if (mainTableUpdates.isEmpty()) {
             return false;
@@ -126,6 +129,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                     columns.add(columnPlan.getLikeQueryColumn());
+                }
+                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                    columns.add(columnPlan.getMaskedColumn());
                 }
             }
             if (columnPlan.shouldWriteBackup()) {
@@ -197,7 +203,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             }
             return valueEquals(separateRow.get(columnPlan.getStorageColumn()), derivedFieldValues.getCipherText())
                     && valueEquals(separateRow.get(columnPlan.getAssistedQueryColumn()), derivedFieldValues.getHashValue())
-                    && matchesOptionalValue(separateRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue());
+                    && matchesOptionalValue(separateRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue())
+                    && matchesOptionalValue(separateRow.get(columnPlan.getMaskedColumn()), derivedFieldValues.getMaskedValue());
         }
         if (!valueEquals(currentRow.get(columnPlan.getStorageColumn()), derivedFieldValues.getCipherText())) {
             return false;
@@ -206,6 +213,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             return false;
         }
         if (!matchesOptionalValue(currentRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue())) {
+            return false;
+        }
+        if (!matchesOptionalValue(currentRow.get(columnPlan.getMaskedColumn()), derivedFieldValues.getMaskedValue())) {
             return false;
         }
         if (!columnPlan.overwritesSourceColumn()) {
@@ -229,7 +239,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             Map<String, Object> separateRow = loadSeparateRow(connection, columnPlan, String.valueOf(sourceValue));
             return separateRow != null
                     && !isBlankValue(separateRow.get(columnPlan.getStorageColumn()))
-                    && optionalColumnPresent(separateRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn());
+                    && optionalColumnPresent(separateRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn())
+                    && optionalColumnPresent(separateRow.get(columnPlan.getMaskedColumn()), columnPlan.getMaskedColumn());
         }
         if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getStorageColumn())
                 && isBlankValue(currentRow.get(columnPlan.getStorageColumn()))) {
@@ -243,13 +254,20 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 && !valueEquals(sourceValue, currentRow.get(columnPlan.getLikeQueryColumn()))) {
             return false;
         }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getMaskedColumn())
+                && !valueEquals(sourceValue, currentRow.get(columnPlan.getMaskedColumn()))) {
+            return false;
+        }
         if (isBlankValue(currentRow.get(columnPlan.getStorageColumn()))) {
             return false;
         }
         if (!optionalColumnPresent(currentRow.get(columnPlan.getAssistedQueryColumn()), columnPlan.getAssistedQueryColumn())) {
             return false;
         }
-        return optionalColumnPresent(currentRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn());
+        if (!optionalColumnPresent(currentRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn())) {
+            return false;
+        }
+        return optionalColumnPresent(currentRow.get(columnPlan.getMaskedColumn()), columnPlan.getMaskedColumn());
     }
 
     private void updateMainTable(Connection connection,
@@ -317,6 +335,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
             sql.append(", ").append(quote(columnPlan.getLikeQueryColumn()));
         }
+        if (columnPlan.hasDistinctMaskedColumn()) {
+            sql.append(", ").append(quote(columnPlan.getMaskedColumn()));
+        }
         sql.append(" from ").append(quote(columnPlan.getStorageTable()))
                 .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
@@ -330,6 +351,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 row.put(columnPlan.getAssistedQueryColumn(), resultSet.getObject(columnPlan.getAssistedQueryColumn()));
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                     row.put(columnPlan.getLikeQueryColumn(), resultSet.getObject(columnPlan.getLikeQueryColumn()));
+                }
+                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                    row.put(columnPlan.getMaskedColumn(), resultSet.getObject(columnPlan.getMaskedColumn()));
                 }
                 return row;
             }
@@ -353,6 +377,10 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
             columns.add(columnPlan.getLikeQueryColumn());
             bindValues.add(values.getLikeValue());
+        }
+        if (columnPlan.hasDistinctMaskedColumn()) {
+            columns.add(columnPlan.getMaskedColumn());
+            bindValues.add(values.getMaskedValue());
         }
         StringBuilder sql = new StringBuilder("insert into ").append(quote(columnPlan.getStorageTable())).append(" (");
         for (int index = 0; index < columns.size(); index++) {
@@ -413,6 +441,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         }
         if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getLikeQueryColumn())) {
             return derivedFieldValues.getLikeValue();
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getMaskedColumn())) {
+            return derivedFieldValues.getMaskedValue();
         }
         if (columnPlan.isStoredInSeparateTable()) {
             return derivedFieldValues.getHashValue();

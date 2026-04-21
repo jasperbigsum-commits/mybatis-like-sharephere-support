@@ -38,6 +38,10 @@ public class MigrationRiskManifestFactory {
                     entries.add(new MigrationRiskEntry("INSERT", columnPlan.getStorageTable(),
                             columnPlan.getLikeQueryColumn()));
                 }
+                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                    entries.add(new MigrationRiskEntry("INSERT", columnPlan.getStorageTable(),
+                            columnPlan.getMaskedColumn()));
+                }
                 continue;
             }
             if (columnPlan.shouldWriteBackup()) {
@@ -49,6 +53,9 @@ public class MigrationRiskManifestFactory {
             }
             if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                 entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getLikeQueryColumn()));
+            }
+            if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                entries.add(new MigrationRiskEntry("UPDATE", plan.getTableName(), columnPlan.getMaskedColumn()));
             }
         }
         return new MigrationRiskManifest(plan.getDataSourceName(), plan.getEntityName(), plan.getTableName(), plan.getCursorColumns(),

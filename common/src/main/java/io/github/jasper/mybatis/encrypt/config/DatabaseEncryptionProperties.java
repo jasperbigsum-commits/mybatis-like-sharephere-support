@@ -928,6 +928,16 @@ public class DatabaseEncryptionProperties {
         private String likeQueryAlgorithm = "normalizedLike";
 
         /**
+         * 面向对外返回的存储态脱敏列。
+         */
+        private String maskedColumn;
+
+        /**
+         * 存储态脱敏列的算法 bean 名称。
+         */
+        private String maskedAlgorithm = "normalizedLike";
+
+        /**
          * 返回实体属性名。
          *
          * @return 实体属性名
@@ -1123,6 +1133,42 @@ public class DatabaseEncryptionProperties {
          */
         public void setLikeQueryAlgorithm(String likeQueryAlgorithm) {
             this.likeQueryAlgorithm = likeQueryAlgorithm;
+        }
+
+        /**
+         * 返回存储态脱敏列。
+         *
+         * @return 存储态脱敏列名
+         */
+        public String getMaskedColumn() {
+            return maskedColumn;
+        }
+
+        /**
+         * 设置存储态脱敏列。
+         *
+         * @param maskedColumn 存储态脱敏列名
+         */
+        public void setMaskedColumn(String maskedColumn) {
+            this.maskedColumn = maskedColumn;
+        }
+
+        /**
+         * 返回存储态脱敏算法 bean 名称。
+         *
+         * @return 存储态脱敏算法 bean 名称
+         */
+        public String getMaskedAlgorithm() {
+            return maskedAlgorithm;
+        }
+
+        /**
+         * 设置存储态脱敏算法 bean 名称。
+         *
+         * @param maskedAlgorithm 存储态脱敏算法 bean 名称
+         */
+        public void setMaskedAlgorithm(String maskedAlgorithm) {
+            this.maskedAlgorithm = maskedAlgorithm;
         }
     }
 }

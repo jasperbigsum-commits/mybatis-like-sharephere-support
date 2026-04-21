@@ -115,7 +115,7 @@ public class EncryptMetadataRegistry {
      * @return 已注册物理表名
      */
     public Set<String> getRegisteredTableNames() {
-        return new LinkedHashSet<String>(tableRules.keySet());
+        return new LinkedHashSet<>(tableRules.keySet());
     }
 
     /**
@@ -228,12 +228,13 @@ public class EncryptMetadataRegistry {
             }
             EncryptTableRule tableRule = new EncryptTableRule(tableName);
             tableProperties.getFields().forEach(fieldProperties ->
-                    tableRule.addColumnRule(toColumnRule(fieldProperties)));
+                    tableRule.addColumnRule(toColumnRule(tableName, fieldProperties)));
             tableRules.put(tableRule.getTableName(), tableRule);
         });
     }
 
-    private EncryptColumnRule toColumnRule(DatabaseEncryptionProperties.FieldRuleProperties properties) {
+    private EncryptColumnRule toColumnRule(String tableName,
+                                           DatabaseEncryptionProperties.FieldRuleProperties properties) {
         String property = resolveConfiguredProperty(properties);
         String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
         if (StringUtils.isBlank(column)) {
@@ -242,13 +243,15 @@ public class EncryptMetadataRegistry {
         }
         EncryptColumnRule rule = new EncryptColumnRule(
                 property,
-                null,
+                tableName,
                 column,
                 properties.getCipherAlgorithm(),
                 properties.getAssistedQueryColumn(),
                 properties.getAssistedQueryAlgorithm(),
                 properties.getLikeQueryColumn(),
                 properties.getLikeQueryAlgorithm(),
+                properties.getMaskedColumn(),
+                properties.getMaskedAlgorithm(),
                 properties.getStorageMode(),
                 properties.getStorageTable(),
                 properties.getStorageColumn() != null ? properties.getStorageColumn() : column,
@@ -279,6 +282,7 @@ public class EncryptMetadataRegistry {
     }
 
     private void validateRule(EncryptColumnRule rule) {
+        validateSharedDerivedColumnAlgorithm(rule);
         if (!rule.isStoredInSeparateTable()) {
             return;
         }
@@ -295,6 +299,29 @@ public class EncryptMetadataRegistry {
                             + ", column=" + rule.column()
                             + ", storageTable=" + rule.storageTable());
         }
+    }
+
+    private void validateSharedDerivedColumnAlgorithm(EncryptColumnRule rule) {
+        if (!rule.sharesLikeQueryAndMaskedColumn()) {
+            return;
+        }
+        if (StringUtils.isBlank(rule.likeQueryAlgorithm()) || StringUtils.isBlank(rule.maskedAlgorithm())) {
+            return;
+        }
+        if (rule.likeQueryAlgorithm().equals(rule.maskedAlgorithm())) {
+            return;
+        }
+        throw new EncryptionConfigurationException(
+                EncryptionErrorCode.SHARED_DERIVED_COLUMN_ALGORITHM_MISMATCH,
+                "likeQueryColumn and maskedColumn share the same physical column but use different algorithms. "
+                        + "property=" + rule.property()
+                        + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                        + ", column=" + rule.column()
+                        + ", sharedColumn=" + rule.likeQueryColumn()
+                        + ", likeQueryAlgorithm=" + rule.likeQueryAlgorithm()
+                        + ", maskedAlgorithm=" + rule.maskedAlgorithm()
+                        + ". Configure the same algorithm for both roles."
+        );
     }
 
     private String firstNonBlank(String... candidates) {
@@ -342,6 +369,8 @@ public class EncryptMetadataRegistry {
                     columnRule.assistedQueryAlgorithm(),
                     columnRule.likeQueryColumn(),
                     columnRule.likeQueryAlgorithm(),
+                    columnRule.maskedColumn(),
+                    columnRule.maskedAlgorithm(),
                     columnRule.storageMode(),
                     columnRule.storageTable(),
                     columnRule.storageColumn(),
@@ -497,7 +526,7 @@ public class EncryptMetadataRegistry {
     }
 
     private Set<String> collectTableNames(String sql) {
-        Set<String> tables = new LinkedHashSet<String>();
+        Set<String> tables = new LinkedHashSet<>();
         try {
             Statement statement = CCJSqlParserUtil.parse(sql);
             collectTables(statement, tables);

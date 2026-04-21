@@ -1,5 +1,16 @@
 # 开发与验收
 
+## 这份文档适合谁
+
+这份文档面向开发者、评审者和上线验收人员。
+
+如果你是业务接入方，优先阅读：
+
+- [快速使用指南](quick-start.zh-CN.md)
+- [持久层加密指南](persistence-encryption-guide.zh-CN.md)
+- [脱敏响应指南](sensitive-response-guide.zh-CN.md)
+- [存量迁移指南](migration-guide.zh-CN.md)
+
 ## 工具链
 
 当前仓库未内置 Maven Wrapper，请使用本机 Maven（`mvn`）执行构建。

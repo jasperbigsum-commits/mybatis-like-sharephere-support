@@ -1,1 +1,2 @@
 io.github.jasper.mybatis.encrypt.config.MybatisEncryptionAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.SensitiveResponseAutoConfiguration

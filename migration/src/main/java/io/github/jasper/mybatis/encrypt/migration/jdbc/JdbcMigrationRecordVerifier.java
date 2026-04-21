@@ -74,6 +74,10 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                     assertMatches(columnPlan.getProperty(), "like", expected.getLikeValue(),
                             externalRow.get(columnPlan.getLikeQueryColumn()));
                 }
+                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                    assertMatches(columnPlan.getProperty(), "masked", expected.getMaskedValue(),
+                            externalRow.get(columnPlan.getMaskedColumn()));
+                }
                 continue;
             }
             assertCipherMatches(columnPlan, plainValue,
@@ -85,6 +89,10 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                 assertMatches(columnPlan.getProperty(), "like", expected.getLikeValue(),
                         mainRow.get(columnPlan.getLikeQueryColumn()));
+            }
+            if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                assertMatches(columnPlan.getProperty(), "masked", expected.getMaskedValue(),
+                        mainRow.get(columnPlan.getMaskedColumn()));
             }
         }
     }
@@ -112,6 +120,9 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                     columns.add(columnPlan.getLikeQueryColumn());
+                }
+                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                    columns.add(columnPlan.getMaskedColumn());
                 }
             }
             if (columnPlan.shouldWriteBackup()) {
@@ -158,6 +169,9 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
             sql.append(", ").append(quote(columnPlan.getLikeQueryColumn()));
         }
+        if (columnPlan.hasDistinctMaskedColumn()) {
+            sql.append(", ").append(quote(columnPlan.getMaskedColumn()));
+        }
         sql.append(" from ").append(quote(columnPlan.getStorageTable()))
                 .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
@@ -175,6 +189,9 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
                     row.put(columnPlan.getLikeQueryColumn(), resultSet.getObject(columnPlan.getLikeQueryColumn()));
+                }
+                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
+                    row.put(columnPlan.getMaskedColumn(), resultSet.getObject(columnPlan.getMaskedColumn()));
                 }
                 return row;
             }

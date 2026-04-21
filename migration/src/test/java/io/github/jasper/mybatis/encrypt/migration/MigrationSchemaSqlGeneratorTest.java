@@ -96,12 +96,43 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
 
         List<String> ddl = generator.generateForEntity(SeparateTableUserEntity.class);
 
-        assertEquals(Arrays.asList(
+        assertEquals(Collections.singletonList(
                 "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
                         + "`id_card_cipher` varchar(126), "
                         + "`id_card_hash` varchar(64), "
                         + "`id_card_like` varchar(80))"
         ), ddl);
+    }
+
+    @Test
+    void shouldGenerateMaskedColumnSqlForSameTableAndSeparateTable() throws Exception {
+        DataSource dataSource = newDataSource("schema-masked-columns");
+        executeSql(dataSource,
+                "create table user_account ("
+                        + "id bigint primary key, "
+                        + "phone varchar(64), "
+                        + "id_card varchar(80), "
+                        + "phone_cipher varchar(110), "
+                        + "phone_hash varchar(64), "
+                        + "phone_like varchar(64))",
+                "create table user_id_card_encrypt ("
+                        + "id varchar(64) primary key, "
+                        + "id_card_cipher varchar(126), "
+                        + "id_card_hash varchar(64), "
+                        + "id_card_like varchar(80))");
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry(), properties());
+
+        List<String> sameTableDdl = generator.generateForEntity(MaskedSameTableUserEntity.class);
+        List<String> separateTableDdl = generator.generateForEntity(MaskedSeparateTableUserEntity.class);
+
+        assertEquals(Collections.singletonList(
+                "alter table `user_account` add column `phone_masked` varchar(64)"
+        ), sameTableDdl);
+        assertEquals(Collections.singletonList(
+                "alter table `user_id_card_encrypt` add column `id_card_masked` varchar(80)"
+        ), separateTableDdl);
     }
 
     @Test

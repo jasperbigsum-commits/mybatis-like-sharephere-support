@@ -26,7 +26,8 @@ public class AnnotationEncryptMetadataLoader {
      * @return 加密表规则；当实体未声明任何加密字段时返回 {@code null}
      */
     public EncryptTableRule load(Class<?> type) {
-        EncryptTableRule rule = new EncryptTableRule(resolveTableName(type));
+        String tableName = resolveTableName(type);
+        EncryptTableRule rule = new EncryptTableRule(tableName);
         boolean found = false;
         for (Field field : type.getDeclaredFields()) {
             EncryptField encryptField = field.getAnnotation(EncryptField.class);
@@ -38,13 +39,15 @@ public class AnnotationEncryptMetadataLoader {
             String column = blankToDefault(encryptField.column(), resolveColumnName(field));
             rule.addColumnRule(new EncryptColumnRule(
                     property,
-                    blankToNull(encryptField.table()),
+                    blankToDefault(encryptField.table(), tableName),
                     column,
                     encryptField.cipherAlgorithm(),
                     blankToNull(encryptField.assistedQueryColumn()),
                     blankToNull(encryptField.assistedQueryAlgorithm()),
                     blankToNull(encryptField.likeQueryColumn()),
                     blankToNull(encryptField.likeQueryAlgorithm()),
+                    blankToNull(encryptField.maskedColumn()),
+                    blankToNull(encryptField.maskedAlgorithm()),
                     encryptField.storageMode(),
                     blankToNull(encryptField.storageTable()),
                     blankToDefault(encryptField.storageColumn(), column),

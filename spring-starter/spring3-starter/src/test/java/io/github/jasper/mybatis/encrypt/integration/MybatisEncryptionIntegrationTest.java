@@ -51,7 +51,9 @@ import org.h2.tools.RunScript;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
+import io.github.jasper.mybatis.encrypt.algorithm.support.IdCardMaskLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
+import io.github.jasper.mybatis.encrypt.algorithm.support.PhoneNumberMaskLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
@@ -155,8 +157,8 @@ class MybatisEncryptionIntegrationTest {
                 parameterCaptureInterceptor.findPreparedStatementContaining("insert into `user_id_card_encrypt`");
         assertNotNull(separateInsert);
         assertInstanceOf(Map.class, separateInsert.parameterObject);
-        assertEquals(4, separateInsert.parameters.size());
-        assertTrue(singleLine(separateInsert.sql).toLowerCase(Locale.ROOT).contains("values (?, ?, ?, ?)"));
+        assertEquals(5, separateInsert.parameters.size());
+        assertTrue(singleLine(separateInsert.sql).toLowerCase(Locale.ROOT).contains("values (?, ?, ?, ?, ?)"));
     }
 
     @Test
@@ -1254,7 +1256,11 @@ class MybatisEncryptionIntegrationTest {
         AlgorithmRegistry algorithmRegistry = new AlgorithmRegistry(
                 Map.of("sm4", new Sm4CipherAlgorithm("integration-test-key")),
                 Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
-                Map.of("normalizedLike", new NormalizedLikeQueryAlgorithm())
+                Map.of(
+                        "normalizedLike", new NormalizedLikeQueryAlgorithm(),
+                        "phoneMaskLike", new PhoneNumberMaskLikeQueryAlgorithm(),
+                        "idCardMaskLike", new IdCardMaskLikeQueryAlgorithm()
+                )
         );
         TrackingSeparateTableEncryptionManager separateTableManager =
                 new TrackingSeparateTableEncryptionManager(dataSource, metadataRegistry, algorithmRegistry, properties);
@@ -1359,24 +1365,26 @@ class MybatisEncryptionIntegrationTest {
         String phoneHash = assistedQueryAlgorithm.transform(phone);
         String idCardHash = assistedQueryAlgorithm.transform(idCard);
         try (Connection connection = dataSource.getConnection();
-             PreparedStatement userStatement = connection.prepareStatement(
-                     "insert into user_account (id, name, phone_cipher, phone_hash, phone_like, id_card) "
-                             + "values (?, ?, ?, ?, ?, ?)");
-             PreparedStatement idCardStatement = connection.prepareStatement(
-                     "insert into user_id_card_encrypt (id, id_card_cipher, id_card_hash, id_card_like) "
-                             + "values (?, ?, ?, ?)")) {
+            PreparedStatement userStatement = connection.prepareStatement(
+                    "insert into user_account (id, name, phone_cipher, phone_hash, phone_like, phone_masked, id_card) "
+                            + "values (?, ?, ?, ?, ?, ?, ?)");
+            PreparedStatement idCardStatement = connection.prepareStatement(
+                    "insert into user_id_card_encrypt (id, id_card_cipher, id_card_hash, id_card_like, id_card_masked) "
+                            + "values (?, ?, ?, ?, ?)")) {
             userStatement.setLong(1, id);
             userStatement.setString(2, name);
             userStatement.setString(3, cipherAlgorithm.encrypt(phone));
             userStatement.setString(4, phoneHash);
             userStatement.setString(5, likeQueryAlgorithm.transform(phone));
-            userStatement.setString(6, idCardHash);
+            userStatement.setString(6, new PhoneNumberMaskLikeQueryAlgorithm().transform(phone));
+            userStatement.setString(7, idCardHash);
             userStatement.executeUpdate();
 
             idCardStatement.setLong(1, id);
             idCardStatement.setString(2, cipherAlgorithm.encrypt(idCard));
             idCardStatement.setString(3, idCardHash);
             idCardStatement.setString(4, likeQueryAlgorithm.transform(idCard));
+            idCardStatement.setString(5, new IdCardMaskLikeQueryAlgorithm().transform(idCard));
             idCardStatement.executeUpdate();
         }
     }
@@ -1406,24 +1414,28 @@ class MybatisEncryptionIntegrationTest {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
              ResultSet resultSet = statement.executeQuery(
-                     "select phone_cipher, phone_hash, phone_like from user_account where id = " + id)) {
+                    "select phone_cipher, phone_hash, phone_like, phone_masked from user_account where id = " + id)) {
             resultSet.next();
             assertNotEquals(plainPhone, resultSet.getString("phone_cipher"));
             assertNotNull(resultSet.getString("phone_hash"));
             assertEquals(plainPhone, resultSet.getString("phone_like"));
+            assertEquals(new PhoneNumberMaskLikeQueryAlgorithm().transform(plainPhone),
+                    resultSet.getString("phone_masked"));
         }
     }
 
     private void assertSeparateTableStorage(String referenceId, String plainIdCard) throws Exception {
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "select id_card_cipher, id_card_hash, id_card_like from user_id_card_encrypt where id_card_hash = ?")) {
+                    "select id_card_cipher, id_card_hash, id_card_like, id_card_masked from user_id_card_encrypt where id_card_hash = ?")) {
             statement.setString(1, referenceId);
             try (ResultSet resultSet = statement.executeQuery()) {
             resultSet.next();
             assertNotEquals(plainIdCard, resultSet.getString("id_card_cipher"));
             assertNotNull(resultSet.getString("id_card_hash"));
             assertEquals(plainIdCard, resultSet.getString("id_card_like"));
+            assertEquals(new IdCardMaskLikeQueryAlgorithm().transform(plainIdCard),
+                    resultSet.getString("id_card_masked"));
             }
         }
     }
@@ -2104,7 +2116,9 @@ class MybatisEncryptionIntegrationTest {
                 column = "phone",
                 storageColumn = "phone_cipher",
                 assistedQueryColumn = "phone_hash",
-                likeQueryColumn = "phone_like"
+                likeQueryColumn = "phone_like",
+                maskedColumn = "phone_masked",
+                maskedAlgorithm = "phoneMaskLike"
         )
         private String phone;
 
@@ -2115,7 +2129,9 @@ class MybatisEncryptionIntegrationTest {
                 storageColumn = "id_card_cipher",
                 storageIdColumn = "id",
                 assistedQueryColumn = "id_card_hash",
-                likeQueryColumn = "id_card_like"
+                likeQueryColumn = "id_card_like",
+                maskedColumn = "id_card_masked",
+                maskedAlgorithm = "idCardMaskLike"
         )
         private String idCard;
 
@@ -2202,7 +2218,9 @@ class MybatisEncryptionIntegrationTest {
                 column = "phone",
                 storageColumn = "phone_cipher",
                 assistedQueryColumn = "phone_hash",
-                likeQueryColumn = "phone_like"
+                likeQueryColumn = "phone_like",
+                maskedColumn = "phone_masked",
+                maskedAlgorithm = "phoneMaskLike"
         )
         private String phone;
 
@@ -2214,7 +2232,9 @@ class MybatisEncryptionIntegrationTest {
                 storageColumn = "id_card_cipher",
                 storageIdColumn = "id",
                 assistedQueryColumn = "id_card_hash",
-                likeQueryColumn = "id_card_like"
+                likeQueryColumn = "id_card_like",
+                maskedColumn = "id_card_masked",
+                maskedAlgorithm = "idCardMaskLike"
         )
         private String idCard;
 
@@ -2764,7 +2784,9 @@ class MybatisEncryptionIntegrationTest {
                 column = "phone",
                 storageColumn = "phone_cipher",
                 assistedQueryColumn = "phone_hash",
-                likeQueryColumn = "phone_like"
+                likeQueryColumn = "phone_like",
+                maskedColumn = "phone_masked",
+                maskedAlgorithm = "phoneMaskLike"
         )
         private String phone;
 
@@ -2776,7 +2798,9 @@ class MybatisEncryptionIntegrationTest {
                 storageColumn = "id_card_cipher",
                 storageIdColumn = "id",
                 assistedQueryColumn = "id_card_hash",
-                likeQueryColumn = "id_card_like"
+                likeQueryColumn = "id_card_like",
+                maskedColumn = "id_card_masked",
+                maskedAlgorithm = "idCardMaskLike"
         )
         private String idCard;
 

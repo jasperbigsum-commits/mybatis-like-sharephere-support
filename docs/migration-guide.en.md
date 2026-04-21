@@ -2,6 +2,17 @@
 
 [中文](migration-guide.zh-CN.md) | [English](migration-guide.en.md)
 
+## When to read this
+
+Read this document after your entity rules are already defined and you still need to backfill historical plaintext data.
+
+Suggested reading order:
+
+1. [Quick Start](quick-start.en.md)
+2. [Persistence Encryption Guide](persistence-encryption-guide.en.md)
+3. this migration guide
+4. [Migration Cursor Design Guide](migration-cursor-design.en.md) for cursor strategy
+
 ## Goal
 
 `mybatis-like-sharephere-support-migration` is a standalone migration and verification module for historical data. It backfills encrypted storage based on existing entity rules and provides resumable execution plus operator confirmation before mutation.
@@ -57,6 +68,23 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+Common `EntityMigrationDefinition.builder(...)` arguments:
+
+| Argument | Typical usage | Purpose | Example |
+| --- | --- | --- | --- |
+| entity type | required | source entity metadata for the migration | `UserAccount.class` |
+| cursor column | required | batch progression column | `"id"` / `"record_no"` |
+| `batchSize` | strongly recommended | rows processed per batch | `200` / `500` / `1000` |
+| `verifyAfterWrite` | recommended | verify rows after mutation | `true` |
+| `backupColumn(...)` | common when overwriting source columns | back up original plaintext before overwrite | `"phone_backup"` |
+| `excludeFields(...)` | optional | skip some encrypted fields | partial-field migrations |
+
+Practical guidance:
+
+- start with a small batch such as `200` or `500`
+- when the main-table source column will be overwritten, prefer an explicit backup column
+- for very large tables, generate DDL first, migrate in batches, then enable strict verification
+
 ## Spring auto-injection
 
 If you already use `spring2-starter` or `spring3-starter`, prefer injecting
@@ -76,6 +104,17 @@ Auto-configuration provides these beans by default:
   emits DDL for the current default datasource
 - `GlobalMigrationSchemaSqlGeneratorFactory`
   routes DDL generation by datasource name in multi-datasource applications
+
+Bean quick guide:
+
+| Bean | Problem it solves | When to use directly |
+| --- | --- | --- |
+| `MigrationTaskFactory` | create and run single-datasource migrations | most applications |
+| `GlobalMigrationTaskFactory` | route migrations by datasource | multiple JDBC datasources |
+| `MigrationSchemaSqlGenerator` | generate DDL for one datasource | DBA review before backfill |
+| `GlobalMigrationSchemaSqlGeneratorFactory` | generate DDL for multiple datasources | multi-datasource rollout |
+| `MigrationStateStore` | persist checkpoints | resumable execution |
+| `MigrationConfirmationPolicy` | require human confirmation | production rollout / controlled change windows |
 
 Minimal example:
 
@@ -195,6 +234,18 @@ Rule notes:
 - `checkpoint-directory` is the default persistent checkpoint directory; the starter now stores migration state on disk instead of in memory
 - templates support `${table}`, `${property}`, and `${column}`
 
+Migration configuration quick reference:
+
+| Property | Purpose | When to configure |
+| --- | --- | --- |
+| `default-cursor-columns` | global default cursor columns | most tables share one cursor strategy |
+| `cursor-rules` | per-table cursor overrides | a few tables do not use `id` |
+| `checkpoint-directory` | checkpoint file location | almost always |
+| `batch-size` | default batch size | consistent rollout tuning |
+| `verify-after-write` | default post-write verification | correctness-first rollouts |
+| `exclude-tables` | prevent accidental migration of protected/system tables | production safety |
+| `backup-column-templates` | infer backup column names automatically | many overwrite-style fields |
+
 Cursor constraints:
 
 - cursor columns must be stable, sortable, and must not be updated by the migration itself
@@ -248,8 +299,17 @@ Dialect compatibility:
 Usage notes:
 
 - the generator only returns SQL; it does not execute it
+- review the generated SQL before running the migration task
 - advanced objects such as indexes, constraints, comments, and ClickHouse engine clauses must still be added manually
 - if your separate-table primary key is not the default string reference id but a numeric or custom strategy, keep the existing table definition instead of blindly replacing it with auto-created DDL
+
+Typical rollout flow:
+
+1. define `@EncryptField` rules on the entity
+2. generate DDL for new columns / external tables
+3. let DBAs review and apply the schema changes
+4. run `MigrationTaskFactory`
+5. sample-check query results and API behavior
 
 If you want to build the task first and execute it later:
 

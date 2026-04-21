@@ -190,7 +190,7 @@ public final class MigrationSchemaSqlGenerator {
      * @return 扁平 DDL 列表
      */
     public List<String> generateAllRegisteredTables(Consumer<EntityMigrationDefinition.Builder> builderCustomizer) {
-        List<String> statements = new ArrayList<String>();
+        List<String> statements = new ArrayList<>();
         for (List<String> ddl : generateAllRegisteredTablesGrouped(builderCustomizer).values()) {
             statements.addAll(ddl);
         }
@@ -214,7 +214,7 @@ public final class MigrationSchemaSqlGenerator {
      */
     public Map<String, List<String>> generateAllRegisteredTablesGrouped(
             Consumer<EntityMigrationDefinition.Builder> builderCustomizer) {
-        LinkedHashMap<String, List<String>> statementsByTable = new LinkedHashMap<String, List<String>>();
+        LinkedHashMap<String, List<String>> statementsByTable = new LinkedHashMap<>();
         for (String tableName : metadataRegistry.getRegisteredTableNames()) {
             if (properties.isMigrationTableExcluded(tableName)) {
                 continue;
@@ -229,7 +229,7 @@ public final class MigrationSchemaSqlGenerator {
 
     private List<String> generate(EntityMigrationPlan plan) {
         SchemaSnapshot snapshot = loadSnapshot();
-        LinkedHashMap<String, TableRequirement> requirements = new LinkedHashMap<String, TableRequirement>();
+        LinkedHashMap<String, TableRequirement> requirements = new LinkedHashMap<>();
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             ColumnMetadata sourceColumn = snapshot.requireColumn(plan.getTableName(), columnPlan.getSourceColumn());
             if (columnPlan.isStoredInSeparateTable()) {
@@ -247,6 +247,10 @@ public final class MigrationSchemaSqlGenerator {
                     registerRequirement(requirements, storageTable, columnPlan.getLikeQueryColumn(),
                             likeType(sourceColumn));
                 }
+                if (columnPlan.hasDistinctMaskedColumn()) {
+                    registerRequirement(requirements, storageTable, columnPlan.getMaskedColumn(),
+                            likeType(sourceColumn));
+                }
             } else {
                 registerRequirement(requirements, plan.getTableName(), columnPlan.getStorageColumn(),
                         cipherType(sourceColumn));
@@ -257,6 +261,10 @@ public final class MigrationSchemaSqlGenerator {
                     registerRequirement(requirements, plan.getTableName(), columnPlan.getLikeQueryColumn(),
                             likeType(sourceColumn));
                 }
+                if (columnPlan.hasDistinctMaskedColumn()) {
+                    registerRequirement(requirements, plan.getTableName(), columnPlan.getMaskedColumn(),
+                            likeType(sourceColumn));
+                }
             }
             if (columnPlan.shouldWriteBackup()) {
                 registerRequirement(requirements, plan.getTableName(), columnPlan.getBackupColumn(),
@@ -264,7 +272,7 @@ public final class MigrationSchemaSqlGenerator {
             }
         }
 
-        List<String> statements = new ArrayList<String>();
+        List<String> statements = new ArrayList<>();
         for (TableRequirement tableRequirement : requirements.values()) {
             if (!snapshot.hasTable(tableRequirement.tableName)) {
                 statements.add(createTableSql(tableRequirement));
@@ -343,7 +351,7 @@ public final class MigrationSchemaSqlGenerator {
     private SchemaSnapshot loadSnapshot() {
         try (Connection connection = dataSource.getConnection()) {
             DatabaseMetaData metadata = connection.getMetaData();
-            Map<String, TableMetadata> tables = new LinkedHashMap<String, TableMetadata>();
+            Map<String, TableMetadata> tables = new LinkedHashMap<>();
             try (ResultSet resultSet = metadata.getColumns(connection.getCatalog(), null, null, null)) {
                 while (resultSet.next()) {
                     String tableName = resultSet.getString("TABLE_NAME");
@@ -582,7 +590,7 @@ public final class MigrationSchemaSqlGenerator {
     private static final class TableMetadata {
 
         private final String tableName;
-        private final Map<String, ColumnMetadata> columns = new LinkedHashMap<String, ColumnMetadata>();
+        private final Map<String, ColumnMetadata> columns = new LinkedHashMap<>();
 
         private TableMetadata(String tableName) {
             this.tableName = tableName;
@@ -767,7 +775,7 @@ public final class MigrationSchemaSqlGenerator {
         private final String tableName;
         private final LinkedHashMap<String, ColumnRequirement> columns =
                 new LinkedHashMap<String, ColumnRequirement>();
-        private final List<String> primaryKeyColumns = new ArrayList<String>();
+        private final List<String> primaryKeyColumns = new ArrayList<>();
 
         private TableRequirement(String tableName) {
             this.tableName = tableName;

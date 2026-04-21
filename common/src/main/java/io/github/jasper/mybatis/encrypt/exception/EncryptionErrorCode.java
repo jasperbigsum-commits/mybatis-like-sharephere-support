@@ -22,6 +22,10 @@ public enum EncryptionErrorCode {
      */
     MISSING_LIKE_QUERY_ALGORITHM,
     /**
+     * 缺少响应字段脱敏器定义。
+     */
+    MISSING_SENSITIVE_FIELD_MASKER,
+    /**
      * 表规则配置非法。
      */
     INVALID_TABLE_RULE,
@@ -29,6 +33,10 @@ public enum EncryptionErrorCode {
      * 字段规则配置非法。
      */
     INVALID_FIELD_RULE,
+    /**
+     * 共享派生列配置了不一致的算法。
+     */
+    SHARED_DERIVED_COLUMN_ALGORITHM_MISMATCH,
     /**
      * 独立表模式缺少存储表定义。
      */

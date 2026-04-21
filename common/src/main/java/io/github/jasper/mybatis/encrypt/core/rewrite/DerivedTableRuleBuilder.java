@@ -118,13 +118,15 @@ final class DerivedTableRuleBuilder {
     private EncryptColumnRule projectDerivedRule(String projectedColumn, EncryptColumnRule sourceRule) {
         return new EncryptColumnRule(
                 projectedColumn,
-                null,
+                sourceRule.table(),
                 projectedColumn,
                 sourceRule.cipherAlgorithm(),
                 sourceRule.hasAssistedQueryColumn() ? HIDDEN_ASSISTED_PREFIX + projectedColumn : null,
                 sourceRule.assistedQueryAlgorithm(),
                 sourceRule.hasLikeQueryColumn() ? HIDDEN_LIKE_PREFIX + projectedColumn : null,
                 sourceRule.likeQueryAlgorithm(),
+                sourceRule.maskedColumn(),
+                sourceRule.maskedAlgorithm(),
                 FieldStorageMode.SAME_TABLE,
                 null,
                 projectedColumn,

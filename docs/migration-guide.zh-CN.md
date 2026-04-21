@@ -2,6 +2,17 @@
 
 [中文](migration-guide.zh-CN.md) | [English](migration-guide.en.md)
 
+## 这份文档适合什么时候看
+
+当你已经准备好了实体规则，但数据库里还存在历史明文数据时，再看这份文档。
+
+建议阅读顺序：
+
+1. 先看 [快速使用指南](quick-start.zh-CN.md)
+2. 再看 [持久层加密指南](persistence-encryption-guide.zh-CN.md)
+3. 需要历史回填时，看本文
+4. 需要设计游标时，继续看 [迁移游标设计指南](migration-cursor-design.zh-CN.md)
+
 ## 目标
 
 `mybatis-like-sharephere-support-migration` 用于历史数据迁移与校验，适合把已有明文字段按现有加密规则补齐到目标结构中，同时提供断点恢复和变更风险确认能力。
@@ -57,6 +68,23 @@ MigrationTask task = JdbcMigrationTasks.create(
 MigrationReport report = task.execute();
 ```
 
+`EntityMigrationDefinition.builder(...)` 常用参数速查：
+
+| 参数 | 是否常用 | 作用 | 典型值 |
+| --- | --- | --- | --- |
+| 实体类型 | 必填 | 指定迁移规则来源实体 | `UserAccount.class` |
+| 游标列 | 必填 | 指定批处理推进依据 | `"id"` / `"record_no"` |
+| `batchSize` | 强烈推荐 | 每批处理行数 | `200` / `500` / `1000` |
+| `verifyAfterWrite` | 推荐 | 写后校验结果是否符合目标态 | `true` |
+| `backupColumn(...)` | 覆盖原列时常用 | 迁移前备份原字段 | `"phone_backup"` |
+| `excludeFields(...)` | 按需 | 排除部分字段不迁移 | 只迁移部分敏感字段时使用 |
+
+经验建议：
+
+- 首次上线用小批量，例如 `200` 或 `500`
+- 主表会被覆盖时优先显式配置备份列
+- 大表先生成 DDL、再分批迁移、最后再打开严格校验
+
 ## Spring 自动注入用法
 
 如果已经接入 `spring2-starter` 或 `spring3-starter`，更推荐直接注入
@@ -76,6 +104,17 @@ MigrationReport report = task.execute();
   单数据源场景下输出 DDL
 - `GlobalMigrationSchemaSqlGeneratorFactory`
   多数据源场景下按 datasource 名称路由 DDL 生成
+
+这些 Bean 各自解决什么问题：
+
+| Bean | 解决的问题 | 什么时候直接用 |
+| --- | --- | --- |
+| `MigrationTaskFactory` | 单数据源迁移任务创建与执行 | 大多数单库应用 |
+| `GlobalMigrationTaskFactory` | 多数据源路由迁移 | 有多个业务数据源 |
+| `MigrationSchemaSqlGenerator` | 单数据源 DDL 生成 | 先让 DBA 审核建表 / 补列 SQL |
+| `GlobalMigrationSchemaSqlGeneratorFactory` | 多数据源 DDL 生成 | 多库分批生成 DDL |
+| `MigrationStateStore` | checkpoint 持久化 | 要断点恢复时一定要关注 |
+| `MigrationConfirmationPolicy` | 风险确认 | 上线前要人工确认变更范围 |
 
 最小使用示例：
 
@@ -194,6 +233,18 @@ mybatis:
 - `checkpoint-directory` 是默认 checkpoint 持久化目录，starter 会直接落盘保存状态，不再使用内存状态
 - 模板支持 `${table}`、`${property}`、`${column}`
 
+迁移配置项速查：
+
+| 配置项 | 作用 | 什么时候配 |
+| --- | --- | --- |
+| `default-cursor-columns` | 全局默认游标列 | 大多数表都按同一游标推进 |
+| `cursor-rules` | 按表覆盖游标列 | 少数表不用 `id` 做游标 |
+| `checkpoint-directory` | checkpoint 文件目录 | 几乎总是要配，便于恢复 |
+| `batch-size` | 默认批大小 | 想统一所有任务的吞吐策略 |
+| `verify-after-write` | 默认写后校验 | 对结果正确性要求高 |
+| `exclude-tables` | 排除敏感或系统表 | 防止误迁系统表 |
+| `backup-column-templates` | 自动推导备份列名 | 字段多，不想逐个写 `backupColumn(...)` |
+
 游标约束：
 
 - 游标列必须稳定、可排序、不会在迁移过程中被更新
@@ -247,8 +298,17 @@ Map<String, List<String>> grouped = generator.generateAllRegisteredTablesGrouped
 使用建议：
 
 - 生成器只返回 SQL，不会自动执行
+- 推荐先生成并人工审核，再执行迁移任务
 - 索引、约束、注释、ClickHouse engine 子句等复杂对象仍需手工补充
 - 如果你的独立表主键不是默认字符串引用，而是数值或其他自定义规则，建议沿用现有外表定义，不要直接覆盖为自动建表 SQL
+
+典型流程：
+
+1. 先写好实体上的 `@EncryptField`
+2. 调用 DDL 生成器生成补列 / 建表 SQL
+3. 让 DBA 审核并执行
+4. 再运行 `MigrationTaskFactory`
+5. 最后抽样校验查询和接口返回
 
 如果你希望先构建任务，再决定执行时机：
 

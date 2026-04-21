@@ -118,6 +118,22 @@ After a pause, do not:
 
 ## Failure-handling procedure
 
+### General recovery principles
+
+After an interrupted migration, prefer fixing the root cause and rerunning the same task. Do not delete checkpoints first.
+
+Resume requires:
+
+- the same datasource
+- the same entity/table and cursor columns
+- the same checkpoint directory
+- the same field scope and backup strategy
+
+If committed batches already exist, the next run continues after the committed checkpoint.
+If the failure happened inside a transaction, the uncommitted batch rolls back and is processed again.
+
+The same applies to one-click batch migration. `executeAllRegisteredTables()` keeps state per table; on a second run, completed tables whose target state is still valid are not rewritten, while incomplete tables are compensated idempotently.
+
 ### `CHECKPOINT_LOCKED`
 
 Meaning:
@@ -157,6 +173,24 @@ Action:
 4. add or fix backup strategy before trying again
 
 This is a hard-stop error. Repeating the same run is not a valid recovery method.
+
+### Recovery from backup columns
+
+When an overwrite-style field is configured with `backupColumn(...)`, the migrator automatically reads original plaintext from the backup column first.
+
+This applies when:
+
+- the source column was already replaced by hash, like, cipher, or a separate-table reference value
+- the backup column still contains the original plaintext
+- ciphertext, like/hash columns, or separate-table rows are missing and need compensation
+
+Procedure:
+
+1. verify that the backup column still contains original plaintext
+2. keep `backupColumn(...)` in the migration definition
+3. rerun the same migration task
+
+No separate recovery API is required.
 
 ## Post-rollout verification checklist
 

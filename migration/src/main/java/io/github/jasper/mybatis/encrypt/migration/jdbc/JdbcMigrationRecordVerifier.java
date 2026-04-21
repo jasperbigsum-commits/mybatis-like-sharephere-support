@@ -54,7 +54,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                 continue;
             }
             ensurePlaintextRecoverable(connection, plan, columnPlan, mainRow);
-            Object plainValue = record.getColumnValue(columnPlan.getSourceColumn());
+            Object plainValue = recordStateSupport.resolvePlainValue(columnPlan, record, mainRow);
             MigrationValueResolver.DerivedFieldValues expected = valueResolver.resolve(columnPlan, plainValue);
             if (expected.isEmpty()) {
                 continue;

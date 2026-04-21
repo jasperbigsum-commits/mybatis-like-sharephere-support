@@ -720,6 +720,74 @@ verificationEnabled=true
 - 修复问题后直接重跑即可从 `lastProcessedCursorValues` 对应的已提交断点继续
 - 如果发现源列已经被部分迁移改写、且当前任务又无法从备份恢复明文，任务会直接以 `PLAINTEXT_UNRECOVERABLE` 失败，而不是继续错误补偿
 
+### 中断后如何继续迁移
+
+迁移中断后不要手工改状态文件。推荐做法是：
+
+1. 保留原来的 `MigrationStateStore` 目录或存储
+2. 保持同一个实体/表、游标列、字段范围、数据源和确认策略
+3. 修复导致失败的问题
+4. 重新执行同一个迁移任务
+
+示例：
+
+```java
+MigrationTask task = migrationTaskFactory.createForTable(
+        "user_account",
+        "id",
+        builder -> builder
+                .batchSize(500)
+                .verifyAfterWrite(true)
+);
+
+MigrationReport report = task.execute();
+```
+
+如果上一次失败前已有批次提交成功，下一次会从 `lastProcessedCursorValues.*` 后继续读取。
+如果上一次失败发生在批次事务内部，该批次会回滚，下次会重新处理该批次。
+
+不要为了“继续执行”删除 checkpoint。删除状态文件等价于从头扫描，只有在确认目标态幂等、且明确需要重建状态时才应这么做。
+
+### 一键批量迁移二次执行
+
+`executeAllRegisteredTables()` 和 `globalMigrationTaskFactory.executeAllRegisteredTables(...)`
+也是逐表创建迁移任务，每张表各自使用自己的 checkpoint。
+
+二次执行时预期行为：
+
+- 如果状态文件显示 `COMPLETED`，且数据库当前目标态仍然完整，任务会直接返回已完成报告，不会重复改写已完成字段
+- 如果状态文件显示 `COMPLETED`，但数据库字段被回滚或派生列缺失，任务会重建进度并按幂等规则补偿
+- 如果某字段源列已被覆盖、派生列又不完整，但没有备份列可恢复明文，会失败并返回 `PLAINTEXT_UNRECOVERABLE`
+
+覆盖式字段使用随机 IV 密文时，迁移判断以“密文能否解密回原始明文”为准，不会因为同一明文二次加密得到不同密文就误判为必须重迁。
+
+### 如何从备份字段恢复
+
+迁移模块没有单独的“从备份恢复 API”。只要迁移计划中配置了 `backupColumn(...)`，恢复是自动发生的。
+
+自动恢复条件：
+
+- 字段是覆盖式迁移，例如源列被 hash、like、cipher 或独立表引用值覆盖
+- `backupColumn(...)` 或 `backup-column-templates` 已配置
+- 备份列里仍然保存原始明文
+- 当前目标态不完整，需要补偿写入
+
+示例：
+
+```java
+MigrationReport report = migrationTaskFactory.executeForEntity(
+        UserAccount.class,
+        "id",
+        builder -> builder
+                .backupColumn("phone", "phone_backup")
+                .verifyAfterWrite(true)
+);
+```
+
+如果当前行的 `phone` 已经被改写成 hash，但 `phone_backup` 仍然保存原始手机号，迁移器会优先使用 `phone_backup` 重新生成缺失的密文、like、hash 或独立表记录。
+
+如果没有备份列，且源列已经不是原始明文，框架不会猜测或二次派生，会直接抛出 `PLAINTEXT_UNRECOVERABLE`。
+
 ## 推荐操作流程
 
 1. 先按实体类配置迁移任务，不要直接按表名手写变更 SQL。

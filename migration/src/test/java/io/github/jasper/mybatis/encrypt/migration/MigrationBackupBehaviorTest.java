@@ -137,4 +137,47 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
             assertEquals(" AbC-123 ", resultSet.getString("phone_backup"));
         }
     }
+
+    @Test
+    void shouldResumeOverwriteMigrationFromBackupColumnWhenSourceWasAlreadyReplaced() throws Exception {
+        DataSource dataSource = newDataSource("same_table_hash_overwrite_backup_resume");
+        String plaintext = "13800138000";
+        String hashValue = algorithmRegistry().assisted("sm3").transform(plaintext);
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(128), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_like varchar(255), " +
+                        "phone_backup varchar(128))",
+                "insert into user_account (id, phone, phone_backup) values (1, '" + hashValue + "', '" + plaintext + "')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(HashOverwriteUserEntity.class, "id")
+                        .backupColumn("phone", "phone_backup")
+                        .build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-hash-overwrite-backup-resume"))
+        );
+
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        assertEquals(1L, report.getMigratedRows());
+        assertEquals(1L, report.getVerifiedRows());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone, phone_cipher, phone_like, phone_backup from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            assertEquals(hashValue, resultSet.getString("phone"));
+            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
+            assertEquals(algorithmRegistry().like("normalizedLike").transform(plaintext),
+                    resultSet.getString("phone_like"));
+            assertEquals(plaintext, resultSet.getString("phone_backup"));
+        }
+    }
 }

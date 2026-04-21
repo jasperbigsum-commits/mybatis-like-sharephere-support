@@ -112,4 +112,64 @@ class GlobalMigrationTaskFactoryTest extends MigrationJdbcTestSupport {
         assertEquals("user_account", reports.get(0).getTableName());
         assertEquals(1L, reports.get(0).getMigratedRows());
     }
+
+    @Test
+    void shouldExecuteAllRegisteredTablesRepeatedlyWithoutRemigratingCompletedOverwriteRows() throws Exception {
+        DataSource dataSource = newDataSource("global_all_tables_rerun_overwrite");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(128), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_like varchar(255), " +
+                        "phone_backup varchar(128))",
+                "insert into user_account (id, phone) values (1, '13800138000')");
+
+        DatabaseEncryptionProperties properties = properties();
+        EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
+        registry.registerEntityType(HashOverwriteUserEntity.class);
+        InMemoryMigrationStateStore stateStore = new InMemoryMigrationStateStore();
+        Map<String, DataSource> dataSources = new LinkedHashMap<String, DataSource>();
+        dataSources.put("primaryDs", dataSource);
+        GlobalMigrationTaskFactory factory = new DefaultGlobalMigrationTaskFactory(
+                dataSources,
+                registry,
+                algorithmRegistry(),
+                properties,
+                stateStore,
+                AllowAllMigrationConfirmationPolicy.INSTANCE);
+
+        List<MigrationReport> firstReports = factory.executeAllRegisteredTables(
+                "primaryDs",
+                builder -> builder.backupColumn("phone", "phone_backup"));
+        String firstCipher;
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone_cipher from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            firstCipher = resultSet.getString("phone_cipher");
+        }
+
+        List<MigrationReport> secondReports = factory.executeAllRegisteredTables(
+                "primaryDs",
+                builder -> builder.backupColumn("phone", "phone_backup"));
+
+        assertEquals(1, firstReports.size());
+        assertEquals(MigrationStatus.COMPLETED, firstReports.get(0).getStatus());
+        assertEquals(1L, firstReports.get(0).getMigratedRows());
+        assertEquals(1, secondReports.size());
+        assertEquals(MigrationStatus.COMPLETED, secondReports.get(0).getStatus());
+        assertEquals(1L, secondReports.get(0).getMigratedRows());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select phone, phone_cipher, phone_backup from user_account where id = 1")) {
+            assertTrue(resultSet.next());
+            assertEquals(algorithmRegistry().assisted("sm3").transform("13800138000"),
+                    resultSet.getString("phone"));
+            assertEquals(firstCipher, resultSet.getString("phone_cipher"));
+            assertEquals("13800138000", resultSet.getString("phone_backup"));
+        }
+    }
 }

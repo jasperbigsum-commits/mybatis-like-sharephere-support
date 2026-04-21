@@ -697,6 +697,74 @@ Resume behavior:
 - failed in-flight batches are not marked as completed
 - rerunning the same task resumes from the committed `lastProcessedCursorValues` checkpoint
 
+### How to resume after interruption
+
+Do not manually edit the state file after an interrupted migration. Recommended procedure:
+
+1. keep the original `MigrationStateStore` directory or storage backend
+2. keep the same entity/table, cursor columns, field scope, datasource, and confirmation policy
+3. fix the root cause of the failure
+4. execute the same migration task again
+
+Example:
+
+```java
+MigrationTask task = migrationTaskFactory.createForTable(
+        "user_account",
+        "id",
+        builder -> builder
+                .batchSize(500)
+                .verifyAfterWrite(true)
+);
+
+MigrationReport report = task.execute();
+```
+
+If previous batches were committed, the next run continues after `lastProcessedCursorValues.*`.
+If the failure happened inside an in-flight batch transaction, that batch rolls back and is processed again.
+
+Do not delete checkpoints just to continue. Deleting state means scanning from the beginning again and should only be done when the target state is known to be idempotent and the team intentionally wants to rebuild progress.
+
+### Re-running one-click batch migration
+
+`executeAllRegisteredTables()` and `globalMigrationTaskFactory.executeAllRegisteredTables(...)`
+create one migration task per registered physical table. Each table keeps its own checkpoint.
+
+Expected behavior on a second run:
+
+- if the state is `COMPLETED` and the database target state is still complete, the task returns the completed report without rewriting completed fields
+- if the state is `COMPLETED` but database data was rolled back or derived columns are missing, progress is rebuilt and the task compensates idempotently
+- if a source column was already overwritten and target data is incomplete, but no backup column can recover plaintext, execution fails with `PLAINTEXT_UNRECOVERABLE`
+
+For random-IV ciphertext, the migration checks whether the stored ciphertext decrypts back to the original plaintext. It does not require raw ciphertext strings to be equal across reruns.
+
+### How backup-column recovery works
+
+The migration module does not expose a separate "restore from backup" API. Recovery is automatic when the migration plan contains `backupColumn(...)`.
+
+Automatic recovery applies when:
+
+- the field uses overwrite-style migration, such as replacing the source column with hash, like, cipher, or a separate-table reference value
+- `backupColumn(...)` or `backup-column-templates` is configured
+- the backup column still contains the original plaintext
+- the current target state is incomplete and must be compensated
+
+Example:
+
+```java
+MigrationReport report = migrationTaskFactory.executeForEntity(
+        UserAccount.class,
+        "id",
+        builder -> builder
+                .backupColumn("phone", "phone_backup")
+                .verifyAfterWrite(true)
+);
+```
+
+If `phone` has already been replaced by a hash but `phone_backup` still contains the original phone number, the migrator uses `phone_backup` first to regenerate missing ciphertext, like, hash, or separate-table rows.
+
+If no backup column exists and the source column is no longer original plaintext, the framework does not guess or derive again from the overwritten value. It fails with `PLAINTEXT_UNRECOVERABLE`.
+
 ## Recommended operator workflow
 
 1. Build migration tasks from entity classes instead of writing ad hoc table updates.

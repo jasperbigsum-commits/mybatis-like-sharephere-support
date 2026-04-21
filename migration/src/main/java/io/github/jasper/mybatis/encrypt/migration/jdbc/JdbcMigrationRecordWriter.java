@@ -34,6 +34,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
     private static final Logger log = LoggerFactory.getLogger(JdbcMigrationRecordWriter.class);
 
     private final DatabaseEncryptionProperties properties;
+    private final AlgorithmRegistry algorithmRegistry;
     private final ReferenceIdGenerator referenceIdGenerator;
     private final MigrationValueResolver valueResolver;
     private final MigrationRecordStateSupport recordStateSupport;
@@ -48,6 +49,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                                      AlgorithmRegistry algorithmRegistry,
                                      ReferenceIdGenerator referenceIdGenerator) {
         this.properties = properties;
+        this.algorithmRegistry = algorithmRegistry;
         this.referenceIdGenerator = referenceIdGenerator;
         this.valueResolver = new MigrationValueResolver(algorithmRegistry);
         this.recordStateSupport = new MigrationRecordStateSupport(properties);
@@ -192,12 +194,12 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (separateRow == null) {
                 return false;
             }
-            return valueEquals(separateRow.get(columnPlan.getStorageColumn()), derivedFieldValues.getCipherText())
+            return cipherMatches(columnPlan, plainValue, separateRow.get(columnPlan.getStorageColumn()))
                     && valueEquals(separateRow.get(columnPlan.getAssistedQueryColumn()), derivedFieldValues.getHashValue())
                     && matchesOptionalValue(separateRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue())
                     && matchesOptionalValue(separateRow.get(columnPlan.getMaskedColumn()), derivedFieldValues.getMaskedValue());
         }
-        if (!valueEquals(currentRow.get(columnPlan.getStorageColumn()), derivedFieldValues.getCipherText())) {
+        if (!cipherMatches(columnPlan, plainValue, currentRow.get(columnPlan.getStorageColumn()))) {
             return false;
         }
         if (!matchesOptionalValue(currentRow.get(columnPlan.getAssistedQueryColumn()), derivedFieldValues.getHashValue())) {
@@ -212,8 +214,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         if (!columnPlan.overwritesSourceColumn()) {
             return true;
         }
-        return valueEquals(currentRow.get(columnPlan.getSourceColumn()),
-                expectedSourceValue(columnPlan, derivedFieldValues));
+        return sourceValueMatches(columnPlan, plainValue, currentRow.get(columnPlan.getSourceColumn()), derivedFieldValues);
     }
 
     private boolean isAlreadyMigratedWithoutPlaintext(Connection connection,
@@ -344,6 +345,20 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         return expected == null ? true : valueEquals(actual, expected);
     }
 
+    private boolean cipherMatches(EntityMigrationColumnPlan columnPlan, Object plainValue, Object actualCipherValue) {
+        String plainText = plainValue == null ? null : String.valueOf(plainValue);
+        String actualCipher = actualCipherValue == null ? null : String.valueOf(actualCipherValue);
+        if (plainText == null || actualCipher == null) {
+            return plainText == null && actualCipher == null;
+        }
+        try {
+            String decrypted = algorithmRegistry.cipher(columnPlan.getCipherAlgorithm()).decrypt(actualCipher);
+            return plainText.equals(decrypted);
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
     private boolean isBlankValue(Object value) {
         return value == null || StringUtils.isBlank(String.valueOf(value));
     }
@@ -352,24 +367,26 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         return StringUtils.isNotBlank(left) && left.equals(right);
     }
 
-    private String expectedSourceValue(EntityMigrationColumnPlan columnPlan,
+    private boolean sourceValueMatches(EntityMigrationColumnPlan columnPlan,
+                                       Object plainValue,
+                                       Object actualSourceValue,
                                        MigrationValueResolver.DerivedFieldValues derivedFieldValues) {
         if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getStorageColumn())) {
-            return derivedFieldValues.getCipherText();
+            return cipherMatches(columnPlan, plainValue, actualSourceValue);
         }
         if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getAssistedQueryColumn())) {
-            return derivedFieldValues.getHashValue();
+            return valueEquals(actualSourceValue, derivedFieldValues.getHashValue());
         }
         if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getLikeQueryColumn())) {
-            return derivedFieldValues.getLikeValue();
+            return valueEquals(actualSourceValue, derivedFieldValues.getLikeValue());
         }
         if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getMaskedColumn())) {
-            return derivedFieldValues.getMaskedValue();
+            return valueEquals(actualSourceValue, derivedFieldValues.getMaskedValue());
         }
         if (columnPlan.isStoredInSeparateTable()) {
-            return derivedFieldValues.getHashValue();
+            return valueEquals(actualSourceValue, derivedFieldValues.getHashValue());
         }
-        return null;
+        return actualSourceValue == null;
     }
 
     private void logCursorDebug(String stage, String sql, MigrationCursor cursor) {

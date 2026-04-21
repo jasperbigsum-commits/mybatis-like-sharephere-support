@@ -48,9 +48,9 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         List<String> archiveDdl = factory.generateAllRegisteredTables("archiveDs");
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(110)",
-                "alter table `user_account` add column `phone_hash` varchar(64)",
-                "alter table `user_account` add column `phone_like` varchar(64)"
+                "alter table `user_account` add column `phone_cipher` varchar(110) after `phone`",
+                "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
+                "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`"
         ), primaryDdl);
         assertEquals(Arrays.asList(
                 "alter table \"user_account\" add (\"phone_cipher\" varchar2(110))",
@@ -77,10 +77,10 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         List<String> ddl = factory.generateAllRegisteredTables("primaryDs");
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(110)",
-                "alter table `user_account` add column `phone_hash` varchar(64)",
-                "alter table `user_account` add column `phone_like` varchar(64)",
-                "alter table `user_account` add column `phone_masked` varchar(64)"
+                "alter table `user_account` add column `phone_cipher` varchar(110) after `phone`",
+                "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
+                "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`",
+                "alter table `user_account` add column `phone_masked` varchar(64) after `phone_like`"
         ), ddl);
     }
 }

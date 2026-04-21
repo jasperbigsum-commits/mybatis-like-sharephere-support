@@ -234,41 +234,50 @@ public final class MigrationSchemaSqlGenerator {
             ColumnMetadata sourceColumn = snapshot.requireColumn(plan.getTableName(), columnPlan.getSourceColumn());
             if (columnPlan.isStoredInSeparateTable()) {
                 String storageTable = columnPlan.getStorageTable();
+                String previousColumn = columnPlan.getStorageIdColumn();
                 if (!snapshot.hasTable(storageTable)) {
                     registerRequirement(requirements, storageTable, columnPlan.getStorageIdColumn(),
                             referenceIdType(), true);
                 }
-                registerRequirement(requirements, storageTable, columnPlan.getStorageColumn(),
-                        cipherType(sourceColumn));
+                previousColumn = registerRequirement(requirements, storageTable, columnPlan.getStorageColumn(),
+                        cipherType(sourceColumn), false, previousColumn);
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-                    registerRequirement(requirements, storageTable, columnPlan.getAssistedQueryColumn(), hashType());
+                    previousColumn = registerRequirement(requirements, storageTable, columnPlan.getAssistedQueryColumn(),
+                            hashType(), false, previousColumn);
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                    registerRequirement(requirements, storageTable, columnPlan.getLikeQueryColumn(),
-                            likeType(sourceColumn));
+                    previousColumn = registerRequirement(requirements, storageTable, columnPlan.getLikeQueryColumn(),
+                            likeType(sourceColumn), false, previousColumn);
                 }
                 if (columnPlan.hasDistinctMaskedColumn()) {
                     registerRequirement(requirements, storageTable, columnPlan.getMaskedColumn(),
-                            likeType(sourceColumn));
+                            likeType(sourceColumn), false, previousColumn);
                 }
             } else {
-                registerRequirement(requirements, plan.getTableName(), columnPlan.getStorageColumn(),
-                        cipherType(sourceColumn));
+                String previousColumn = columnPlan.getSourceColumn();
+                previousColumn = registerRequirement(requirements, plan.getTableName(), columnPlan.getStorageColumn(),
+                        cipherType(sourceColumn), false, previousColumn);
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-                    registerRequirement(requirements, plan.getTableName(), columnPlan.getAssistedQueryColumn(), hashType());
+                    previousColumn = registerRequirement(requirements, plan.getTableName(),
+                            columnPlan.getAssistedQueryColumn(), hashType(), false, previousColumn);
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                    registerRequirement(requirements, plan.getTableName(), columnPlan.getLikeQueryColumn(),
-                            likeType(sourceColumn));
+                    previousColumn = registerRequirement(requirements, plan.getTableName(),
+                            columnPlan.getLikeQueryColumn(), likeType(sourceColumn), false, previousColumn);
                 }
                 if (columnPlan.hasDistinctMaskedColumn()) {
-                    registerRequirement(requirements, plan.getTableName(), columnPlan.getMaskedColumn(),
-                            likeType(sourceColumn));
+                    previousColumn = registerRequirement(requirements, plan.getTableName(),
+                            columnPlan.getMaskedColumn(), likeType(sourceColumn), false, previousColumn);
                 }
+                if (columnPlan.shouldWriteBackup()) {
+                    registerRequirement(requirements, plan.getTableName(), columnPlan.getBackupColumn(),
+                            backupType(sourceColumn), false, previousColumn);
+                }
+                continue;
             }
             if (columnPlan.shouldWriteBackup()) {
                 registerRequirement(requirements, plan.getTableName(), columnPlan.getBackupColumn(),
-                        backupType(sourceColumn));
+                        backupType(sourceColumn), false, columnPlan.getSourceColumn());
             }
         }
 
@@ -281,7 +290,8 @@ public final class MigrationSchemaSqlGenerator {
             for (ColumnRequirement requirement : tableRequirement.columns.values()) {
                 ColumnMetadata existing = snapshot.findColumn(requirement.tableName, requirement.columnName);
                 if (existing == null) {
-                    statements.add(addColumnSql(requirement.tableName, requirement.columnName, requirement.columnType));
+                    statements.add(addColumnSql(requirement.tableName, requirement.columnName,
+                            requirement.columnType, requirement.afterColumnName));
                     continue;
                 }
                 if (!existing.satisfies(requirement.columnType)) {
@@ -313,8 +323,17 @@ public final class MigrationSchemaSqlGenerator {
                                      String columnName,
                                      ColumnType columnType,
                                      boolean primaryKey) {
+        registerRequirement(requirements, tableName, columnName, columnType, primaryKey, null);
+    }
+
+    private String registerRequirement(Map<String, TableRequirement> requirements,
+                                       String tableName,
+                                       String columnName,
+                                       ColumnType columnType,
+                                       boolean primaryKey,
+                                       String afterColumnName) {
         if (StringUtils.isBlank(tableName) || StringUtils.isBlank(columnName) || columnType == null) {
-            return;
+            return afterColumnName;
         }
         String normalizedTable = NameUtils.normalizeIdentifier(tableName);
         TableRequirement tableRequirement = requirements.get(normalizedTable);
@@ -322,7 +341,8 @@ public final class MigrationSchemaSqlGenerator {
             tableRequirement = new TableRequirement(tableName);
             requirements.put(normalizedTable, tableRequirement);
         }
-        tableRequirement.register(columnName, columnType, primaryKey);
+        tableRequirement.register(columnName, columnType, primaryKey, afterColumnName);
+        return columnName;
     }
 
     private ColumnType cipherType(ColumnMetadata sourceColumn) {
@@ -374,7 +394,10 @@ public final class MigrationSchemaSqlGenerator {
         }
     }
 
-    private String addColumnSql(String tableName, String columnName, ColumnType columnType) {
+    private String addColumnSql(String tableName,
+                                String columnName,
+                                ColumnType columnType,
+                                String afterColumnName) {
         String quotedTable = dialect.quote(tableName);
         String quotedColumn = dialect.quote(columnName);
         switch (dialect) {
@@ -382,8 +405,21 @@ public final class MigrationSchemaSqlGenerator {
             case DM:
                 return "alter table " + quotedTable + " add (" + quotedColumn + " " + columnType.renderedType + ")";
             default:
-                return "alter table " + quotedTable + " add column " + quotedColumn + " " + columnType.renderedType;
+                StringBuilder sql = new StringBuilder("alter table ")
+                        .append(quotedTable)
+                        .append(" add column ")
+                        .append(quotedColumn)
+                        .append(' ')
+                        .append(columnType.renderedType);
+                if (supportsColumnPlacement() && StringUtils.isNotBlank(afterColumnName)) {
+                    sql.append(" after ").append(dialect.quote(afterColumnName));
+                }
+                return sql.toString();
         }
+    }
+
+    private boolean supportsColumnPlacement() {
+        return dialect == SqlDialect.MYSQL || dialect == SqlDialect.OCEANBASE;
     }
 
     private String modifyColumnSql(String tableName, String columnName, ColumnType columnType) {
@@ -748,25 +784,37 @@ public final class MigrationSchemaSqlGenerator {
         private final String tableName;
         private final String columnName;
         private final ColumnType columnType;
+        private final String afterColumnName;
 
-        private ColumnRequirement(String tableName, String columnName, ColumnType columnType) {
+        private ColumnRequirement(String tableName,
+                                  String columnName,
+                                  ColumnType columnType,
+                                  String afterColumnName) {
             this.tableName = tableName;
             this.columnName = columnName;
             this.columnType = columnType;
+            this.afterColumnName = afterColumnName;
         }
 
-        private ColumnRequirement merge(ColumnType incoming) {
+        private ColumnRequirement merge(ColumnType incoming, String incomingAfterColumnName) {
             if (!columnType.family.equals(incoming.family)) {
                 throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
                         "Conflicting schema requirement for column: " + tableName + "." + columnName);
             }
+            ColumnType mergedType = columnType;
             if (columnType.length == null || incoming.length == null) {
-                return this;
+                return new ColumnRequirement(tableName, columnName, mergedType,
+                        mergeAfterColumnName(afterColumnName, incomingAfterColumnName));
             }
             if (incoming.length > columnType.length) {
-                return new ColumnRequirement(tableName, columnName, incoming);
+                mergedType = incoming;
             }
-            return this;
+            return new ColumnRequirement(tableName, columnName, mergedType,
+                    mergeAfterColumnName(afterColumnName, incomingAfterColumnName));
+        }
+
+        private String mergeAfterColumnName(String currentAfterColumnName, String incomingAfterColumnName) {
+            return StringUtils.isNotBlank(currentAfterColumnName) ? currentAfterColumnName : incomingAfterColumnName;
         }
     }
 
@@ -781,13 +829,16 @@ public final class MigrationSchemaSqlGenerator {
             this.tableName = tableName;
         }
 
-        private void register(String columnName, ColumnType columnType, boolean primaryKey) {
+        private void register(String columnName,
+                              ColumnType columnType,
+                              boolean primaryKey,
+                              String afterColumnName) {
             String normalizedColumn = NameUtils.normalizeIdentifier(columnName);
             ColumnRequirement existing = columns.get(normalizedColumn);
             if (existing == null) {
-                columns.put(normalizedColumn, new ColumnRequirement(tableName, columnName, columnType));
+                columns.put(normalizedColumn, new ColumnRequirement(tableName, columnName, columnType, afterColumnName));
             } else {
-                columns.put(normalizedColumn, existing.merge(columnType));
+                columns.put(normalizedColumn, existing.merge(columnType, afterColumnName));
             }
             if (primaryKey && !primaryKeyColumns.contains(normalizedColumn)) {
                 primaryKeyColumns.add(normalizedColumn);

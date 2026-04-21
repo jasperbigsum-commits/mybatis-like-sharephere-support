@@ -36,6 +36,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
     private final DatabaseEncryptionProperties properties;
     private final ReferenceIdGenerator referenceIdGenerator;
     private final MigrationValueResolver valueResolver;
+    private final MigrationRecordStateSupport recordStateSupport;
 
     /**
      * jdbc迁移记录写入
@@ -49,6 +50,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         this.properties = properties;
         this.referenceIdGenerator = referenceIdGenerator;
         this.valueResolver = new MigrationValueResolver(algorithmRegistry);
+        this.recordStateSupport = new MigrationRecordStateSupport(properties);
     }
 
     @Override
@@ -59,7 +61,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (isAlreadyMigratedWithoutPlaintext(connection, columnPlan, currentRow)) {
                 continue;
             }
-            Object plainValue = resolvePlainValue(columnPlan, record, currentRow);
+            ensurePlaintextRecoverable(connection, plan, columnPlan, currentRow);
+            Object plainValue = recordStateSupport.resolvePlainValue(columnPlan, record, currentRow);
             MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
             if (derivedFieldValues.isEmpty()) {
                 continue;
@@ -104,7 +107,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (isAlreadyMigratedWithoutPlaintext(connection, columnPlan, currentRow)) {
                 continue;
             }
-            Object plainValue = resolvePlainValue(columnPlan, record, currentRow);
+            ensurePlaintextRecoverable(connection, plan, columnPlan, currentRow);
+            Object plainValue = recordStateSupport.resolvePlainValue(columnPlan, record, currentRow);
             MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
             if (derivedFieldValues.isEmpty()) {
                 continue;
@@ -169,20 +173,6 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         }
     }
 
-    private Object resolvePlainValue(EntityMigrationColumnPlan columnPlan,
-                                     MigrationRecord record,
-                                     Map<String, Object> currentRow) {
-        if (columnPlan.shouldWriteBackup()) {
-            Object backupValue = currentRow.get(columnPlan.getBackupColumn());
-            if (!isBlankValue(backupValue)) {
-                return backupValue;
-            }
-        }
-        return currentRow.containsKey(columnPlan.getSourceColumn())
-                ? currentRow.get(columnPlan.getSourceColumn())
-                : record.getColumnValue(columnPlan.getSourceColumn());
-    }
-
     private boolean isAlreadyInTargetState(Connection connection,
                                            EntityMigrationColumnPlan columnPlan,
                                            Map<String, Object> currentRow,
@@ -197,7 +187,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (!valueEquals(currentRow.get(columnPlan.getSourceColumn()), derivedFieldValues.getHashValue())) {
                 return false;
             }
-            Map<String, Object> separateRow = loadSeparateRow(connection, columnPlan, derivedFieldValues.getHashValue());
+            Map<String, Object> separateRow =
+                    recordStateSupport.loadSeparateRow(connection, columnPlan, derivedFieldValues.getHashValue());
             if (separateRow == null) {
                 return false;
             }
@@ -228,46 +219,18 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
     private boolean isAlreadyMigratedWithoutPlaintext(Connection connection,
                                                       EntityMigrationColumnPlan columnPlan,
                                                       Map<String, Object> currentRow) throws SQLException {
-        if (!columnPlan.overwritesSourceColumn() || columnPlan.shouldWriteBackup()) {
-            return false;
+        return recordStateSupport.isAlreadyMigratedWithoutPlaintext(connection, columnPlan, currentRow);
+    }
+
+    private void ensurePlaintextRecoverable(Connection connection,
+                                            EntityMigrationPlan plan,
+                                            EntityMigrationColumnPlan columnPlan,
+                                            Map<String, Object> currentRow) throws SQLException {
+        if (!recordStateSupport.isPlaintextIrrecoverable(connection, columnPlan, currentRow)) {
+            return;
         }
-        Object sourceValue = currentRow.get(columnPlan.getSourceColumn());
-        if (isBlankValue(sourceValue)) {
-            return false;
-        }
-        if (columnPlan.isStoredInSeparateTable()) {
-            Map<String, Object> separateRow = loadSeparateRow(connection, columnPlan, String.valueOf(sourceValue));
-            return separateRow != null
-                    && !isBlankValue(separateRow.get(columnPlan.getStorageColumn()))
-                    && optionalColumnPresent(separateRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn())
-                    && optionalColumnPresent(separateRow.get(columnPlan.getMaskedColumn()), columnPlan.getMaskedColumn());
-        }
-        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getStorageColumn())
-                && isBlankValue(currentRow.get(columnPlan.getStorageColumn()))) {
-            return false;
-        }
-        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getAssistedQueryColumn())
-                && !valueEquals(sourceValue, currentRow.get(columnPlan.getAssistedQueryColumn()))) {
-            return false;
-        }
-        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getLikeQueryColumn())
-                && !valueEquals(sourceValue, currentRow.get(columnPlan.getLikeQueryColumn()))) {
-            return false;
-        }
-        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getMaskedColumn())
-                && !valueEquals(sourceValue, currentRow.get(columnPlan.getMaskedColumn()))) {
-            return false;
-        }
-        if (isBlankValue(currentRow.get(columnPlan.getStorageColumn()))) {
-            return false;
-        }
-        if (!optionalColumnPresent(currentRow.get(columnPlan.getAssistedQueryColumn()), columnPlan.getAssistedQueryColumn())) {
-            return false;
-        }
-        if (!optionalColumnPresent(currentRow.get(columnPlan.getLikeQueryColumn()), columnPlan.getLikeQueryColumn())) {
-            return false;
-        }
-        return optionalColumnPresent(currentRow.get(columnPlan.getMaskedColumn()), columnPlan.getMaskedColumn());
+        throw new MigrationExecutionException(MigrationErrorCode.PLAINTEXT_UNRECOVERABLE,
+                recordStateSupport.buildPlaintextIrrecoverableMessage(plan.getTableName(), columnPlan), null);
     }
 
     private void updateMainTable(Connection connection,
@@ -318,44 +281,6 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             statement.setString(1, referenceHash);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next();
-            }
-        }
-    }
-
-    private Map<String, Object> loadSeparateRow(Connection connection,
-                                                EntityMigrationColumnPlan columnPlan,
-                                                String referenceHash) throws SQLException {
-        if (referenceHash == null || StringUtils.isBlank(columnPlan.getAssistedQueryColumn())) {
-            return null;
-        }
-        StringBuilder sql = new StringBuilder("select ")
-                .append(quote(columnPlan.getStorageColumn()))
-                .append(", ")
-                .append(quote(columnPlan.getAssistedQueryColumn()));
-        if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-            sql.append(", ").append(quote(columnPlan.getLikeQueryColumn()));
-        }
-        if (columnPlan.hasDistinctMaskedColumn()) {
-            sql.append(", ").append(quote(columnPlan.getMaskedColumn()));
-        }
-        sql.append(" from ").append(quote(columnPlan.getStorageTable()))
-                .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
-        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            statement.setString(1, referenceHash);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                if (!resultSet.next()) {
-                    return null;
-                }
-                Map<String, Object> row = new LinkedHashMap<String, Object>();
-                row.put(columnPlan.getStorageColumn(), resultSet.getObject(columnPlan.getStorageColumn()));
-                row.put(columnPlan.getAssistedQueryColumn(), resultSet.getObject(columnPlan.getAssistedQueryColumn()));
-                if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                    row.put(columnPlan.getLikeQueryColumn(), resultSet.getObject(columnPlan.getLikeQueryColumn()));
-                }
-                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
-                    row.put(columnPlan.getMaskedColumn(), resultSet.getObject(columnPlan.getMaskedColumn()));
-                }
-                return row;
             }
         }
     }
@@ -417,10 +342,6 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
 
     private boolean matchesOptionalValue(Object actual, String expected) {
         return expected == null ? true : valueEquals(actual, expected);
-    }
-
-    private boolean optionalColumnPresent(Object actual, String columnName) {
-        return StringUtils.isBlank(columnName) || !isBlankValue(actual);
     }
 
     private boolean isBlankValue(Object value) {

@@ -60,6 +60,8 @@
 
 - [存量迁移指南（中文）](docs/migration-guide.zh-CN.md)
 - [Migration Guide (English)](docs/migration-guide.en.md)
+- [迁移生产上线操作手册（中文）](docs/migration-production-runbook.zh-CN.md)
+- [Migration Production Runbook (English)](docs/migration-production-runbook.en.md)
 - [迁移游标设计指南（中文）](docs/migration-cursor-design.zh-CN.md)
 - [Migration Cursor Design Guide (English)](docs/migration-cursor-design.en.md)
 
@@ -67,6 +69,7 @@
 
 - 已有历史明文数据，需要补写密文列、辅助列、脱敏列
 - 需要断点恢复、DDL 生成、风险确认
+- 准备进入生产变更窗口，需要按 checklist 执行迁移
 - 需要迁移 builder 参数、配置项和自动装配 Bean 的用途说明
 
 ### 5. 架构与维护
@@ -89,6 +92,7 @@
 - 理解字段如何落密文、如何支持查询：看 [持久层加密指南（中文）](docs/persistence-encryption-guide.zh-CN.md)
 - 让对外接口自动返回脱敏值：看 [脱敏响应指南](docs/sensitive-response-guide.zh-CN.md)
 - 处理历史数据：看 [存量迁移指南（中文）](docs/migration-guide.zh-CN.md)
+- 按生产窗口执行迁移：看 [迁移生产上线操作手册（中文）](docs/migration-production-runbook.zh-CN.md)
 - 判断某种 SQL 是否支持：看 [SQL Support Matrix](docs/sql-support-matrix.md)
 
 ## 核心能力速览

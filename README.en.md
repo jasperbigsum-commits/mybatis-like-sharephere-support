@@ -63,11 +63,13 @@ Read this when you need:
 
 - [存量迁移指南（中文）](docs/migration-guide.zh-CN.md)
 - [Migration Guide (English)](docs/migration-guide.en.md)
+- [迁移生产上线操作手册（中文）](docs/migration-production-runbook.zh-CN.md)
+- [Migration Production Runbook (English)](docs/migration-production-runbook.en.md)
 - [迁移游标设计指南（中文）](docs/migration-cursor-design.zh-CN.md)
 - [Migration Cursor Design Guide (English)](docs/migration-cursor-design.en.md)
 
 Read this when you need migration builder arguments, configuration properties, auto-configured
-Bean responsibilities, DDL generation, checkpoint recovery, or rollout confirmation.
+Bean responsibilities, DDL generation, checkpoint recovery, rollout confirmation, or a production execution checklist.
 
 ### 5. Architecture And Maintenance
 
@@ -84,6 +86,7 @@ If you want to:
 - understand encrypted persistence and query rewrite: read [Persistence Encryption Guide (English)](docs/persistence-encryption-guide.en.md)
 - mask controller responses: read [Sensitive Response Guide](docs/sensitive-response-guide.zh-CN.md)
 - migrate historical plaintext data: read [Migration Guide (English)](docs/migration-guide.en.md)
+- execute a migration during a production window: read [Migration Production Runbook (English)](docs/migration-production-runbook.en.md)
 - check SQL support boundaries: read [SQL Support Matrix](docs/sql-support-matrix.md)
 
 ## Capability Summary

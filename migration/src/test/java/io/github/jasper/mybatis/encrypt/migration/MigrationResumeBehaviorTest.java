@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -23,6 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 覆盖断点恢复与复合游标场景，确保失败批次不会污染已提交检查点。
@@ -220,6 +223,64 @@ class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
         try (MigrationCheckpointLock ignored = stateStore.acquireCheckpointLock(plan)) {
             MigrationCheckpointLockException exception = assertThrows(MigrationCheckpointLockException.class, task::execute);
             assertEquals(MigrationErrorCode.CHECKPOINT_LOCKED, exception.getErrorCode());
+        }
+    }
+
+    @Test
+    void shouldSkipVerificationForAlreadyMigratedSeparateTableFieldWhenOtherFieldStillRequiresMigration() throws Exception {
+        DataSource dataSource = newDataSource("resume_mixed_state_verify");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255), " +
+                        "id_card varchar(128))",
+                "create table user_id_card_encrypt (" +
+                        "id varchar(64) primary key, " +
+                        "id_card_cipher varchar(512), " +
+                        "id_card_hash varchar(128), " +
+                        "id_card_like varchar(255))");
+
+        AlgorithmRegistry algorithmRegistry = algorithmRegistry();
+        String idCardPlain = "320101199001011234";
+        String idCardHash = algorithmRegistry.assisted("sm3").transform(idCardPlain);
+        String idCardCipher = algorithmRegistry.cipher("sm4").encrypt(idCardPlain);
+        String idCardLike = algorithmRegistry.like("normalizedLike").transform(idCardPlain);
+        executeSql(dataSource,
+                "insert into user_account (id, phone, id_card) values (1, '13800138000', '" + idCardHash + "')",
+                "insert into user_id_card_encrypt (id, id_card_cipher, id_card_hash, id_card_like) values ("
+                        + "'ref-1', '" + idCardCipher + "', '" + idCardHash + "', '" + idCardLike + "')");
+
+        Path stateDir = createTempDirectory("migration-state-mixed-verify");
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(MixedStateUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry,
+                properties(),
+                new FileMigrationStateStore(stateDir)
+        );
+
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        assertEquals(1L, report.getMigratedRows());
+        assertEquals(1L, report.getVerifiedRows());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet mainRow = statement.executeQuery(
+                     "select phone_cipher, phone_hash, phone_like, id_card from user_account where id = 1")) {
+            assertTrue(mainRow.next());
+            assertEquals(idCardHash, mainRow.getString("id_card"));
+            assertTrue(mainRow.getString("phone_cipher") != null && !mainRow.getString("phone_cipher").isEmpty());
+            assertTrue(mainRow.getString("phone_hash") != null && !mainRow.getString("phone_hash").isEmpty());
+            assertTrue(mainRow.getString("phone_like") != null && !mainRow.getString("phone_like").isEmpty());
+            try (ResultSet externalCount = statement.executeQuery("select count(1) from user_id_card_encrypt")) {
+                assertTrue(externalCount.next());
+                assertEquals(1L, externalCount.getLong(1));
+            }
         }
     }
 }

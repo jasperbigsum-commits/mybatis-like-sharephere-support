@@ -246,6 +246,45 @@ abstract class MigrationJdbcTestSupport {
         private String idCard;
     }
 
+    @EncryptTable("user_archive")
+    static class ArchiveSameTableUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "archive_phone",
+                storageColumn = "archive_phone_cipher",
+                assistedQueryColumn = "archive_phone_hash",
+                likeQueryColumn = "archive_phone_like"
+        )
+        private String archivePhone;
+    }
+
+    @EncryptTable("user_account")
+    static class MixedStateUserEntity {
+
+        private Long id;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                likeQueryColumn = "phone_like"
+        )
+        private String phone;
+
+        @EncryptField(
+                column = "id_card",
+                storageMode = FieldStorageMode.SEPARATE_TABLE,
+                storageTable = "user_id_card_encrypt",
+                storageColumn = "id_card_cipher",
+                storageIdColumn = "id",
+                assistedQueryColumn = "id_card_hash",
+                likeQueryColumn = "id_card_like"
+        )
+        private String idCard;
+    }
+
     @EncryptTable("user_account")
     static class HashOverwriteUserEntity {
 

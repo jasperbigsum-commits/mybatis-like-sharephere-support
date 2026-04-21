@@ -12,6 +12,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -83,5 +84,69 @@ class MigrationCompensationIdempotencyTest extends MigrationJdbcTestSupport {
                 assertEquals(1L, externalCount.getLong(1));
             }
         }
+    }
+
+    @Test
+    void shouldFailFastWhenSeparateTableSourceWasOverwrittenButPlaintextCannotBeRecovered() throws Exception {
+        DataSource dataSource = newDataSource("irrecoverable_separate_table");
+        String idCardPlain = "320101199001011234";
+        String idCardHash = algorithmRegistry().assisted("sm3").transform(idCardPlain);
+        String idCardCipher = algorithmRegistry().cipher("sm4").encrypt(idCardPlain);
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "id_card varchar(64))",
+                "create table user_id_card_encrypt (" +
+                        "id varchar(64) primary key, " +
+                        "id_card_cipher varchar(512), " +
+                        "id_card_hash varchar(128), " +
+                        "id_card_like varchar(255))",
+                "insert into user_account (id, id_card) values (1, '" + idCardHash + "')",
+                "insert into user_id_card_encrypt (id, id_card_cipher, id_card_hash, id_card_like) values ("
+                        + "'ref-1', '" + idCardCipher + "', '" + idCardHash + "', null)");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SeparateTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-irrecoverable-separate"))
+        );
+
+        MigrationExecutionException exception = assertThrows(MigrationExecutionException.class, task::execute);
+
+        assertEquals(MigrationErrorCode.PLAINTEXT_UNRECOVERABLE, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("id_card"));
+    }
+
+    @Test
+    void shouldFailFastWhenSameTableOverwriteLostPlaintextDuringPartialReplay() throws Exception {
+        DataSource dataSource = newDataSource("irrecoverable_same_table");
+        String phonePlain = "13800138000";
+        String phoneHash = algorithmRegistry().assisted("sm3").transform(phonePlain);
+        String phoneCipher = algorithmRegistry().cipher("sm4").encrypt(phonePlain);
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(128), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, phone, phone_cipher, phone_like) values ("
+                        + "1, '" + phoneHash + "', '" + phoneCipher + "', null)");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(HashOverwriteUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-irrecoverable-same"))
+        );
+
+        MigrationExecutionException exception = assertThrows(MigrationExecutionException.class, task::execute);
+
+        assertEquals(MigrationErrorCode.PLAINTEXT_UNRECOVERABLE, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("phone"));
     }
 }

@@ -11,7 +11,8 @@
 1. 先看 [快速使用指南](quick-start.zh-CN.md)
 2. 再看 [持久层加密指南](persistence-encryption-guide.zh-CN.md)
 3. 需要历史回填时，看本文
-4. 需要设计游标时，继续看 [迁移游标设计指南](migration-cursor-design.zh-CN.md)
+4. 准备进生产窗口时，看 [迁移生产上线操作手册](migration-production-runbook.zh-CN.md)
+5. 需要设计游标时，继续看 [迁移游标设计指南](migration-cursor-design.zh-CN.md)
 
 ## 目标
 
@@ -84,6 +85,144 @@ MigrationReport report = task.execute();
 - 首次上线用小批量，例如 `200` 或 `500`
 - 主表会被覆盖时优先显式配置备份列
 - 大表先生成 DDL、再分批迁移、最后再打开严格校验
+
+## 先校验后迁移：推荐操作规范
+
+这里说的“先校验”有两个不同层次，必须区分清楚：
+
+- 写前校验
+  指真正开始写库前，对规则、DDL、变更范围、备份策略、断点状态做预检查
+- 写后校验
+  指任务执行时的 `verifyAfterWrite(true)`，只在本批数据已经写入后校验目标态是否正确
+
+不要把 `verifyAfterWrite(true)` 误当成“只校验不迁移”开关。它不是 dry-run，也不会阻止写入。
+
+### 推荐的标准流程
+
+1. 先构建任务定义，不要立即执行
+2. 生成 DDL 并让 DBA 审核、执行
+3. 启用风险确认策略，先确认变更范围
+4. 做写前数据检查，确认源字段仍可恢复原始明文
+5. 小批量灰度执行，保留 `verifyAfterWrite(true)`
+6. 观察成功率、错误码、checkpoint 状态后再放大批量
+
+### 写前校验清单
+
+#### 1. 规则与表结构校验
+
+上线前至少确认以下几点：
+
+- 实体规则已经注册，且来源是实体而不是 DTO
+- 游标列稳定、可排序、不会在迁移过程中被覆盖
+- `MigrationSchemaSqlGenerator` 生成的补列 SQL 已执行完成
+- 独立表模式下，外表主键、hash 列、cipher 列、like/masked 列都与规则一致
+
+推荐做法：
+
+- 先调用 `MigrationSchemaSqlGenerator.generateForEntity(...)`
+- 审核输出 SQL 后再执行正式迁移
+- 不要跳过 DDL 审核直接让任务边报错边补结构
+
+#### 2. 变更范围校验
+
+推荐在生产环境强制启用：
+
+- `FileMigrationConfirmationPolicy`
+- 或 `ExpectedRiskConfirmationPolicy`
+
+这样可以在真正写库前，先把会变更的表和列固定下来，避免因为规则漂移导致误扩散。
+
+重点核对：
+
+- 是否只覆盖预期表
+- 是否只包含预期敏感字段
+- 是否误把测试字段、历史废弃字段也纳入迁移
+- 是否有会覆盖源列但未配置备份的字段
+
+#### 3. 明文可恢复性校验
+
+这是最容易误操作的部分。
+
+对于任何会覆盖源列的字段，例如：
+
+- 同表覆盖 `sourceColumn -> hash / like / cipher`
+- 独立表模式下主表源列被改写为引用 hash
+
+都应在迁移前确认：
+
+- 当前源列里仍然是原始明文
+- 或者已经配置了 `backupColumn(...)`
+- 或者已通过 `backup-column-templates` 自动生成备份列
+
+如果某字段曾经执行过半次迁移，已经把源列改写了，但备份列又不存在，那么后续重跑时可能直接触发 `PLAINTEXT_UNRECOVERABLE`。这不是框架“太严格”，而是系统已经无法安全判断当前值到底是明文还是派生值。
+
+现场处理原则：
+
+1. 不要强行重跑
+2. 先从业务备份、历史表、审计日志或人工导出中恢复原始明文
+3. 再补齐备份列或修正外表残缺数据
+4. 确认后重新执行迁移
+
+#### 4. checkpoint 与恢复状态校验
+
+正式执行前请检查：
+
+- 是否存在旧的状态文件
+- 状态文件是否对应当前实体、表、游标和数据源
+- 是否刚修改过迁移规则、字段范围、游标列，但仍沿用旧 checkpoint
+
+规范建议：
+
+- 同一个迁移任务不要并发启动多个实例
+- 不要手动编辑 `lastProcessedCursorValues.*`
+- 如果迁移定义已经变化，应重新生成确认文件并重新评估是否复用旧 checkpoint
+
+### 推荐执行姿势
+
+#### 阶段一：只做预检查，不执行迁移
+
+```java
+MigrationTask task = migrationTaskFactory.createForEntity(
+        UserAccount.class,
+        "id",
+        builder -> builder
+                .batchSize(200)
+                .verifyAfterWrite(true)
+                .backupColumn("phone", "phone_backup")
+);
+
+List<String> ddl = migrationSchemaSqlGenerator.generateForEntity(UserAccount.class);
+```
+
+这一阶段建议完成：
+
+- 看 DDL
+- 看风险确认文件
+- 看备份列是否齐全
+- 看源表里待迁移字段是否仍是原始明文
+
+#### 阶段二：小批量灰度
+
+推荐参数：
+
+- `batchSize=50~200`
+- `verifyAfterWrite=true`
+
+目的：
+
+- 先验证 SQL、索引、锁冲突、外表写入、校验链路是否正常
+- 先观察是否会出现 `CHECKPOINT_LOCKED`、`VERIFICATION_VALUE_MISMATCH`、`PLAINTEXT_UNRECOVERABLE`
+
+#### 阶段三：放量执行
+
+只有在灰度批确认稳定后，再逐步扩大到 `500`、`1000` 或更大批量。
+
+不要做的事：
+
+- 直接拿全量大批次首跑
+- 迁移失败后不分析错误码就删 checkpoint 重跑
+- 源列已被覆盖但没有备份时继续尝试补偿
+- 未做 DDL 审核就让生产任务自动探路
 
 ## Spring 自动注入用法
 
@@ -386,6 +525,19 @@ MigrationTask task = JdbcMigrationTasks.create(
 - 任务直接阻断
 - 操作人员审核文件中列出的变更范围
 
+文件生成规则补充说明：
+
+- `FileMigrationConfirmationPolicy` 是按“单个迁移任务”生成确认文件，不是按整个策略实例生成一个总文件
+- 如果一次批量执行多张表，会生成多份确认文件，通常一张主表对应一份
+- 如果任务来自多数据源工厂，确认文件名会带上 `dataSourceName` 前缀，避免同名任务互相覆盖
+- 如果字段使用独立表模式，仍然只生成当前主表任务的一份文件，但文件中的 `entry.*` 会同时包含主表更新项和外表插入项
+
+可以这样理解：
+
+- 同表模式：一张主表任务，一份确认文件
+- 独立表模式：一张主表任务，一份确认文件，文件内同时列出主表和外表风险项
+- 多表批量迁移：多张主表任务，多份确认文件
+
 确认文件样例：
 
 ```properties
@@ -398,6 +550,9 @@ entry.3=UPDATE|user_account|phone_like
 ```
 
 如果实际迁移范围和确认文件不一致，任务会失败并要求重新确认。
+
+如果你的目标是“在配置里一次维护多张表确认范围，而不是落多个文件”，应优先使用
+`ExpectedRiskConfirmationPolicy.builder()`，而不是 `FileMigrationConfirmationPolicy`。
 
 ### 2. 配置白名单确认
 
@@ -422,6 +577,37 @@ MigrationTask task = JdbcMigrationTasks.create(
 - 把确认范围固化到配置中心
 - 流水线执行前做静态变更范围校验
 - 禁止因实体规则变化而悄悄扩大变更面
+
+默认的 `ExpectedRiskConfirmationPolicy.of(...)` 仍然适合单个迁移任务的精确确认。
+如果一个应用会复用同一个 policy 连续执行多张表，推荐改用 builder：
+
+```java
+ExpectedRiskConfirmationPolicy policy = ExpectedRiskConfirmationPolicy.builder()
+        .expectEntityTable(
+                "com.example.UserAccount",
+                "user_account",
+                "UPDATE|user_account|phone_cipher",
+                "UPDATE|user_account|phone_hash",
+                "UPDATE|user_account|phone_like"
+        )
+        .expectEntityTable(
+                "com.example.UserArchive",
+                "user_archive",
+                "UPDATE|user_archive|archive_phone_cipher",
+                "UPDATE|user_archive|archive_phone_hash",
+                "UPDATE|user_archive|archive_phone_like"
+        )
+        .build();
+```
+
+builder 方式的匹配顺序：
+
+- `dataSource + entity + table`
+- `entity + table`
+- `dataSource + table`
+- `table`
+
+也就是说，既可以做精确任务级配置，也可以做按表的批量配置。
 
 ## 错误类型与错误码
 
@@ -450,7 +636,30 @@ MigrationTask task = JdbcMigrationTasks.create(
 - `CONFIRMATION_SCOPE_MISMATCH`
 - `CURSOR_CHECKPOINT_INVALID`
 - `STATE_STORE_DATA_INVALID`
+- `PLAINTEXT_UNRECOVERABLE`
 - `VERIFICATION_VALUE_MISMATCH`
+
+### `PLAINTEXT_UNRECOVERABLE` 代表什么
+
+这个错误码用于“已经能证明原字段明文丢失，系统不能再安全补偿”的场景。
+
+典型触发条件：
+
+- 字段采用覆盖式迁移，且没有配置 `backupColumn(...)`
+- 上一次迁移已经把主表源列改写成 hash / 引用值 / 其他派生值
+- 但同表派生列或独立表记录只写成功了一部分，当前状态不是完整目标态
+
+为什么此时必须失败：
+
+- 迁移器已经无法从当前行恢复原始明文
+- 如果继续把“已改写值”当成明文再次派生，会生成错误密文或错误 like/hash
+- 这类问题不能靠自动重试修复，必须先人工恢复原始明文或回填备份
+
+推荐处理方式：
+
+1. 从业务备份、审计表或旧备份列恢复原始明文
+2. 校正不完整的同表派生列或独立表记录
+3. 对未来所有会覆盖源列的字段补充 `backupColumn(...)` 或统一 `backup-column-templates`
 
 ## 状态文件与断点恢复
 
@@ -509,6 +718,7 @@ verificationEnabled=true
 - 只在批次提交成功后推进断点
 - 中途失败不会把未提交批次记为已完成
 - 修复问题后直接重跑即可从 `lastProcessedCursorValues` 对应的已提交断点继续
+- 如果发现源列已经被部分迁移改写、且当前任务又无法从备份恢复明文，任务会直接以 `PLAINTEXT_UNRECOVERABLE` 失败，而不是继续错误补偿
 
 ## 推荐操作流程
 
@@ -518,6 +728,20 @@ verificationEnabled=true
 4. 审核通过后设置 `approved=true`，正式执行迁移。
 5. 迁移过程中保留状态文件，不要手动删除断点信息。
 6. 如规则或字段范围发生变化，应重新生成并审核确认文件。
+
+## 生产上线操作手册
+
+真正进入生产变更窗口时，建议直接切换到独立手册执行：
+
+- [迁移生产上线操作手册](migration-production-runbook.zh-CN.md)
+
+该手册包含：
+
+- 研发、DBA、运维三方角色分工
+- 执行前 checklist
+- 首次灰度与放量规则
+- 失败后处置规范
+- 明确禁止的高风险操作
 
 ## 测试覆盖
 

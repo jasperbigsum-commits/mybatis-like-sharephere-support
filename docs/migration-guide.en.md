@@ -11,7 +11,8 @@ Suggested reading order:
 1. [Quick Start](quick-start.en.md)
 2. [Persistence Encryption Guide](persistence-encryption-guide.en.md)
 3. this migration guide
-4. [Migration Cursor Design Guide](migration-cursor-design.en.md) for cursor strategy
+4. [Migration Production Runbook](migration-production-runbook.en.md) before entering a production change window
+5. [Migration Cursor Design Guide](migration-cursor-design.en.md) for cursor strategy
 
 ## Goal
 
@@ -84,6 +85,144 @@ Practical guidance:
 - start with a small batch such as `200` or `500`
 - when the main-table source column will be overwritten, prefer an explicit backup column
 - for very large tables, generate DDL first, migrate in batches, then enable strict verification
+
+## Verify First, Then Migrate: Recommended Operating Procedure
+
+There are two very different kinds of "verification" in a migration rollout, and they must not be confused:
+
+- pre-write verification
+  checks rules, DDL, mutation scope, backup strategy, and checkpoint state before any data is mutated
+- post-write verification
+  the runtime `verifyAfterWrite(true)` option, which validates rows only after the current batch has already been written
+
+Do not treat `verifyAfterWrite(true)` as a dry-run switch. It does not prevent writes.
+
+### Recommended rollout sequence
+
+1. build the migration task definition without executing it yet
+2. generate DDL and have DBAs review and apply it
+3. enable a confirmation policy and confirm the mutation scope
+4. run pre-write data checks to ensure plaintext is still recoverable
+5. execute a small canary batch with `verifyAfterWrite(true)`
+6. scale up only after error codes, checkpoint state, and write results look healthy
+
+### Pre-write checklist
+
+#### 1. Rules and schema readiness
+
+Before production execution, confirm at least the following:
+
+- rules come from registered entities, not DTO projections
+- cursor columns are stable, sortable, and not overwritten by the migration
+- `MigrationSchemaSqlGenerator` output has already been reviewed and applied
+- in separate-table mode, the external table key/hash/cipher/like/masked columns match the rule definition
+
+Recommended practice:
+
+- call `MigrationSchemaSqlGenerator.generateForEntity(...)` first
+- review the emitted SQL before running the real migration
+- do not let production jobs discover missing columns at runtime
+
+#### 2. Mutation-scope verification
+
+In production, prefer enforcing one of these:
+
+- `FileMigrationConfirmationPolicy`
+- `ExpectedRiskConfirmationPolicy`
+
+This locks the intended mutation scope before data is touched and prevents silent drift when rules change.
+
+Review carefully:
+
+- only the intended tables are included
+- only the intended sensitive fields are included
+- test or retired columns are not accidentally pulled into the rollout
+- overwrite-style fields have a backup strategy
+
+#### 3. Plaintext recoverability verification
+
+This is the most common source of operator mistakes.
+
+For any overwrite-style field, such as:
+
+- same-table overwrite of `sourceColumn -> hash / like / cipher`
+- separate-table mode where the main-table source column is rewritten to a hash/reference value
+
+verify before execution that:
+
+- the current source column still contains the original plaintext
+- or `backupColumn(...)` is configured
+- or `backup-column-templates` covers the field automatically
+
+If a previous partial migration already rewrote the source column and no backup exists, reruns can fail with `PLAINTEXT_UNRECOVERABLE`. That is intentional: the framework can no longer safely distinguish original plaintext from an already-derived value.
+
+Operator response:
+
+1. do not force a rerun immediately
+2. restore original plaintext from backups, audit tables, history tables, or another trusted source
+3. repair incomplete same-table or separate-table derived data
+4. rerun only after plaintext recoverability is restored
+
+#### 4. Checkpoint and resume-state verification
+
+Before execution, inspect:
+
+- whether an old state file already exists
+- whether the state file still matches the current entity, table, cursor set, and datasource
+- whether migration rules, included fields, or cursor columns changed since that checkpoint was created
+
+Operational rules:
+
+- never start multiple instances of the same migration task concurrently
+- do not manually edit `lastProcessedCursorValues.*`
+- if the migration definition changed, regenerate confirmation files and reassess whether the old checkpoint is still safe to reuse
+
+### Recommended execution style
+
+#### Phase 1: preflight only, no execution
+
+```java
+MigrationTask task = migrationTaskFactory.createForEntity(
+        UserAccount.class,
+        "id",
+        builder -> builder
+                .batchSize(200)
+                .verifyAfterWrite(true)
+                .backupColumn("phone", "phone_backup")
+);
+
+List<String> ddl = migrationSchemaSqlGenerator.generateForEntity(UserAccount.class);
+```
+
+At this stage, review:
+
+- DDL output
+- confirmation files / expected mutation scope
+- backup coverage for overwrite-style fields
+- whether source columns still contain original plaintext
+
+#### Phase 2: small canary batch
+
+Recommended starting parameters:
+
+- `batchSize=50~200`
+- `verifyAfterWrite=true`
+
+Purpose:
+
+- validate SQL shape, index usage, lock behavior, external-table writes, and verification flow
+- catch `CHECKPOINT_LOCKED`, `VERIFICATION_VALUE_MISMATCH`, or `PLAINTEXT_UNRECOVERABLE` early
+
+#### Phase 3: scale up
+
+Only after the canary batch is stable should you move to `500`, `1000`, or larger batch sizes.
+
+Do not:
+
+- start the first production run with a full-size batch
+- delete checkpoints and rerun without first reading the error code
+- keep retrying when the source column was already overwritten and no backup exists
+- skip DDL review and rely on the production task to discover schema gaps
 
 ## Spring auto-injection
 
@@ -387,6 +526,19 @@ On the first run:
 - execution is blocked
 - operators review the listed mutation scope
 
+Important file-generation rules:
+
+- `FileMigrationConfirmationPolicy` generates confirmation files per migration task, not one aggregate file per policy instance
+- if multiple tables are migrated in one batch, multiple confirmation files will be created, usually one per main-table task
+- when the task comes from a multi-datasource factory, the filename is prefixed with `dataSourceName` to avoid collisions
+- in separate-table mode, the current main-table task still produces only one file, but its `entry.*` lines include both main-table updates and external-table inserts
+
+In practice:
+
+- same-table mode: one main-table task, one confirmation file
+- separate-table mode: one main-table task, one confirmation file, with both main-table and external-table risk entries inside
+- batch migration across multiple tables: multiple main-table tasks, therefore multiple confirmation files
+
 Sample confirmation file:
 
 ```properties
@@ -399,6 +551,9 @@ entry.3=UPDATE|user_account|phone_like
 ```
 
 If the actual mutation scope differs from the file contents, execution fails and operators must review again.
+
+If the goal is "maintain confirmation scope for many tables in one configuration object instead of multiple files",
+prefer `ExpectedRiskConfirmationPolicy.builder()` rather than `FileMigrationConfirmationPolicy`.
 
 ### 2. Configuration-based allowlist confirmation
 
@@ -423,6 +578,37 @@ This is useful when:
 - the expected mutation scope is stored in configuration management
 - pipelines must statically validate the allowed change set
 - rule drift must not silently expand the affected columns
+
+The legacy `ExpectedRiskConfirmationPolicy.of(...)` factory is still the right choice for one exact migration task.
+When one policy instance must cover multiple tables, use the builder instead:
+
+```java
+ExpectedRiskConfirmationPolicy policy = ExpectedRiskConfirmationPolicy.builder()
+        .expectEntityTable(
+                "com.example.UserAccount",
+                "user_account",
+                "UPDATE|user_account|phone_cipher",
+                "UPDATE|user_account|phone_hash",
+                "UPDATE|user_account|phone_like"
+        )
+        .expectEntityTable(
+                "com.example.UserArchive",
+                "user_archive",
+                "UPDATE|user_archive|archive_phone_cipher",
+                "UPDATE|user_archive|archive_phone_hash",
+                "UPDATE|user_archive|archive_phone_like"
+        )
+        .build();
+```
+
+Builder scope resolution order:
+
+- `dataSource + entity + table`
+- `entity + table`
+- `dataSource + table`
+- `table`
+
+This means the same policy can be configured either very precisely per task or more broadly per table.
 
 ## Error types and codes
 
@@ -519,6 +705,20 @@ Resume behavior:
 4. Set `approved=true` and execute the task.
 5. Keep state files intact during migration so resume remains available.
 6. If entity rules or field scope changes, regenerate and review the confirmation file again.
+
+## Production Rollout Runbook
+
+When you enter a real production change window, switch to the dedicated runbook:
+
+- [Migration Production Runbook](migration-production-runbook.en.md)
+
+That document contains:
+
+- role ownership across engineering, DBA, and operations
+- pre-execution checklist
+- canary and scale-up rules
+- failure-handling procedures
+- explicitly forbidden high-risk actions
 
 ## Test coverage
 

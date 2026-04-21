@@ -28,9 +28,9 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 builder -> builder.backupColumn("phone", "phone_backup"));
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(110)",
-                "alter table `user_account` add column `phone_hash` varchar(64)",
-                "alter table `user_account` add column `phone_like` varchar(64)"
+                "alter table `user_account` add column `phone_cipher` varchar(110) after `phone`",
+                "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
+                "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`"
         ), ddl);
     }
 
@@ -80,8 +80,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         assertEquals(Arrays.asList(
                 "alter table `user_id_card_encrypt` modify column `id_card_cipher` varchar(126)",
                 "alter table `user_id_card_encrypt` modify column `id_card_hash` varchar(64)",
-                "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80)",
-                "alter table `user_account` add column `id_card_backup` varchar(80)"
+                "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80) after `id_card_hash`",
+                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`"
         ), ddl);
     }
 
@@ -128,10 +128,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         List<String> separateTableDdl = generator.generateForEntity(MaskedSeparateTableUserEntity.class);
 
         assertEquals(Collections.singletonList(
-                "alter table `user_account` add column `phone_masked` varchar(64)"
+                "alter table `user_account` add column `phone_masked` varchar(64) after `phone_like`"
         ), sameTableDdl);
         assertEquals(Collections.singletonList(
-                "alter table `user_id_card_encrypt` add column `id_card_masked` varchar(80)"
+                "alter table `user_id_card_encrypt` add column `id_card_masked` varchar(80) after `id_card_like`"
         ), separateTableDdl);
     }
 
@@ -149,9 +149,9 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         Map<String, List<String>> ddl = generator.generateAllRegisteredTablesGrouped();
 
         assertEquals(Collections.singletonMap("user_account", Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(110)",
-                "alter table `user_account` add column `phone_hash` varchar(64)",
-                "alter table `user_account` add column `phone_like` varchar(64)"
+                "alter table `user_account` add column `phone_cipher` varchar(110) after `phone`",
+                "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
+                "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`"
         )), ddl);
     }
 

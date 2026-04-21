@@ -32,6 +32,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
     private final AlgorithmRegistry algorithmRegistry;
     private final DatabaseEncryptionProperties properties;
     private final MigrationValueResolver valueResolver;
+    private final MigrationRecordStateSupport recordStateSupport;
 
     /**
      * jdbc记录迁移验证器
@@ -42,12 +43,17 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         this.algorithmRegistry = algorithmRegistry;
         this.properties = properties;
         this.valueResolver = new MigrationValueResolver(algorithmRegistry);
+        this.recordStateSupport = new MigrationRecordStateSupport(properties);
     }
 
     @Override
     public void verify(Connection connection, EntityMigrationPlan plan, MigrationRecord record) throws SQLException {
         Map<String, Object> mainRow = loadMainRow(connection, plan, record.getCursor());
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
+            if (recordStateSupport.isAlreadyMigratedWithoutPlaintext(connection, columnPlan, mainRow)) {
+                continue;
+            }
+            ensurePlaintextRecoverable(connection, plan, columnPlan, mainRow);
             Object plainValue = record.getColumnValue(columnPlan.getSourceColumn());
             MigrationValueResolver.DerivedFieldValues expected = valueResolver.resolve(columnPlan, plainValue);
             if (expected.isEmpty()) {
@@ -63,7 +69,12 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                             "Missing separate-table reference id for field: " + columnPlan.getProperty());
                 }
                 assertMatches(columnPlan.getProperty(), "referenceHash", expected.getHashValue(), referenceId);
-                Map<String, Object> externalRow = loadExternalRow(connection, columnPlan, referenceId);
+                Map<String, Object> externalRow =
+                        recordStateSupport.loadSeparateRow(connection, columnPlan, String.valueOf(referenceId));
+                if (externalRow == null) {
+                    throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_EXTERNAL_ROW_MISSING,
+                            "Missing separate-table row for reference id: " + referenceId);
+                }
                 assertCipherMatches(columnPlan, plainValue,
                         externalRow.get(columnPlan.getStorageColumn()));
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
@@ -160,44 +171,6 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         }
     }
 
-    private Map<String, Object> loadExternalRow(Connection connection, EntityMigrationColumnPlan columnPlan, Object referenceId)
-            throws SQLException {
-        StringBuilder sql = new StringBuilder("select ").append(quote(columnPlan.getStorageColumn()));
-        if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-            sql.append(", ").append(quote(columnPlan.getAssistedQueryColumn()));
-        }
-        if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-            sql.append(", ").append(quote(columnPlan.getLikeQueryColumn()));
-        }
-        if (columnPlan.hasDistinctMaskedColumn()) {
-            sql.append(", ").append(quote(columnPlan.getMaskedColumn()));
-        }
-        sql.append(" from ").append(quote(columnPlan.getStorageTable()))
-                .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
-        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            MigrationJdbcParameterBinder.bind(statement, 1, referenceId);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                if (!resultSet.next()) {
-                    throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_EXTERNAL_ROW_MISSING,
-                            "Missing separate-table row for reference id: " + referenceId);
-                }
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put(columnPlan.getStorageColumn(), resultSet.getObject(columnPlan.getStorageColumn()));
-                if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-                    row.put(columnPlan.getAssistedQueryColumn(),
-                            resultSet.getObject(columnPlan.getAssistedQueryColumn()));
-                }
-                if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                    row.put(columnPlan.getLikeQueryColumn(), resultSet.getObject(columnPlan.getLikeQueryColumn()));
-                }
-                if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
-                    row.put(columnPlan.getMaskedColumn(), resultSet.getObject(columnPlan.getMaskedColumn()));
-                }
-                return row;
-            }
-        }
-    }
-
     private void assertMatches(String property, String aspect, Object expected, Object actual) {
         String expectedText = expected == null ? null : String.valueOf(expected);
         String actualText = actual == null ? null : String.valueOf(actual);
@@ -205,6 +178,17 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             throw new MigrationVerificationException(MigrationErrorCode.VERIFICATION_VALUE_MISMATCH,
                     "Verification failed for property " + property + " aspect " + aspect);
         }
+    }
+
+    private void ensurePlaintextRecoverable(Connection connection,
+                                            EntityMigrationPlan plan,
+                                            EntityMigrationColumnPlan columnPlan,
+                                            Map<String, Object> currentRow) throws SQLException {
+        if (!recordStateSupport.isPlaintextIrrecoverable(connection, columnPlan, currentRow)) {
+            return;
+        }
+        throw new MigrationVerificationException(MigrationErrorCode.PLAINTEXT_UNRECOVERABLE,
+                recordStateSupport.buildPlaintextIrrecoverableMessage(plan.getTableName(), columnPlan));
     }
 
     private void appendCursorEqualityPredicate(StringBuilder sql, java.util.List<String> cursorColumns) {

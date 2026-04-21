@@ -53,6 +53,10 @@ public enum MigrationErrorCode {
      */
     EXECUTION_FAILED,
     /**
+     * 原字段明文已不可恢复，无法继续补偿迁移
+     */
+    PLAINTEXT_UNRECOVERABLE,
+    /**
      * 需确认信息
      */
     CONFIRMATION_REQUIRED,

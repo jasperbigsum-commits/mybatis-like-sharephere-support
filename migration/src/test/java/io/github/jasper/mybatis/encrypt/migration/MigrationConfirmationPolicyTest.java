@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -154,5 +156,74 @@ class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
 
         assertEquals(MigrationErrorCode.CONFIRMATION_SCOPE_MISMATCH, exception.getErrorCode());
         assertTrue(exception.getMessage().contains("does not match actual mutation scope"));
+    }
+
+    @Test
+    void shouldSupportOneExpectedRiskPolicyConfiguredForMultipleTables() throws Exception {
+        DataSource dataSource = newDataSource("expected_scope_multi_table");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "create table user_archive (" +
+                        "id bigint primary key, " +
+                        "archive_phone varchar(64), " +
+                        "archive_phone_cipher varchar(512), " +
+                        "archive_phone_hash varchar(128), " +
+                        "archive_phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')",
+                "insert into user_archive (id, archive_phone) values (1, '13900139000')");
+
+        EntityMigrationPlanFactory planFactory = new EntityMigrationPlanFactory(metadataRegistry());
+        EntityMigrationPlan accountPlan = planFactory
+                .create(EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build());
+        EntityMigrationPlan archivePlan = planFactory
+                .create(EntityMigrationDefinition.builder(ArchiveSameTableUserEntity.class, "id").build());
+        MigrationRiskManifestFactory manifestFactory = new MigrationRiskManifestFactory();
+        MigrationRiskManifest accountManifest = manifestFactory.create(accountPlan);
+        MigrationRiskManifest archiveManifest = manifestFactory.create(archivePlan);
+
+        ExpectedRiskConfirmationPolicy policy = ExpectedRiskConfirmationPolicy.builder()
+                .expectEntityTable(accountPlan.getEntityName(), accountPlan.getTableName(),
+                        toEntryTokens(accountManifest))
+                .expectEntityTable(archivePlan.getEntityName(), archivePlan.getTableName(),
+                        toEntryTokens(archiveManifest))
+                .build();
+
+        MigrationReport accountReport = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-expected-scope-account")),
+                policy
+        ).execute();
+
+        MigrationReport archiveReport = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(ArchiveSameTableUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-expected-scope-archive")),
+                policy
+        ).execute();
+
+        assertEquals(MigrationStatus.COMPLETED, accountReport.getStatus());
+        assertEquals(1L, accountReport.getMigratedRows());
+        assertEquals(MigrationStatus.COMPLETED, archiveReport.getStatus());
+        assertEquals(1L, archiveReport.getMigratedRows());
+    }
+
+    private String[] toEntryTokens(MigrationRiskManifest manifest) {
+        List<String> tokens = new ArrayList<String>();
+        for (MigrationRiskEntry entry : manifest.getEntries()) {
+            tokens.add(entry.asToken());
+        }
+        return tokens.toArray(new String[0]);
     }
 }

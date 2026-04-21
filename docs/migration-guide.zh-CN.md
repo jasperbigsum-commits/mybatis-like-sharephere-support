@@ -636,6 +636,7 @@ builder 方式的匹配顺序：
 - `CONFIRMATION_SCOPE_MISMATCH`
 - `CURSOR_CHECKPOINT_INVALID`
 - `STATE_STORE_DATA_INVALID`
+- `STATE_INCOMPATIBLE`
 - `PLAINTEXT_UNRECOVERABLE`
 - `VERIFICATION_VALUE_MISMATCH`
 
@@ -661,10 +662,29 @@ builder 方式的匹配顺序：
 2. 校正不完整的同表派生列或独立表记录
 3. 对未来所有会覆盖源列的字段补充 `backupColumn(...)` 或统一 `backup-column-templates`
 
+### `STATE_INCOMPATIBLE` 代表什么
+
+这个错误码用于“已经存在 checkpoint，但它不属于当前迁移任务”的场景。迁移器会在写库和保存新状态之前失败，旧状态文件不会被覆盖。
+
+典型触发条件：
+
+- 修改了实体/表、字段范围、游标列、备份列、`verifyAfterWrite` 等会影响计划签名的配置
+- 更换了数据源、连接 URL、数据库用户，导致数据源指纹不同
+- 同一目录里混用了实体入口和表名入口，产生了不同任务标识
+
+处理方式：
+
+1. 如果目标是继续上一次迁移，恢复与上次完全一致的配置后重跑
+2. 如果目标是启动一个新的迁移任务，先归档或移动旧 checkpoint，再执行新任务
+3. 不要手工编辑 `planSignature`、`dataSourceFingerprint` 或游标值来绕过校验
+
 ## 状态文件与断点恢复
 
 状态文件记录：
 
+- `dataSourceName`
+- `dataSourceFingerprint`
+- `planSignature`
 - `cursorColumns.*`
 - `cursorJavaTypes.*`
 - `status`
@@ -718,6 +738,7 @@ verificationEnabled=true
 - 只在批次提交成功后推进断点
 - 中途失败不会把未提交批次记为已完成
 - 修复问题后直接重跑即可从 `lastProcessedCursorValues` 对应的已提交断点继续
+- 已存在 checkpoint 但 `planSignature` 或 `dataSourceFingerprint` 与当前任务不一致时，会以 `STATE_INCOMPATIBLE` 失败且不会覆盖旧状态文件
 - 如果发现源列已经被部分迁移改写、且当前任务又无法从备份恢复明文，任务会直接以 `PLAINTEXT_UNRECOVERABLE` 失败，而不是继续错误补偿
 
 ### 中断后如何继续迁移

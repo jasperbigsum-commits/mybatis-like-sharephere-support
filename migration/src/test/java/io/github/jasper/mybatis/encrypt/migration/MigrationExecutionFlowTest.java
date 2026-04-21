@@ -16,6 +16,8 @@ import java.util.Properties;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -444,7 +446,7 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
     }
 
     @Test
-    void shouldIgnoreStaleCompletedCheckpointWhenSignatureOrDatasourceFingerprintChanges() throws Exception {
+    void shouldRejectIncompatibleCheckpointWithoutOverwritingState() throws Exception {
         DataSource dataSource = newDataSource("stale_checkpoint");
         executeSql(dataSource,
                 "create table user_account (" +
@@ -485,19 +487,22 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
                 properties(),
                 stateStore
         );
-        MigrationReport report = task.execute();
+        MigrationExecutionException exception = assertThrows(MigrationExecutionException.class, task::execute);
 
-        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
-        assertEquals(2L, report.getMigratedRows());
-        assertEquals(2L, report.getVerifiedRows());
+        assertEquals(MigrationErrorCode.STATE_INCOMPATIBLE, exception.getErrorCode());
+        Properties persistedState = loadSinglePropertiesFile(stateDir);
+        assertEquals("legacy-db", persistedState.getProperty("dataSourceFingerprint"));
+        assertEquals("legacy-plan", persistedState.getProperty("planSignature"));
+        assertEquals("COMPLETED", persistedState.getProperty("status"));
+        assertEquals("99", persistedState.getProperty("scannedRows"));
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(
+            ResultSet resultSet = statement.executeQuery(
                      "select phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
             assertTrue(resultSet.next());
-            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
-            assertTrue(resultSet.getString("phone_hash") != null && !resultSet.getString("phone_hash").isEmpty());
-            assertTrue(resultSet.getString("phone_like") != null && !resultSet.getString("phone_like").isEmpty());
+            assertNull(resultSet.getString("phone_cipher"));
+            assertNull(resultSet.getString("phone_hash"));
+            assertNull(resultSet.getString("phone_like"));
         }
     }
 

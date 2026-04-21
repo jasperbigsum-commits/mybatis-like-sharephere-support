@@ -77,6 +77,10 @@ public enum MigrationErrorCode {
      */
     STATE_STORE_DATA_INVALID,
     /**
+     * 已存在的 checkpoint 与当前迁移任务不兼容
+     */
+    STATE_INCOMPATIBLE,
+    /**
      * 验证环节引用信息缺失
      */
     VERIFICATION_REFERENCE_MISSING,

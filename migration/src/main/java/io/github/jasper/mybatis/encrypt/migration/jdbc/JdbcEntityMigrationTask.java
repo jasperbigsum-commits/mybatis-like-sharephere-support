@@ -108,10 +108,10 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             confirmationPolicy.confirm(plan, riskManifestFactory.create(plan));
             MigrationState state = stateStore.load(plan).orElse(null);
             ExecutionSnapshot executionSnapshot = readExecutionSnapshot();
-            boolean shouldResetProgress = false;
-            if (state == null || !isStateCompatible(state, executionSnapshot)) {
+            if (state == null) {
                 state = newState();
-                shouldResetProgress = true;
+            } else {
+                assertStateCompatible(state, executionSnapshot);
             }
             applyExecutionSnapshot(state, executionSnapshot);
             if (state.getTotalRows() == 0L) {
@@ -125,7 +125,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             if (completedForCurrentRange && isCompletedStateStillValid()) {
                 return state.toReport();
             }
-            if (shouldResetProgress || completedForCurrentRange) {
+            if (completedForCurrentRange) {
                 resetProgress(state);
             }
             state.setStatus(MigrationStatus.RUNNING);
@@ -234,9 +234,23 @@ public class JdbcEntityMigrationTask implements MigrationTask {
         state.setRangeEndValues(MigrationCursorCodec.stringify(executionSnapshot.range().getRangeEndCursor()));
     }
 
-    private boolean isStateCompatible(MigrationState state, ExecutionSnapshot executionSnapshot) {
-        return Objects.equals(state.getPlanSignature(), executionSnapshot.planSignature())
-                && Objects.equals(state.getDataSourceFingerprint(), executionSnapshot.dataSourceFingerprint());
+    private void assertStateCompatible(MigrationState state, ExecutionSnapshot executionSnapshot) {
+        if (Objects.equals(state.getPlanSignature(), executionSnapshot.planSignature())
+                && Objects.equals(state.getDataSourceFingerprint(), executionSnapshot.dataSourceFingerprint())) {
+            return;
+        }
+        throw new MigrationExecutionException(MigrationErrorCode.STATE_INCOMPATIBLE,
+                "Migration checkpoint is incompatible with the current task. "
+                        + "The existing state was not overwritten. "
+                        + "Keep the state file to resume the original task, or move/delete it only when restarting "
+                        + "from scratch is intentional. "
+                        + "entity=" + plan.getEntityName()
+                        + ", table=" + plan.getTableName()
+                        + ", storedPlanSignature=" + state.getPlanSignature()
+                        + ", currentPlanSignature=" + executionSnapshot.planSignature()
+                        + ", storedDataSourceFingerprint=" + state.getDataSourceFingerprint()
+                        + ", currentDataSourceFingerprint=" + executionSnapshot.dataSourceFingerprint(),
+                null);
     }
 
     private String dataSourceFingerprint(Connection connection) throws SQLException {

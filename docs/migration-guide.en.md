@@ -637,12 +637,33 @@ All of them extend `MigrationException`, and callers can read `getErrorCode()` f
 - `CONFIRMATION_SCOPE_MISMATCH`
 - `CURSOR_CHECKPOINT_INVALID`
 - `STATE_STORE_DATA_INVALID`
+- `STATE_INCOMPATIBLE`
+- `PLAINTEXT_UNRECOVERABLE`
 - `VERIFICATION_VALUE_MISMATCH`
+
+### What `STATE_INCOMPATIBLE` means
+
+This code means a checkpoint already exists, but it does not belong to the current migration task. The migrator fails before writing database rows or saving new state, so the existing state file is not overwritten.
+
+Typical causes:
+
+- entity/table, field scope, cursor columns, backup columns, or `verifyAfterWrite` changed and therefore the plan signature changed
+- datasource, JDBC URL, or database user changed and therefore the datasource fingerprint changed
+- the same state directory was reused across entity-driven and table-name-driven task entries that identify different tasks
+
+Recommended action:
+
+1. to resume the previous migration, restore the exact same configuration and rerun
+2. to start a new migration intentionally, archive or move the old checkpoint first
+3. do not manually edit `planSignature`, `dataSourceFingerprint`, or cursor values to bypass the check
 
 ## State files and resume behavior
 
 State files store:
 
+- `dataSourceName`
+- `dataSourceFingerprint`
+- `planSignature`
 - `cursorColumns.*`
 - `cursorJavaTypes.*`
 - `status`
@@ -696,6 +717,7 @@ Resume behavior:
 - checkpoints advance only after a batch commits successfully
 - failed in-flight batches are not marked as completed
 - rerunning the same task resumes from the committed `lastProcessedCursorValues` checkpoint
+- if an existing checkpoint has a different `planSignature` or `dataSourceFingerprint`, execution fails with `STATE_INCOMPATIBLE` and does not overwrite the old state file
 
 ### How to resume after interruption
 

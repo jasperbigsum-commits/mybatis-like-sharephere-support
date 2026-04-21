@@ -134,6 +134,8 @@
 
 一键批量迁移同样适用这个规则。`executeAllRegisteredTables()` 会按表分别保存状态，二次执行时已完成且目标态完整的表不会重复改写；目标态不完整的表会按幂等规则补偿。
 
+如果已有 checkpoint 的 `planSignature` 或 `dataSourceFingerprint` 与当前任务不一致，任务会以 `STATE_INCOMPATIBLE` 失败，并且不会覆盖旧状态文件。此时不要反复重跑，也不要手工改状态文件；先确认是否变更了字段范围、游标列、备份列、数据源或执行入口。
+
 ### 遇到 `CHECKPOINT_LOCKED`
 
 说明：
@@ -145,6 +147,19 @@
 1. 先确认是否确实已有实例在跑
 2. 保留当前状态文件，不做人工修改
 3. 关闭重复实例，只保留一个执行入口
+
+### 遇到 `STATE_INCOMPATIBLE`
+
+说明：
+
+- 当前 checkpoint 不属于本次迁移任务，继续使用可能导致错表、错库或错字段断点
+
+处理：
+
+1. 保留现有 checkpoint，不要删除或覆盖
+2. 比对本次和上次的实体/表、字段范围、游标列、备份列、`verifyAfterWrite`、数据源名称和 JDBC 连接信息
+3. 如果要继续旧任务，恢复旧配置后重跑
+4. 如果要从头启动新任务，先归档或移动旧 checkpoint，再执行新任务
 
 ### 遇到 `VERIFICATION_VALUE_MISMATCH`
 

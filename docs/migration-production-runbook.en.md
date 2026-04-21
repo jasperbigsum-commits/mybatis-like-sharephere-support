@@ -134,6 +134,8 @@ If the failure happened inside a transaction, the uncommitted batch rolls back a
 
 The same applies to one-click batch migration. `executeAllRegisteredTables()` keeps state per table; on a second run, completed tables whose target state is still valid are not rewritten, while incomplete tables are compensated idempotently.
 
+If an existing checkpoint has a different `planSignature` or `dataSourceFingerprint`, the task fails with `STATE_INCOMPATIBLE` and does not overwrite the old state file. Do not keep rerunning or manually edit the state file. First check whether field scope, cursor columns, backup columns, datasource, or task entry point changed.
+
 ### `CHECKPOINT_LOCKED`
 
 Meaning:
@@ -145,6 +147,19 @@ Action:
 1. confirm whether another instance is active
 2. keep the current state files untouched
 3. stop duplicate instances and keep exactly one execution path
+
+### `STATE_INCOMPATIBLE`
+
+Meaning:
+
+- the current checkpoint does not belong to this migration task, so using it could resume against the wrong table, datasource, or field scope
+
+Action:
+
+1. keep the existing checkpoint intact
+2. compare entity/table, field scope, cursor columns, backup columns, `verifyAfterWrite`, datasource name, and JDBC connection information against the previous run
+3. to resume the old task, restore the old configuration and rerun
+4. to intentionally start a new task, archive or move the old checkpoint first
 
 ### `VERIFICATION_VALUE_MISMATCH`
 

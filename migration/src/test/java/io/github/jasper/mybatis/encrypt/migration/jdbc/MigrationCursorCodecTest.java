@@ -28,7 +28,7 @@ class MigrationCursorCodecTest {
                 Arrays.asList(String.class.getName(), Long.class.getName()));
 
         assertEquals("tenantA", cursor.getValue("tenant_id"));
-        assertEquals(Long.valueOf(2L), cursor.getValue("record_no"));
+        assertEquals(2L, cursor.getValue("record_no"));
         assertEquals(Arrays.asList("tenantA", "2"), MigrationCursorCodec.stringify(cursor));
         assertEquals("{tenant_id=tenantA, record_no=2}", MigrationCursorCodec.display(cursor));
     }

@@ -132,7 +132,9 @@ Resume requires:
 If committed batches already exist, the next run continues after the committed checkpoint.
 If the failure happened inside a transaction, the uncommitted batch rolls back and is processed again.
 
-The same applies to one-click batch migration. `executeAllRegisteredTables()` keeps state per table; on a second run, completed tables whose target state is still valid are not rewritten, while incomplete tables are compensated idempotently.
+The same applies to one-click batch migration. `executeAllRegisteredTables()` keeps state per table; on a second run, a `COMPLETED` table is returned immediately when the stored checkpoint and the current table snapshot still have the same row count, range start, range end, and last processed cursor. This repeat path does not read every row again. If the count or cursor range changed, the task rebuilds progress and reruns safely from the beginning instead of trusting the old cursor.
+
+Important boundary: the repeat fast path is a snapshot-level check, not a row-by-row audit. If someone manually rolls back derived columns while keeping the same row count and cursor range, rerunning the one-click migration will trust the completed checkpoint. Use sampling SQL or an explicit recovery run after archiving/moving the checkpoint when you intentionally need to repair such in-place damage.
 
 If an existing checkpoint has a different `planSignature` or `dataSourceFingerprint`, the task fails with `STATE_INCOMPATIBLE` and does not overwrite the old state file. Do not keep rerunning or manually edit the state file. First check whether field scope, cursor columns, backup columns, datasource, or task entry point changed.
 

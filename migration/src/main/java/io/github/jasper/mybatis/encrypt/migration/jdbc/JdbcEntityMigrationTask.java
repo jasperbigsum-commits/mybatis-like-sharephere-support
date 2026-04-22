@@ -115,6 +115,12 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                 // 不能偷偷清空旧进度重新跑，否则会把原本可恢复的断点覆盖掉。
                 assertStateCompatible(state, executionSnapshot);
             }
+            boolean completedState = state.getStatus() == MigrationStatus.COMPLETED;
+            if (completedState && isCompletedSnapshotUnchanged(state, executionSnapshot)) {
+                // A completed checkpoint is reusable when the table count and cursor range are unchanged.
+                // This avoids a row-by-row validation scan on repeated one-click migration runs.
+                return state.toReport();
+            }
             applyExecutionSnapshot(state, executionSnapshot);
             if (state.getTotalRows() == 0L) {
                 state.setStatus(MigrationStatus.COMPLETED);
@@ -122,8 +128,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                 stateStore.save(plan, state);
                 return state.toReport();
             }
-            boolean completedForCurrentRange = state.getStatus() == MigrationStatus.COMPLETED
-                    && isCompletedForCurrentRange(state);
+            boolean completedForCurrentRange = false;
             if (completedForCurrentRange && isCompletedStateStillValid()) {
                 // 当前 range 已完成且库内数据仍满足“已迁移完成”状态时，直接复用历史 report，
                 // 不再重新写库，避免重复加密和重复备份。
@@ -132,6 +137,11 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             if (completedForCurrentRange) {
                 // checkpoint 虽然标记为 COMPLETED，但数据库内容已经被回滚或人工改坏，
                 // 这里要重建进度而不是继续沿用旧 cursor，否则补偿扫描会直接跳过整段数据。
+                resetProgress(state);
+            }
+            if (completedState) {
+                // A changed completed snapshot is replayed from the beginning. Continuing from the old cursor can
+                // miss backfilled rows whose cursor is before the previously completed range end.
                 resetProgress(state);
             }
             state.setStatus(MigrationStatus.RUNNING);
@@ -297,6 +307,19 @@ public class JdbcEntityMigrationTask implements MigrationTask {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private boolean isCompletedSnapshotUnchanged(MigrationState state, ExecutionSnapshot executionSnapshot) {
+        MigrationRange range = executionSnapshot.range();
+        List<String> currentStart = MigrationCursorCodec.stringify(range.getRangeStartCursor());
+        List<String> currentEnd = MigrationCursorCodec.stringify(range.getRangeEndCursor());
+        List<String> lastProcessed = state.getLastProcessedCursorValues();
+        // Compare the persisted checkpoint before applyExecutionSnapshot mutates it. Matching count and boundaries
+        // is the cheap completion proof used by repeated one-click migrations.
+        return state.getTotalRows() == range.getTotalRows()
+                && Objects.equals(state.getRangeStartValues(), currentStart)
+                && Objects.equals(state.getRangeEndValues(), currentEnd)
+                && Objects.equals(lastProcessed == null ? Collections.<String>emptyList() : lastProcessed, currentEnd);
     }
 
     private boolean isCompletedForCurrentRange(MigrationState state) {

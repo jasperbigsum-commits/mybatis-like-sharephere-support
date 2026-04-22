@@ -32,7 +32,7 @@ class FileMigrationStateStoreTest extends MigrationJdbcTestSupport {
                 Collections.singletonList("id"),
                 100,
                 true,
-                Collections.<EntityMigrationColumnPlan>emptyList());
+                Collections.emptyList());
 
         MigrationState state = new MigrationState();
         state.setEntityName(plan.getEntityName());
@@ -78,7 +78,7 @@ class FileMigrationStateStoreTest extends MigrationJdbcTestSupport {
                 Collections.singletonList("id"),
                 100,
                 true,
-                Collections.<EntityMigrationColumnPlan>emptyList());
+                Collections.emptyList());
 
         Properties malformed = new Properties();
         malformed.setProperty("entityName", plan.getEntityName());
@@ -105,7 +105,7 @@ class FileMigrationStateStoreTest extends MigrationJdbcTestSupport {
                 Collections.singletonList("id"),
                 100,
                 true,
-                Collections.<EntityMigrationColumnPlan>emptyList());
+                Collections.emptyList());
 
         MigrationState state = new MigrationState();
         state.setDataSourceName("archiveDs");
@@ -131,7 +131,7 @@ class FileMigrationStateStoreTest extends MigrationJdbcTestSupport {
                 Collections.singletonList("id"),
                 100,
                 true,
-                Collections.<EntityMigrationColumnPlan>emptyList());
+                Collections.emptyList());
 
         try (MigrationCheckpointLock ignored = stateStore.acquireCheckpointLock(plan)) {
             MigrationCheckpointLockException exception = assertThrows(MigrationCheckpointLockException.class,

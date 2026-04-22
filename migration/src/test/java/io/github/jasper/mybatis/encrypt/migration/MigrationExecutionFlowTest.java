@@ -3,6 +3,11 @@ package io.github.jasper.mybatis.encrypt.migration;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcEntityMigrationTask;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordReader;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordVerifier;
+import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordWriter;
+import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -11,8 +16,11 @@ import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -510,7 +518,55 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
     }
 
     @Test
-    void shouldRebuildCompletedStateWhenDatabaseDataIsRolledBackToPlaintext() throws Exception {
+    void shouldReuseCompletedCheckpointWithoutReadingBatchesAgainWhenSnapshotIsUnchanged() throws Exception {
+        DataSource dataSource = newDataSource("completed_state_fast_reuse");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')");
+
+        Path stateDir = createTempDirectory("migration-state-completed-fast-reuse");
+        FileMigrationStateStore stateStore = new FileMigrationStateStore(stateDir);
+        DatabaseEncryptionProperties properties = properties();
+        EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(
+                properties, new AnnotationEncryptMetadataLoader());
+        EntityMigrationPlan plan = new EntityMigrationPlanFactory(metadataRegistry, properties)
+                .create(EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build());
+
+        MigrationTask firstTask = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SameTableUserEntity.class, "id").build(),
+                metadataRegistry,
+                algorithmRegistry(),
+                properties,
+                stateStore
+        );
+        assertEquals(MigrationStatus.COMPLETED, firstTask.execute().getStatus());
+
+        CountingMigrationRecordReader countingReader = new CountingMigrationRecordReader(properties);
+        MigrationTask rerunTask = new JdbcEntityMigrationTask(
+                dataSource,
+                plan,
+                countingReader,
+                countingReader,
+                new JdbcMigrationRecordWriter(properties, algorithmRegistry(), new SnowflakeReferenceIdGenerator()),
+                new JdbcMigrationRecordVerifier(properties, algorithmRegistry()),
+                stateStore,
+                AllowAllMigrationConfirmationPolicy.INSTANCE
+        );
+
+        MigrationReport rerunReport = rerunTask.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, rerunReport.getStatus());
+        assertEquals(0, countingReader.batchReadCount());
+    }
+
+    @Test
+    void shouldTrustCompletedCheckpointWhenRollbackKeepsSameCountAndCursorRange() throws Exception {
         DataSource dataSource = newDataSource("completed_state_plaintext_rollback");
         executeSql(dataSource,
                 "create table user_account (" +
@@ -556,9 +612,30 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
                      "select phone, phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
             assertTrue(resultSet.next());
             assertEquals("13800138000", resultSet.getString("phone"));
-            assertTrue(resultSet.getString("phone_cipher") != null && !resultSet.getString("phone_cipher").isEmpty());
-            assertTrue(resultSet.getString("phone_hash") != null && !resultSet.getString("phone_hash").isEmpty());
-            assertTrue(resultSet.getString("phone_like") != null && !resultSet.getString("phone_like").isEmpty());
+            assertNull(resultSet.getString("phone_cipher"));
+            assertNull(resultSet.getString("phone_hash"));
+            assertNull(resultSet.getString("phone_like"));
+        }
+    }
+
+    private static final class CountingMigrationRecordReader extends JdbcMigrationRecordReader {
+
+        private final AtomicInteger batchReadCount = new AtomicInteger();
+
+        private CountingMigrationRecordReader(DatabaseEncryptionProperties properties) {
+            super(properties);
+        }
+
+        @Override
+        public List<MigrationRecord> readBatch(Connection connection,
+                                               EntityMigrationPlan plan,
+                                               MigrationCursor lastProcessedCursor) throws SQLException {
+            batchReadCount.incrementAndGet();
+            return super.readBatch(connection, plan, lastProcessedCursor);
+        }
+
+        private int batchReadCount() {
+            return batchReadCount.get();
         }
     }
 }

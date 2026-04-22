@@ -754,8 +754,9 @@ create one migration task per registered physical table. Each table keeps its ow
 
 Expected behavior on a second run:
 
-- if the state is `COMPLETED` and the database target state is still complete, the task returns the completed report without rewriting completed fields
-- if the state is `COMPLETED` but database data was rolled back or derived columns are missing, progress is rebuilt and the task compensates idempotently
+- if the state is `COMPLETED` and the current row count, range start, range end, and last processed cursor still match the checkpoint, the task returns the completed report without rewriting completed fields or scanning every row again
+- if the state is `COMPLETED` but the row count or cursor range changed, progress is rebuilt and the task compensates idempotently
+- if database data was modified in place while keeping the same row count and cursor range, the second run trusts the `COMPLETED` checkpoint; archive or move the old checkpoint first when you intentionally need a repair rerun
 - if a source column was already overwritten and target data is incomplete, but no backup column can recover plaintext, execution fails with `PLAINTEXT_UNRECOVERABLE`
 
 For random-IV ciphertext, the migration checks whether the stored ciphertext decrypts back to the original plaintext. It does not require raw ciphertext strings to be equal across reruns.

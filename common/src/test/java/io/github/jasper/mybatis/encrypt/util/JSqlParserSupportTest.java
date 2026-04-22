@@ -5,8 +5,7 @@ import net.sf.jsqlparser.statement.select.Select;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 @Tag("unit")
 @Tag("parser")
@@ -18,7 +17,7 @@ class JSqlParserSupportTest {
 
         Statement statement = JSqlParserSupport.parseStatement(sql);
 
-        assertTrue(statement instanceof Select);
+        assertInstanceOf(Select.class, statement);
     }
 
     @Test

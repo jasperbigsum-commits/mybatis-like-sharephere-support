@@ -132,7 +132,9 @@
 如果任务已经有已提交批次，下一次会从已提交 checkpoint 后继续。
 如果失败发生在事务内，未提交批次会回滚，下次会重新处理。
 
-一键批量迁移同样适用这个规则。`executeAllRegisteredTables()` 会按表分别保存状态，二次执行时已完成且目标态完整的表不会重复改写；目标态不完整的表会按幂等规则补偿。
+一键批量迁移同样适用这个规则。`executeAllRegisteredTables()` 会按表分别保存状态；二次执行时，如果某张表的 checkpoint 为 `COMPLETED`，并且当前数据库中的记录数、rangeStart、rangeEnd、lastProcessedCursor 与 checkpoint 一致，会直接返回已完成报告，不会再次逐行读取全表。若记录数或游标范围发生变化，任务会重建进度并从头按幂等规则重跑，避免沿用旧游标漏掉回填数据。
+
+注意边界：这个二次执行快路径是“表快照级”判断，不是逐行审计。如果有人手工把派生列回滚为空，但记录数和游标范围没有变化，再次执行一键迁移会信任 `COMPLETED` checkpoint。遇到这类原地破坏场景，应先用抽样 SQL 或专门校验流程确认，再归档/移动旧 checkpoint 后执行修复型重跑。
 
 如果已有 checkpoint 的 `planSignature` 或 `dataSourceFingerprint` 与当前任务不一致，任务会以 `STATE_INCOMPATIBLE` 失败，并且不会覆盖旧状态文件。此时不要反复重跑，也不要手工改状态文件；先确认是否变更了字段范围、游标列、备份列、数据源或执行入口。
 

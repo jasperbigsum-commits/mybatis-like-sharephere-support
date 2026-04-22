@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,7 +48,7 @@ class GlobalMigrationTaskFactoryTest extends MigrationJdbcTestSupport {
                         "phone_like varchar(255))",
                 "insert into user_account (id, phone) values (1, '13900139000')");
 
-        Map<String, DataSource> dataSources = new LinkedHashMap<String, DataSource>();
+        Map<String, DataSource> dataSources = new LinkedHashMap<>();
         dataSources.put("primaryDs", primary);
         dataSources.put("archiveDs", archive);
 
@@ -178,7 +177,7 @@ class GlobalMigrationTaskFactoryTest extends MigrationJdbcTestSupport {
     }
 
     @Test
-    void shouldRebuildAllRegisteredTablesAfterCompletedStateIsRolledBack() throws Exception {
+    void shouldReuseAllRegisteredTableCheckpointsWhenRollbackKeepsSameCountAndCursorRange() throws Exception {
         DataSource dataSource = newDataSource("global_all_tables_completed_rollback");
         executeSql(dataSource,
                 "create table user_account (" +
@@ -228,18 +227,18 @@ class GlobalMigrationTaskFactoryTest extends MigrationJdbcTestSupport {
              ResultSet account = statement.executeQuery(
                      "select phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
             assertTrue(account.next());
-            assertNotNull(account.getString("phone_cipher"));
-            assertNotNull(account.getString("phone_hash"));
-            assertNotNull(account.getString("phone_like"));
+            assertNull(account.getString("phone_cipher"));
+            assertNull(account.getString("phone_hash"));
+            assertNull(account.getString("phone_like"));
         }
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
              ResultSet archive = statement.executeQuery(
                      "select archive_phone_cipher, archive_phone_hash, archive_phone_like from user_archive where id = 1")) {
             assertTrue(archive.next());
-            assertNotNull(archive.getString("archive_phone_cipher"));
-            assertNotNull(archive.getString("archive_phone_hash"));
-            assertNotNull(archive.getString("archive_phone_like"));
+            assertNull(archive.getString("archive_phone_cipher"));
+            assertNull(archive.getString("archive_phone_hash"));
+            assertNull(archive.getString("archive_phone_like"));
         }
     }
 }

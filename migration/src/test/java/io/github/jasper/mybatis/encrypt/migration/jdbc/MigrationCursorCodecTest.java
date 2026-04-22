@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursorException;
 import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -15,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * 覆盖游标编解码的核心约束，确保复合检查点的序列化形状稳定可恢复。
  */
 @DisplayName("迁移游标编解码")
+@Tag("unit")
+@Tag("migration")
 class MigrationCursorCodecTest {
 
     @Test

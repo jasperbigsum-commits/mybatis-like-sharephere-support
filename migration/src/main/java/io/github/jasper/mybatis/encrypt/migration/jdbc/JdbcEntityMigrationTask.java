@@ -111,6 +111,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             if (state == null) {
                 state = newState();
             } else {
+                // 已存在 checkpoint 时，必须先确认“任务身份”仍然一致；这里一旦不兼容就直接失败，
+                // 不能偷偷清空旧进度重新跑，否则会把原本可恢复的断点覆盖掉。
                 assertStateCompatible(state, executionSnapshot);
             }
             applyExecutionSnapshot(state, executionSnapshot);
@@ -123,9 +125,13 @@ public class JdbcEntityMigrationTask implements MigrationTask {
             boolean completedForCurrentRange = state.getStatus() == MigrationStatus.COMPLETED
                     && isCompletedForCurrentRange(state);
             if (completedForCurrentRange && isCompletedStateStillValid()) {
+                // 当前 range 已完成且库内数据仍满足“已迁移完成”状态时，直接复用历史 report，
+                // 不再重新写库，避免重复加密和重复备份。
                 return state.toReport();
             }
             if (completedForCurrentRange) {
+                // checkpoint 虽然标记为 COMPLETED，但数据库内容已经被回滚或人工改坏，
+                // 这里要重建进度而不是继续沿用旧 cursor，否则补偿扫描会直接跳过整段数据。
                 resetProgress(state);
             }
             state.setStatus(MigrationStatus.RUNNING);
@@ -168,6 +174,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                                 batchLastProcessedCursor = record.getCursor();
                             }
                             connection.commit();
+                            // 只有整批写入与校验都提交成功后才推进 checkpoint，避免半批成功时把
+                            // lastProcessedCursor 推到后面，导致下次恢复遗漏未提交的记录。
                             state.setScannedRows(state.getScannedRows() + batchScanned);
                             state.setMigratedRows(state.getMigratedRows() + batchMigrated);
                             state.setSkippedRows(state.getSkippedRows() + batchSkipped);
@@ -226,6 +234,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
         state.setEntityName(plan.getEntityName());
         state.setTableName(plan.getTableName());
         state.setCursorColumns(plan.getCursorColumns());
+        // rangeReader 可能在首次执行时才拿到精确 cursor 类型；恢复场景下优先沿用本次快照，
+        // 避免 checkpoint 中残留的旧类型把 cursor 反序列化错位。
         state.setCursorJavaTypes(!executionSnapshot.range().getCursorJavaTypes().isEmpty()
                 ? executionSnapshot.range().getCursorJavaTypes() : state.getCursorJavaTypes());
         state.setVerificationEnabled(plan.isVerifyAfterWrite());
@@ -292,6 +302,8 @@ public class JdbcEntityMigrationTask implements MigrationTask {
     private boolean isCompletedForCurrentRange(MigrationState state) {
         List<String> currentEnd = state.getRangeEndValues();
         List<String> lastProcessed = state.getLastProcessedCursorValues();
+        // COMPLETED 不能只看状态位，还要确认上次 checkpoint 的最后游标确实落在当前 rangeEnd，
+        // 否则 range 变大后旧的 COMPLETED 会错误遮盖新增数据。
         return currentEnd == null || currentEnd.isEmpty()
                 ? lastProcessed == null || lastProcessed.isEmpty()
                 : currentEnd.equals(lastProcessed == null ? Collections.<String>emptyList() : lastProcessed);
@@ -299,6 +311,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
 
     private boolean isCompletedStateStillValid() {
         if (!(recordWriter instanceof MigrationRecordStateInspector)) {
+            // 不支持状态探测时只能保守信任 COMPLETED，避免因为无法自检而强制重跑所有历史数据。
             return true;
         }
         MigrationRecordStateInspector inspector = (MigrationRecordStateInspector) recordWriter;
@@ -310,6 +323,7 @@ public class JdbcEntityMigrationTask implements MigrationTask {
                     return true;
                 }
                 for (MigrationRecord record : batch) {
+                    // 只要任意一条记录仍需要迁移，就说明“完成态”已经失真，必须整体重建进度。
                     if (inspector.requiresMigration(connection, plan, record)) {
                         return false;
                     }

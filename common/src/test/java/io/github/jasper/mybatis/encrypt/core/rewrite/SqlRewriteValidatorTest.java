@@ -5,10 +5,11 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -16,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
+@Tag("rewrite")
 class SqlRewriteValidatorTest {
 
     private final SqlRewriteValidator validator = new SqlRewriteValidator();
@@ -54,7 +57,7 @@ class SqlRewriteValidatorTest {
     }
 
     private PlainSelect parsePlainSelect(String sql) throws Exception {
-        Statement statement = CCJSqlParserUtil.parse(sql);
+        Statement statement = JSqlParserSupport.parseStatement(sql);
         Select select = (Select) statement;
         return (PlainSelect) select;
     }

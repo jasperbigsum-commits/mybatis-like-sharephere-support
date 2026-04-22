@@ -10,6 +10,7 @@ import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordVerifi
 import io.github.jasper.mybatis.encrypt.migration.jdbc.JdbcMigrationRecordWriter;
 import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -31,6 +32,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖断点恢复与复合游标场景，确保失败批次不会污染已提交检查点。
  */
 @DisplayName("迁移恢复行为")
+@Tag("unit")
+@Tag("migration")
 class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
 
     @Test

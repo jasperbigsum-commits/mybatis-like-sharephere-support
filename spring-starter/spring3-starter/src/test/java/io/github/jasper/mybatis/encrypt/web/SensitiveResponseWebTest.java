@@ -8,6 +8,7 @@ import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
 import io.github.jasper.mybatis.encrypt.core.mask.StoredSensitiveValueResolver;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -21,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("integration")
+@Tag("web")
 class SensitiveResponseWebTest {
 
     @Test

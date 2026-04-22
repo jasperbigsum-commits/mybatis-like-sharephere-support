@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.migration;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -13,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖计划构建阶段的内部约束，防止无效选择器或错误元数据在执行期才暴露。
  */
 @DisplayName("迁移计划工厂")
+@Tag("unit")
+@Tag("migration")
 class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
 
     @Test

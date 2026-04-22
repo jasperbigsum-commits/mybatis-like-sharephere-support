@@ -101,6 +101,8 @@ public class ResultDecryptor {
             if (propertyReference == null || !propertyReference.canWrite()) {
                 continue;
             }
+            // 每个属性都基于当前 candidate 重新解析 owner/property，不复用上一次 MetaObject 或引用；
+            // 如果 getValue() 已经不是数据库密文，通常是业务 getter/setter 或二次查询覆盖了属性。
             Object value = propertyReference.getValue();
             if (!(value instanceof String) || StringUtils.isBlank((String) value)) {
                 continue;

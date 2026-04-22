@@ -6,8 +6,8 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgori
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -16,6 +16,7 @@ import net.sf.jsqlparser.statement.select.Select;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -25,6 +26,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
+@Tag("rewrite")
 class SqlConditionRewriterTest {
 
     @Test
@@ -166,7 +169,7 @@ class SqlConditionRewriterTest {
     }
 
     private Expression parseWhere(String sql) throws Exception {
-        Statement statement = CCJSqlParserUtil.parse(sql);
+        Statement statement = JSqlParserSupport.parseStatement(sql);
         Select select = (Select) statement;
         PlainSelect plainSelect = (PlainSelect) select;
         return plainSelect.getWhere();

@@ -4,10 +4,10 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -370,7 +370,7 @@ public final class QueryResultPlanFactory {
                 return resolver;
             }
             try {
-                Statement statement = CCJSqlParserUtil.parse(sql);
+                Statement statement = JSqlParserSupport.parseStatement(sql);
                 if (statement instanceof Select) {
                     resolver.collect((Select) statement);
                 }

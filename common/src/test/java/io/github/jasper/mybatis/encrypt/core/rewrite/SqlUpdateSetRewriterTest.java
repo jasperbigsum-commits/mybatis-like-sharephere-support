@@ -7,7 +7,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -15,6 +15,7 @@ import net.sf.jsqlparser.statement.update.Update;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -24,6 +25,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
+@Tag("rewrite")
 class SqlUpdateSetRewriterTest {
 
     @Test
@@ -91,7 +94,7 @@ class SqlUpdateSetRewriterTest {
     }
 
     private Update parseUpdate(String sql) throws Exception {
-        Statement statement = CCJSqlParserUtil.parse(sql);
+        Statement statement = JSqlParserSupport.parseStatement(sql);
         return (Update) statement;
     }
 

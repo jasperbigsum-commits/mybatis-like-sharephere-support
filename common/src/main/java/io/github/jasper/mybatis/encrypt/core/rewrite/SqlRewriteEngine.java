@@ -9,10 +9,10 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.relational.*;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -100,7 +100,7 @@ public class SqlRewriteEngine {
     public RewriteResult rewrite(MappedStatement mappedStatement, BoundSql boundSql) {
         metadataRegistry.warmUp(mappedStatement, boundSql.getParameterObject(), boundSql.getSql());
         try {
-            Statement statement = CCJSqlParserUtil.parse(boundSql.getSql());
+            Statement statement = JSqlParserSupport.parseStatement(boundSql.getSql());
             SqlRewriteContext context = new SqlRewriteContext(
                     mappedStatement.getConfiguration(), boundSql, parameterValueResolver);
             if (statement instanceof Insert) {

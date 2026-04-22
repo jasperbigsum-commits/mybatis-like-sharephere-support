@@ -5,6 +5,7 @@ import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationExcepti
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
@@ -18,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
+@Tag("support")
 class DefaultSeparateTableRowPersisterTest {
 
     private JdbcDataSource dataSource;

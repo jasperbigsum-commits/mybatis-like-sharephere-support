@@ -26,7 +26,7 @@ through real MyBatis execution tests.
 | `UPDATE` | Supported | Rewrites same-table encrypted assignments to `storageColumn`; separate-table fields are removed from the main update and synchronized afterward. |
 | `DELETE` | Supported | Supports encrypted predicates in `WHERE`; separate-table records are deleted after the main delete. |
 | `SELECT` explicit columns | Supported | Rewrites encrypted logical columns to `storageColumn AS logicalColumn`. |
-| `SELECT *` / `SELECT t.*` | Supported with caveats | Expands same-table encrypted fields by appending alias projections; complex multi-encrypted-table wildcard scenarios remain conservative. |
+| `SELECT *` / `SELECT t.*` | Supported with caveats | Single-table queries may use bare `*`; multi-table queries must use explicit table wildcards such as `table.*` or `alias.*` so encrypted projections can stay ahead of the wildcard without being overwritten. |
 | Equality predicates `=` / `!=` | Supported | Uses assisted query columns when configured, otherwise falls back to `storageColumn`. |
 | `LIKE` | Supported | Requires `likeQueryColumn`. |
 | `IN (?, ?, ?)` | Supported | Uses assisted query column when available, otherwise `storageColumn`. |
@@ -63,7 +63,7 @@ Avoid these if the field is encrypted:
 | range query | `where phone > ?` / `between` | redesign query or add a safe business index field |
 | aggregate encrypted value | `max(phone)` / `count(distinct phone)` | aggregate on non-sensitive semantics |
 | derive encrypted expression | `substr(phone, 1, 3)` | query plaintext in trusted code path or use stored masked values |
-| ambiguous multi-table wildcard | `select * from a join b ...` | use explicit columns and aliases |
+| bare wildcard in multi-table query | `select * from a join b ...` / `select phone, * from a join b ...` | use `a.*`, `b.*`, or explicit columns instead of bare `*` |
 
 ## Fail Fast By Design
 
@@ -76,6 +76,7 @@ Avoid these if the field is encrypted:
 | Aggregate functions on encrypted fields | Rejected | `COUNT(phone)`, `SUM(phone)`, `MAX(phone)` and similar expressions are not semantically reliable. |
 | Window functions referencing encrypted fields | Rejected | `PARTITION BY`, analytic `ORDER BY`, filter expressions, and named windows fail fast when encrypted fields are involved. |
 | Separate-table encrypted field in `IN` subquery projection | Rejected | The plugin currently only supports same-table encrypted field comparison subqueries. |
+| Bare `*` in multi-table / derived query that contains encrypted table rules | Rejected | The plugin cannot safely decide which table the wildcard should expand from; use explicit `table.*` or `alias.*` to prevent encrypted alias projections from being covered by later wildcard columns. |
 
 ## Still Conservative / Not Fully Covered
 

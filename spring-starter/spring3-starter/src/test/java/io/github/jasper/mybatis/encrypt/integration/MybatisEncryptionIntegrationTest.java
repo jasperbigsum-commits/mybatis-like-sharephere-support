@@ -49,6 +49,7 @@ import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.h2.jdbcx.JdbcDataSource;
 import org.h2.tools.RunScript;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.support.IdCardMaskLikeQueryAlgorithm;
@@ -64,6 +65,7 @@ import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("integration")
 class MybatisEncryptionIntegrationTest {
 
     private static final Path H2_DB_DIR = Path.of("target", "h2");

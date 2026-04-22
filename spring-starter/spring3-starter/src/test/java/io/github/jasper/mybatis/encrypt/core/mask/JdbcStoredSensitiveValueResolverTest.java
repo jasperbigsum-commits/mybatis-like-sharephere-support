@@ -10,6 +10,7 @@ import io.github.jasper.mybatis.encrypt.config.SqlDialectContextHolder;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -21,6 +22,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+@Tag("unit")
+@Tag("mask")
 class JdbcStoredSensitiveValueResolverTest {
 
     @Test

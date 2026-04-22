@@ -5,6 +5,7 @@ import io.github.jasper.mybatis.encrypt.config.SqlDialect;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -16,6 +17,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @DisplayName("全局 DDL 生成工厂")
+@Tag("unit")
+@Tag("migration")
 class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupport {
 
     @Test
@@ -48,12 +51,12 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         List<String> archiveDdl = factory.generateAllRegisteredTables("archiveDs");
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(110) after `phone`",
+                "alter table `user_account` add column `phone_cipher` varchar(380) after `phone`",
                 "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
                 "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`"
         ), primaryDdl);
         assertEquals(Arrays.asList(
-                "alter table \"user_account\" add (\"phone_cipher\" varchar2(110))",
+                "alter table \"user_account\" add (\"phone_cipher\" varchar2(380))",
                 "alter table \"user_account\" add (\"phone_hash\" varchar2(64))",
                 "alter table \"user_account\" add (\"phone_like\" varchar2(64))"
         ), archiveDdl);
@@ -77,7 +80,7 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         List<String> ddl = factory.generateAllRegisteredTables("primaryDs");
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `phone_cipher` varchar(110) after `phone`",
+                "alter table `user_account` add column `phone_cipher` varchar(380) after `phone`",
                 "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
                 "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`",
                 "alter table `user_account` add column `phone_masked` varchar(64) after `phone_like`"

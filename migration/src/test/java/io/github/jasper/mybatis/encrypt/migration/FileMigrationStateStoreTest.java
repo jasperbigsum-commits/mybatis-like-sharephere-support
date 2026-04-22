@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -16,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖状态文件的序列化兼容性与错误兜底，避免恢复阶段读到脏数据后静默失败。
  */
 @DisplayName("迁移状态存储")
+@Tag("unit")
+@Tag("migration")
 class FileMigrationStateStoreTest extends MigrationJdbcTestSupport {
 
     @Test

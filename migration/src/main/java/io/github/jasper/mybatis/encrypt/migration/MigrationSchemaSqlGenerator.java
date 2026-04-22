@@ -28,9 +28,9 @@ import java.util.function.Consumer;
  *
  * <p>默认长度策略：</p>
  * <ul>
- *     <li>hash / assisted 字段：固定 128</li>
+ *     <li>hash / assisted 字段：固定 64</li>
  *     <li>like 字段：与原字段等长</li>
- *     <li>cipher 字段：默认占位长度 + 原字段长度 * 权重</li>
+ *     <li>cipher 字段：按 UTF-8 最坏字节数估算 GCM 密文 Base64 长度，超出阈值时使用大文本类型</li>
  * </ul>
  */
 public final class MigrationSchemaSqlGenerator {
@@ -347,8 +347,19 @@ public final class MigrationSchemaSqlGenerator {
 
     private ColumnType cipherType(ColumnMetadata sourceColumn) {
         int sourceLength = sourceColumn.resolveCharacterLength(sizingOptions.getFallbackCharacterLength());
-        int length = sizingOptions.getCipherColumnBaseLength()
-                + (sourceLength - sizingOptions.getCipherColumnMinCharLength()) * sizingOptions.getCipherColumnLengthWeight();
+        // 这里按“单字符最坏 UTF-8 字节数”估算明文尺寸，而不是直接使用 varchar 长度；
+        // 中文、emoji 等多字节字符如果仍按字符数线性放大会低估密文列长度。
+        long plainBytes = (long) sourceLength * sizingOptions.getCipherColumnMaxBytesPerChar();
+        // 当前默认算法输出为 Base64([IV][ciphertext+tag])，因此需要把认证加密的固定开销一并计入。
+        long payloadBytes = plainBytes + sizingOptions.getCipherColumnAuthenticatedPayloadOverheadBytes();
+        // Base64 长度上取整到 4 的倍数；这里使用纯算术而非浮点，避免边界长度在不同 JVM 上出现偏差。
+        long encodedLength = ((payloadBytes + 2) / 3) * 4;
+        long boundedLength = Math.max(sizingOptions.getCipherColumnMinLength(), encodedLength);
+        if (boundedLength > sizingOptions.getCipherColumnMaxVarcharLength()) {
+            // 超过 varchar 安全阈值后直接退化为 text/clob，避免生成“语法合法但实际建表失败”的 DDL。
+            return ColumnType.largeCharacter(dialect);
+        }
+        int length = (int) boundedLength;
         return ColumnType.variableCharacter(length, dialect);
     }
 
@@ -477,9 +488,10 @@ public final class MigrationSchemaSqlGenerator {
 
         private int hashColumnLength = 64;
         private int fallbackCharacterLength = 255;
-        private int cipherColumnBaseLength = 64;
-        private int cipherColumnMinCharLength = 18;
-        private int cipherColumnLengthWeight = 1;
+        private int cipherColumnMinLength = 64;
+        private int cipherColumnMaxBytesPerChar = 4;
+        private int cipherColumnAuthenticatedPayloadOverheadBytes = 28;
+        private int cipherColumnMaxVarcharLength = 4000;
         private int referenceIdColumnLength = 64;
 
         /**
@@ -519,55 +531,88 @@ public final class MigrationSchemaSqlGenerator {
         }
 
         /**
-         * 返回密文列基础长度。
+         * 返回密文列最小长度。
          *
-         * @return 密文列基础长度
+         * @return 密文列最小长度
          */
-        public int getCipherColumnBaseLength() {
-            return cipherColumnBaseLength;
+        public int getCipherColumnMinLength() {
+            return cipherColumnMinLength;
         }
 
         /**
-         * 设置密文列基础长度。
+         * 设置密文列最小长度。
          *
-         * @param cipherColumnBaseLength 密文列基础长度，必须大于 0
+         * @param cipherColumnMinLength 密文列最小长度，必须大于 0
          */
-        public void setCipherColumnBaseLength(int cipherColumnBaseLength) {
-            this.cipherColumnBaseLength = positive(cipherColumnBaseLength, "cipherColumnBaseLength");
+        public void setCipherColumnMinLength(int cipherColumnMinLength) {
+            this.cipherColumnMinLength = positive(cipherColumnMinLength, "cipherColumnMinLength");
         }
 
         /**
-         * 返回加密字段的最小参考基数生成
-         * @return 最小参考基数大小
-         */
-        public int getCipherColumnMinCharLength() {
-            return cipherColumnMinCharLength;
-        }
-
-        /**
-         * 设置加密字段的最小参考基数生成
-         * @param cipherColumnMinCharLength 最小参考基数大小
-         */
-        public void setCipherColumnMinCharLength(int cipherColumnMinCharLength) {
-            this.cipherColumnMinCharLength = cipherColumnMinCharLength;
-        }
-
-        /**
-         * 返回密文列长度权重。
+         * 返回密文长度估算使用的单字符最大 UTF-8 字节数。
          *
-         * @return 密文列长度权重
+         * @return 单字符最大字节数
          */
-        public int getCipherColumnLengthWeight() {
-            return cipherColumnLengthWeight;
+        public int getCipherColumnMaxBytesPerChar() {
+            return cipherColumnMaxBytesPerChar;
         }
 
         /**
-         * 设置密文列长度权重。
+         * 设置密文长度估算使用的单字符最大 UTF-8 字节数。
          *
-         * @param cipherColumnLengthWeight 密文列长度权重，必须大于 0
+         * <p>默认值 {@code 4} 可覆盖中文、英文、数字和 UTF8MB4 字符。若字段明确只存手机号、
+         * 身份证、银行卡等 ASCII 内容，可设置为 {@code 1} 以生成更紧凑的 DDL。</p>
+         *
+         * @param cipherColumnMaxBytesPerChar 单字符最大字节数，必须大于 0
          */
-        public void setCipherColumnLengthWeight(int cipherColumnLengthWeight) {
-            this.cipherColumnLengthWeight = positive(cipherColumnLengthWeight, "cipherColumnLengthWeight");
+        public void setCipherColumnMaxBytesPerChar(int cipherColumnMaxBytesPerChar) {
+            this.cipherColumnMaxBytesPerChar = positive(cipherColumnMaxBytesPerChar, "cipherColumnMaxBytesPerChar");
+        }
+
+        /**
+         * 返回认证加密载荷固定开销字节数。
+         *
+         * @return 固定开销字节数
+         */
+        public int getCipherColumnAuthenticatedPayloadOverheadBytes() {
+            return cipherColumnAuthenticatedPayloadOverheadBytes;
+        }
+
+        /**
+         * 设置认证加密载荷固定开销字节数。
+         *
+         * <p>默认值 {@code 28} 对应当前 SM4/AES-GCM 输出中的 {@code 12} 字节 IV
+         * 和 {@code 16} 字节认证标签。</p>
+         *
+         * @param cipherColumnAuthenticatedPayloadOverheadBytes 固定开销字节数，必须大于 0
+         */
+        public void setCipherColumnAuthenticatedPayloadOverheadBytes(
+                int cipherColumnAuthenticatedPayloadOverheadBytes) {
+            this.cipherColumnAuthenticatedPayloadOverheadBytes =
+                    positive(cipherColumnAuthenticatedPayloadOverheadBytes,
+                            "cipherColumnAuthenticatedPayloadOverheadBytes");
+        }
+
+        /**
+         * 返回密文列使用 {@code varchar/varchar2} 的最大长度。
+         *
+         * @return 可变字符列最大长度
+         */
+        public int getCipherColumnMaxVarcharLength() {
+            return cipherColumnMaxVarcharLength;
+        }
+
+        /**
+         * 设置密文列使用 {@code varchar/varchar2} 的最大长度。
+         *
+         * <p>超过该长度时 DDL 会使用当前方言的大文本类型，例如 MySQL {@code text}
+         * 或 Oracle {@code clob}。</p>
+         *
+         * @param cipherColumnMaxVarcharLength 可变字符列最大长度，必须大于 0
+         */
+        public void setCipherColumnMaxVarcharLength(int cipherColumnMaxVarcharLength) {
+            this.cipherColumnMaxVarcharLength =
+                    positive(cipherColumnMaxVarcharLength, "cipherColumnMaxVarcharLength");
         }
 
         /**
@@ -701,6 +746,9 @@ public final class MigrationSchemaSqlGenerator {
         }
 
         private boolean satisfies(ColumnType targetType) {
+            if ("text".equals(targetType.family)) {
+                return isLargeCharacterType();
+            }
             if (!typeFamily().equals(targetType.family)) {
                 return false;
             }
@@ -708,6 +756,12 @@ public final class MigrationSchemaSqlGenerator {
                 return false;
             }
             return targetType.scale == null || decimalDigits >= targetType.scale;
+        }
+
+        private boolean isLargeCharacterType() {
+            String normalized = normalizeTypeName(typeName);
+            return normalized.contains("text") || normalized.contains("clob")
+                    || "string".equals(normalized);
         }
 
         private String typeFamily() {
@@ -760,6 +814,10 @@ public final class MigrationSchemaSqlGenerator {
             return new ColumnType("varchar", varyingTypeName(dialect) + "(" + length + ")", length, null);
         }
 
+        private static ColumnType largeCharacter(SqlDialect dialect) {
+            return new ColumnType("text", largeCharacterTypeName(dialect), null, null);
+        }
+
         private static ColumnType fixedCharacter(int length, SqlDialect dialect) {
             return new ColumnType("char", "char(" + length + ")", length, null);
         }
@@ -775,6 +833,18 @@ public final class MigrationSchemaSqlGenerator {
                     return "varchar2";
                 default:
                     return "varchar";
+            }
+        }
+
+        private static String largeCharacterTypeName(SqlDialect dialect) {
+            switch (dialect) {
+                case ORACLE12:
+                case DM:
+                    return "clob";
+                case CLICKHOUSE:
+                    return "String";
+                default:
+                    return "text";
             }
         }
     }
@@ -797,6 +867,11 @@ public final class MigrationSchemaSqlGenerator {
         }
 
         private ColumnRequirement merge(ColumnType incoming, String incomingAfterColumnName) {
+            if (isTextVarcharCompatible(columnType, incoming)) {
+                ColumnType mergedType = "text".equals(incoming.family) ? incoming : columnType;
+                return new ColumnRequirement(tableName, columnName, mergedType,
+                        mergeAfterColumnName(afterColumnName, incomingAfterColumnName));
+            }
             if (!columnType.family.equals(incoming.family)) {
                 throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
                         "Conflicting schema requirement for column: " + tableName + "." + columnName);
@@ -811,6 +886,11 @@ public final class MigrationSchemaSqlGenerator {
             }
             return new ColumnRequirement(tableName, columnName, mergedType,
                     mergeAfterColumnName(afterColumnName, incomingAfterColumnName));
+        }
+
+        private boolean isTextVarcharCompatible(ColumnType current, ColumnType incoming) {
+            return ("text".equals(current.family) && "varchar".equals(incoming.family))
+                    || ("varchar".equals(current.family) && "text".equals(incoming.family));
         }
 
         private String mergeAfterColumnName(String currentAfterColumnName, String incomingAfterColumnName) {

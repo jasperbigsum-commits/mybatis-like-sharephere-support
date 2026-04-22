@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,6 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖全局迁移工厂在多数据源场景下的路由行为。
  */
 @DisplayName("全局迁移工厂")
+@Tag("unit")
+@Tag("migration")
 class GlobalMigrationTaskFactoryTest extends MigrationJdbcTestSupport {
 
     @Test
@@ -170,6 +174,72 @@ class GlobalMigrationTaskFactoryTest extends MigrationJdbcTestSupport {
                     resultSet.getString("phone"));
             assertEquals(firstCipher, resultSet.getString("phone_cipher"));
             assertEquals("13800138000", resultSet.getString("phone_backup"));
+        }
+    }
+
+    @Test
+    void shouldRebuildAllRegisteredTablesAfterCompletedStateIsRolledBack() throws Exception {
+        DataSource dataSource = newDataSource("global_all_tables_completed_rollback");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(64), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_hash varchar(128), " +
+                        "phone_like varchar(255))",
+                "create table user_archive (" +
+                        "id bigint primary key, " +
+                        "archive_phone varchar(64), " +
+                        "archive_phone_cipher varchar(512), " +
+                        "archive_phone_hash varchar(128), " +
+                        "archive_phone_like varchar(255))",
+                "insert into user_account (id, phone) values (1, '13800138000')",
+                "insert into user_archive (id, archive_phone) values (1, '13900139000')");
+
+        DatabaseEncryptionProperties properties = properties();
+        EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
+        registry.registerEntityType(SameTableUserEntity.class);
+        registry.registerEntityType(ArchiveSameTableUserEntity.class);
+        InMemoryMigrationStateStore stateStore = new InMemoryMigrationStateStore();
+        Map<String, DataSource> dataSources = new LinkedHashMap<String, DataSource>();
+        dataSources.put("primaryDs", dataSource);
+        GlobalMigrationTaskFactory factory = new DefaultGlobalMigrationTaskFactory(
+                dataSources,
+                registry,
+                algorithmRegistry(),
+                properties,
+                stateStore,
+                AllowAllMigrationConfirmationPolicy.INSTANCE);
+
+        List<MigrationReport> firstReports = factory.executeAllRegisteredTables("primaryDs");
+        executeSql(dataSource,
+                "update user_account set phone_cipher = null, phone_hash = null, phone_like = null where id = 1",
+                "update user_archive set archive_phone_cipher = null, archive_phone_hash = null, "
+                        + "archive_phone_like = null where id = 1");
+
+        List<MigrationReport> secondReports = factory.executeAllRegisteredTables("primaryDs");
+
+        assertEquals(2, firstReports.size());
+        assertEquals(2, secondReports.size());
+        assertEquals(MigrationStatus.COMPLETED, secondReports.get(0).getStatus());
+        assertEquals(MigrationStatus.COMPLETED, secondReports.get(1).getStatus());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet account = statement.executeQuery(
+                     "select phone_cipher, phone_hash, phone_like from user_account where id = 1")) {
+            assertTrue(account.next());
+            assertNotNull(account.getString("phone_cipher"));
+            assertNotNull(account.getString("phone_hash"));
+            assertNotNull(account.getString("phone_like"));
+        }
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet archive = statement.executeQuery(
+                     "select archive_phone_cipher, archive_phone_hash, archive_phone_like from user_archive where id = 1")) {
+            assertTrue(archive.next());
+            assertNotNull(archive.getString("archive_phone_cipher"));
+            assertNotNull(archive.getString("archive_phone_hash"));
+            assertNotNull(archive.getString("archive_phone_like"));
         }
     }
 }

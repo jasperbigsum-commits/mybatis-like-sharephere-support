@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.migration;
 import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 import io.github.jasper.mybatis.encrypt.migration.risk.MigrationRiskManifestFactory;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -19,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖上线前风险确认的生成、批准与范围漂移拦截场景。
  */
 @DisplayName("迁移确认策略")
+@Tag("unit")
+@Tag("migration")
 class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
 
     @Test

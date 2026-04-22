@@ -1,12 +1,16 @@
 package io.github.jasper.mybatis.encrypt.config;
 
 import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+@Tag("unit")
+@Tag("config")
+@Tag("algorithm")
 class LikeQueryAlgorithmAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()

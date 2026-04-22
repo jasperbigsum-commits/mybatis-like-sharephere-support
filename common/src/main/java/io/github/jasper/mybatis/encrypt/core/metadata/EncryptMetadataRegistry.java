@@ -5,9 +5,9 @@ import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.delete.Delete;
@@ -528,7 +528,7 @@ public class EncryptMetadataRegistry {
     private Set<String> collectTableNames(String sql) {
         Set<String> tables = new LinkedHashSet<>();
         try {
-            Statement statement = CCJSqlParserUtil.parse(sql);
+            Statement statement = JSqlParserSupport.parseStatement(sql);
             collectTables(statement, tables);
         } catch (Exception ignore) {
             return tables;

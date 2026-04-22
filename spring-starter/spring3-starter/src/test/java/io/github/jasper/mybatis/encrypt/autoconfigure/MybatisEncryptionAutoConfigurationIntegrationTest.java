@@ -14,6 +14,7 @@ import jakarta.annotation.Resource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -43,6 +44,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 "mybatis.configuration.map-underscore-to-camel-case=true"
         }
 )
+@Tag("integration")
+@Tag("config")
 class MybatisEncryptionAutoConfigurationIntegrationTest {
 
     @Resource

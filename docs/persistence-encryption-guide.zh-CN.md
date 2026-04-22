@@ -232,6 +232,32 @@ UserPhoneView selectUserPhoneView(@Param("id") Long id);
 - Mapper 方法上补 `@EncryptResultHint`
 - 保持别名和 DTO 属性稳定对应
 
+### 通配符查询约束
+
+建议直接记住下面这条规则：
+
+- 单表查询可以使用裸 `*`
+- 多表查询不要使用裸 `*`
+- 多表查询无论是否声明了表别名，都应写成显式表通配符
+
+可用写法：
+
+- `select user_account.*, order_account.* from user_account join order_account ...`
+- `select u.*, o.* from user_account u join order_account o ...`
+- `select u.phone, u.*, o.* from user_account u join order_account o ...`
+
+不要这样写：
+
+- `select * from user_account join order_account ...`
+- `select phone, * from user_account join order_account ...`
+- `select u.phone, * from user_account u join order_account o ...`
+
+原因不是语法偏好，而是结果集稳定性：
+
+- 插件需要把同表加密字段改写成 `storageColumn as logicalColumn`
+- 这些逻辑投影必须排在对应 `table.*` / `alias.*` 前面，避免 MyBatis/JDBC 优先读到 wildcard 中的旧列
+- 多表场景下裸 `*` 无法安全收敛到某一张表，所以插件会直接拒绝这类 SQL，而不是放出可能错乱的结果集
+
 ### 手工组装输出 DTO
 
 不要再要求持久层自动推断最终输出对象，应改用：

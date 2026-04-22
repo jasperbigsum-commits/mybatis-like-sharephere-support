@@ -6,9 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.baomidou.mybatisplus.annotation.TableField;
 import jakarta.persistence.Column;
 import jakarta.persistence.Table;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 
+@Tag("unit")
+@Tag("metadata")
 class AnnotationEncryptMetadataLoaderTest {
 
     private final AnnotationEncryptMetadataLoader loader = new AnnotationEncryptMetadataLoader();

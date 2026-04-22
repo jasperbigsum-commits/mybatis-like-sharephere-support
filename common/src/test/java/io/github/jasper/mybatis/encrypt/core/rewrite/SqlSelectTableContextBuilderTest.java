@@ -4,7 +4,7 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -12,6 +12,7 @@ import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -21,6 +22,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
+@Tag("rewrite")
 class SqlSelectTableContextBuilderTest {
 
     @Test
@@ -49,7 +52,7 @@ class SqlSelectTableContextBuilderTest {
     }
 
     private PlainSelect parsePlainSelect(String sql) throws Exception {
-        Statement statement = CCJSqlParserUtil.parse(sql);
+        Statement statement = JSqlParserSupport.parseStatement(sql);
         Select select = (Select) statement;
         return (PlainSelect) select;
     }

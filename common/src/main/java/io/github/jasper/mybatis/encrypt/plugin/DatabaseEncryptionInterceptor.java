@@ -191,6 +191,8 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (target == null) {
             return null;
         }
+        // SystemMetaObject.forObject(...) 每次都会为当前 target 创建独立 MetaObject 包装，
+        // 这里没有跨 invocation 共享状态；排查串值问题时应优先检查业务 getter/setter 副作用。
         MetaObject metaObject = SystemMetaObject.forObject(target);
         if (metaObject.hasGetter("mappedStatement")) {
             Object mappedStatement = metaObject.getValue("mappedStatement");
@@ -211,6 +213,8 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (target == null) {
             return null;
         }
+        // ResultSetHandler 在不同 MyBatis 版本中可能直接持有 boundSql，也可能挂在 delegate 下；
+        // 两条路径都只读取本次 invocation 的对象图，不能缓存到字段上。
         MetaObject metaObject = SystemMetaObject.forObject(target);
         if (metaObject.hasGetter("boundSql")) {
             Object boundSql = metaObject.getValue("boundSql");
@@ -386,6 +390,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
                 continue;
             }
             Object value = metaObject.getValue(rule.property());
+            // 只在属性确实参与本次 SQL 绑定时准备独立表引用，避免对象上有值但 SQL 未更新该字段时误写独立表。
             if (value != null && isMappedProperty(boundSql, rule.property())) {
                 return true;
             }

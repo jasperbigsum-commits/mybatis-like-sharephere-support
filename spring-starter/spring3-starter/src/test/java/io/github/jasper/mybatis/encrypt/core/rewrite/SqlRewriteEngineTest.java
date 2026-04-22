@@ -16,6 +16,7 @@ import org.apache.ibatis.mapping.ResultMap;
 import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.mapping.SqlSource;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
@@ -27,6 +28,8 @@ import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationE
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("unit")
+@Tag("rewrite")
 class SqlRewriteEngineTest {
 
     @Test
@@ -159,6 +162,30 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteSqlContainingRepeatedBlankLines() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id,\n\n\n phone\n\n FROM user_account\n\n WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_cipher` AS phone") || result.sql().contains("`phone_cipher` phone"));
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    @Test
     void shouldRewriteWildcardSelectByAppendingStorageAlias() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -178,8 +205,166 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("`phone_cipher` AS phone, *")
-                || result.sql().contains("`phone_cipher` phone, *"));
+        assertTrue(result.sql().contains("`phone_cipher` AS phone, user_account.*")
+                || result.sql().contains("`phone_cipher` phone, user_account.*"));
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteExplicitPlainColumnAndWildcardWithoutAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id, * FROM user_account WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("SELECT id, `phone_cipher` AS phone, user_account.* FROM user_account")
+                || result.sql().contains("SELECT id, `phone_cipher` phone, user_account.* FROM user_account"));
+        assertFalse(result.sql().contains("id, * FROM"));
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteEncryptedColumnAndWildcardWithoutAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT phone, * FROM user_account WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_cipher`"));
+        assertTrue(result.sql().contains("SELECT `phone_cipher` AS phone, user_account.* FROM user_account")
+                || result.sql().contains("SELECT `phone_cipher` phone, user_account.* FROM user_account"));
+        assertFalse(result.sql().contains(", * FROM"));
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteExplicitPlainColumnAndWildcardWithTableAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id, * FROM user_account u WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("SELECT id, u.`phone_cipher` AS phone, u.* FROM user_account u")
+                || result.sql().contains("SELECT id, u.`phone_cipher` phone, u.* FROM user_account u"));
+        assertFalse(result.sql().contains("id, * FROM"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteEncryptedColumnAndWildcardWithTableAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.phone, * FROM user_account u WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_cipher`"));
+        assertTrue(result.sql().contains("SELECT u.`phone_cipher` AS phone, u.* FROM user_account u")
+                || result.sql().contains("SELECT u.`phone_cipher` phone, u.* FROM user_account u"));
+        assertFalse(result.sql().contains(", * FROM"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldKeepWildcardSelectWhenStorageColumnEqualsLogicalColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithInlineStorageColumn();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT * FROM user_account t WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().startsWith("SELECT * FROM user_account"));
+        assertFalse(result.sql().contains(", *"));
+        assertFalse(result.sql().contains("user_account.*"));
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldAvoidDuplicatedEncryptedProjectionWhenSelectContainsExplicitColumnAndWildcard() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT * FROM user_account WHERE phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_cipher`"));
+        assertTrue(result.sql().contains("`phone_cipher` AS phone, user_account.*")
+                || result.sql().contains("`phone_cipher` phone, user_account.*"));
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
@@ -207,6 +392,140 @@ class SqlRewriteEngineTest {
                 || result.sql().contains("u.`phone_cipher` phone, u.*, o.id"));
         assertFalse(result.sql().contains("u.*, u.`phone_cipher` AS phone"));
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteMultiTableSelectUsingExplicitTableWildcardWithoutAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT user_account.phone, user_account.*, order_account.* " +
+                        "FROM user_account JOIN order_account ON user_account.id = order_account.user_id " +
+                        "WHERE user_account.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_cipher`"));
+        assertTrue(result.sql().contains("user_account.`phone_cipher` AS phone, user_account.*, order_account.*")
+                || result.sql().contains("user_account.`phone_cipher` phone, user_account.*, order_account.*"));
+        assertFalse(result.sql().contains("user_account.*, user_account.`phone_cipher` AS phone"));
+        assertTrue(result.sql().contains("user_account.`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldRewriteMultiTableSelectUsingExplicitTableWildcardWithAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.phone, u.*, o.* FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_cipher`"));
+        assertTrue(result.sql().contains("u.`phone_cipher` AS phone, u.*, o.*")
+                || result.sql().contains("u.`phone_cipher` phone, u.*, o.*"));
+        assertFalse(result.sql().contains("u.*, u.`phone_cipher` AS phone"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?"));
+    }
+
+    @Test
+    void shouldFailFastForBareWildcardMixedWithEncryptedProjectionInJoin() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.phone, * FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("table.*") || exception.getMessage().contains("alias.*"));
+    }
+
+    @Test
+    void shouldFailFastForBareWildcardOnlyInJoinWithEncryptedTableRule() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT * FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("table.*") || exception.getMessage().contains("alias.*"));
+    }
+
+    @Test
+    void shouldFailFastForBareWildcardBeforeEncryptedProjectionInJoin() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT *, u.phone FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("table.*") || exception.getMessage().contains("alias.*"));
     }
 
     @Test
@@ -1950,6 +2269,12 @@ class SqlRewriteEngineTest {
         phoneRule.setLikeQueryAlgorithm("phoneMaskLike");
         phoneRule.setMaskedColumn("phone_like");
         phoneRule.setMaskedAlgorithm("phoneMaskLike");
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesWithInlineStorageColumn() {
+        DatabaseEncryptionProperties properties = sampleProperties();
+        properties.getTables().get(0).getFields().get(0).setStorageColumn("phone");
         return properties;
     }
 

@@ -10,6 +10,7 @@ import net.sf.jsqlparser.expression.StringValue;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -19,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("unit")
+@Tag("rewrite")
 class SqlWriteExpressionRewriterTest {
 
     private final Sm4CipherAlgorithm cipherAlgorithm = new Sm4CipherAlgorithm("test-key");

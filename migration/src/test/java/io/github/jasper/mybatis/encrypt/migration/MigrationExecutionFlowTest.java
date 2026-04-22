@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -24,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖迁移任务的主执行链路，包含同表模式、独立表模式以及按表名建任务的入口行为。
  */
 @DisplayName("迁移执行链路")
+@Tag("unit")
+@Tag("migration")
 class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
 
     @Test

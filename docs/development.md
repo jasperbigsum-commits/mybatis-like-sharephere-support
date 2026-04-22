@@ -35,6 +35,55 @@ mvn "-Dmaven.repo.local=.m2repo" -pl spring-starter/spring3-starter -am test
 - 核心单测：验证 SQL 改写、元数据解析、结果解密等纯逻辑组件
 - 配置与验收测试：验证方言转义、日志脱敏、自动扫描等接入能力
 
+## 测试分组执行
+
+根 `pom.xml` 已接入 Maven Surefire 的 JUnit 5 `@Tag` 过滤能力，可通过以下参数按组执行：
+
+- `-Dtest.groups=...`：只执行指定标签的测试
+- `-Dtest.excludedGroups=...`：排除指定标签的测试
+
+当前仓库主要标签如下：
+
+- `unit`：纯单元测试
+- `integration`：集成测试
+- `algorithm`：算法与脱敏算法测试
+- `rewrite`：SQL 改写与日志改写测试
+- `parser`：JSqlParser 解析与预处理测试
+- `metadata`：元数据解析与实体扫描测试
+- `decrypt`：结果解密测试
+- `mask`：存储态脱敏解析测试
+- `plugin`：MyBatis 拦截器测试
+- `migration`：迁移、断点恢复、DDL 生成与确认策略测试
+- `config`：自动配置、方言与 Spring 配置测试
+- `support`：存储支撑组件测试
+- `web`：controller 边界脱敏测试
+
+常用命令示例：
+
+只跑 SQL 改写相关测试：
+
+```bash
+mvn "-Dmaven.repo.local=.m2repo" "-Dtest.groups=rewrite" test
+```
+
+只跑迁移相关测试：
+
+```bash
+mvn "-Dmaven.repo.local=.m2repo" "-Dtest.groups=migration" test
+```
+
+只跑纯单测，排除集成测试：
+
+```bash
+mvn "-Dmaven.repo.local=.m2repo" "-Dtest.groups=unit" "-Dtest.excludedGroups=integration" test
+```
+
+同时跑多组测试时，使用逗号分隔：
+
+```bash
+mvn "-Dmaven.repo.local=.m2repo" "-Dtest.groups=algorithm,metadata" test
+```
+
 ## 最小验收清单
 
 每次提交前至少确认：

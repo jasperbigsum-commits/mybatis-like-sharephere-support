@@ -20,6 +20,7 @@ import org.apache.ibatis.mapping.ResultMapping;
 import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.mapping.SqlSource;
 import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
@@ -30,6 +31,8 @@ import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.annotation.SensitiveField;
 
+@Tag("unit")
+@Tag("decrypt")
 class ResultDecryptorTest {
 
     @Test
@@ -155,6 +158,21 @@ class ResultDecryptorTest {
     }
 
     @Test
+    void shouldDecryptAutoDetectedDtoWhenSqlContainsRepeatedBlankLines() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13100131000"));
+        dto.setName("blank-lines");
+        MappedStatement mappedStatement = autoDetectedDtoStatementWithBlankLines();
+
+        decrypt(decryptor, mappedStatement, List.of(dto));
+
+        assertEquals("13100131000", dto.getPhone());
+        assertEquals("blank-lines", dto.getName());
+    }
+
+    @Test
     void shouldUseBackingFieldAndRecordSensitiveValueWhenGetterHasSideEffect() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
         ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
@@ -271,6 +289,19 @@ class ResultDecryptorTest {
                 configuration, "test.autoDetectedDto", PlainUserProjectionDto.class, List.of()).build();
         SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
                 "select u.id, u.name, u.phone as phone from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration,
+                AutoDetectedMapper.class.getName() + ".selectPlainUserProjection", sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement autoDetectedDtoStatementWithBlankLines() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.autoDetectedDtoBlankLines", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id,\n\n u.name,\n\n u.phone as phone\n\n from user_account u", List.of(), parameterObject);
         return new MappedStatement.Builder(configuration,
                 AutoDetectedMapper.class.getName() + ".selectPlainUserProjection", sqlSource, SqlCommandType.SELECT)
                 .resultMaps(List.of(resultMap))

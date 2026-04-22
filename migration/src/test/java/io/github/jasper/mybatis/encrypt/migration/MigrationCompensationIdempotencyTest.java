@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -19,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖 checkpoint 回退后的幂等重放，确保重复批次不会再次写入副作用。
  */
 @DisplayName("迁移补偿幂等性")
+@Tag("unit")
+@Tag("migration")
 class MigrationCompensationIdempotencyTest extends MigrationJdbcTestSupport {
 
     @Test

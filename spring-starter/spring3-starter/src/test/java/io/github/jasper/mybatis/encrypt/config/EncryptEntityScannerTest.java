@@ -4,11 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import lombok.Data;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 
+@Tag("unit")
+@Tag("metadata")
 class EncryptEntityScannerTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()

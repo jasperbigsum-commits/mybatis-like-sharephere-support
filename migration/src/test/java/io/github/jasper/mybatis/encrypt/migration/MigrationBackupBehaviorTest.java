@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.migration;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -17,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 覆盖原字段被覆盖时的备份行为，确保主表明文在原子更新前被安全保留。
  */
 @DisplayName("迁移备份行为")
+@Tag("unit")
+@Tag("migration")
 class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
 
     @Test

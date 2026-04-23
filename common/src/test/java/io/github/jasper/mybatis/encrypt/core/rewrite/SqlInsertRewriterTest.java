@@ -39,7 +39,7 @@ class SqlInsertRewriterTest {
         EncryptTableRule tableRule = new EncryptTableRule("user_account");
         tableRule.addColumnRule(sameTableRule());
         Configuration configuration = new Configuration();
-        Map<String, Object> parameterObject = new LinkedHashMap<String, Object>();
+        Map<String, Object> parameterObject = new LinkedHashMap<>();
         parameterObject.put("phone", "13800138000");
         parameterObject.put("name", "Alice");
         SqlRewriteContext context = rewriteContext(

@@ -36,7 +36,7 @@ class SqlConditionRewriterTest {
      */
     @Test
     void shouldRewriteEqualityToAssistedColumnAndReplaceParameter() throws Exception {
-        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(sameTableRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = ?",
                 Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
@@ -58,7 +58,7 @@ class SqlConditionRewriterTest {
      */
     @Test
     void shouldRewriteLikeConcatToLikeAndAssistedFallback() throws Exception {
-        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(sameTableRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE CONCAT('%', ?, '%')",
                 Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "segment", String.class).build()),
@@ -86,7 +86,7 @@ class SqlConditionRewriterTest {
      */
     @Test
     void shouldRewriteExactLikeToLikeAndAssistedFallback() throws Exception {
-        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(sameTableRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE ?",
                 Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
@@ -134,11 +134,11 @@ class SqlConditionRewriterTest {
      */
     @Test
     void shouldDispatchComparisonProjectionModeForEncryptedInSubquery() throws Exception {
-        List<ProjectionMode> dispatchedModes = new ArrayList<ProjectionMode>();
+        List<ProjectionMode> dispatchedModes = new ArrayList<>();
         SqlConditionRewriter rewriter = newRewriter(dispatchedModes);
         SqlTableContext tableContext = tableContext(sameTableRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone IN (SELECT phone FROM user_account)",
-                Collections.<ParameterMapping>emptyList(),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         Expression rewritten = rewriter.rewrite(
@@ -157,7 +157,7 @@ class SqlConditionRewriterTest {
      */
     @Test
     void shouldRewriteSeparateTableEqualityToExistsSubquery() throws Exception {
-        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(separateTableRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = ?",
                 Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),

@@ -18,36 +18,6 @@ import java.util.List;
  */
 final class SqlConditionOperandSupport {
 
-    Object readOperandValue(Expression expression, SqlRewriteContext context) {
-        if (expression instanceof JdbcParameter) {
-            int parameterIndex = context.consumeOriginal();
-            return context.originalValue(parameterIndex);
-        }
-        if (expression instanceof StringValue) {
-            return ((StringValue) expression).getValue();
-        }
-        if (expression instanceof LongValue) {
-            return ((LongValue) expression).getStringValue();
-        }
-        return null;
-    }
-
-    void rewriteOperand(Expression expression, SqlRewriteContext context, String transformedValue, MaskingMode maskingMode) {
-        if (expression instanceof JdbcParameter) {
-            context.replaceLastConsumed(transformedValue, maskingMode);
-            return;
-        }
-        if (expression instanceof StringValue) {
-            ((StringValue) expression).setValue(transformedValue);
-            return;
-        }
-        if (expression instanceof NullValue) {
-            return;
-        }
-        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Encrypted query condition must use prepared parameter or string literal.");
-    }
-
     QueryOperand readComposableQueryOperand(Expression expression,
                                             SqlRewriteContext context,
                                             EncryptionErrorCode errorCode,
@@ -75,28 +45,16 @@ final class SqlConditionOperandSupport {
             }
             StringBuilder builder = new StringBuilder();
             List<Integer> parameterIndexes = new ArrayList<Integer>();
-            QueryOperand assistedCandidate = null;
-            boolean multipleAssistedCandidates = false;
             for (Expression item : function.getParameters()) {
                 QueryOperand part = readComposableQueryOperand(item, context, errorCode, unsupportedMessage);
                 parameterIndexes.addAll(part.parameterIndexes());
                 if (part.value() == null) {
-                    return QueryOperand.none(null, parameterIndexes);
+                    return new QueryOperand(null, parameterIndexes);
                 }
                 builder.append(part.value());
-                if (part.hasAssistedCandidate() && part.assistedCandidateParameterized()) {
-                    if (assistedCandidate != null) {
-                        multipleAssistedCandidates = true;
-                    } else {
-                        assistedCandidate = part;
-                    }
-                }
             }
-            if (multipleAssistedCandidates || assistedCandidate == null) {
-                return QueryOperand.none(builder.toString(), parameterIndexes);
-            }
-            return new QueryOperand(builder.toString(), parameterIndexes,
-                    assistedCandidate.assistedCandidateValue(), true);
+            // CONCAT 的最终值一旦可确定，就交给上层按具体语义决定是否还能退化为 hash 精确匹配。
+            return new QueryOperand(builder.toString(), parameterIndexes);
         }
         throw new UnsupportedEncryptedOperationException(errorCode, unsupportedMessage);
     }

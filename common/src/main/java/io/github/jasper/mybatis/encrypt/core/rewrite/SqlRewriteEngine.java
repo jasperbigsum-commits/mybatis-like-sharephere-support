@@ -231,10 +231,47 @@ public class SqlRewriteEngine {
         if (tableContext.isEmpty()) {
             return;
         }
+        if (rewriteGroupBy(plainSelect.getGroupBy(), tableContext)) {
+            context.markChanged();
+        }
         sqlRewriteValidator.validateSelect(plainSelect, tableContext);
         if (sqlSelectProjectionRewriter.rewrite(plainSelect, tableContext, projectionMode)) {
             context.markChanged();
         }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private boolean rewriteGroupBy(GroupByElement groupByElement, SqlTableContext tableContext) {
+        if (groupByElement == null || groupByElement.getGroupByExpressionList() == null) {
+            return false;
+        }
+        boolean changed = false;
+        ExpressionList expressionList = groupByElement.getGroupByExpressionList();
+        for (int index = 0; index < expressionList.size(); index++) {
+            Object item = expressionList.get(index);
+            if (!(item instanceof Expression)) {
+                continue;
+            }
+            Expression rewritten = rewriteGroupByExpression((Expression) item, tableContext);
+            if (rewritten != item) {
+                expressionList.set(index, rewritten);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private Expression rewriteGroupByExpression(Expression expression, SqlTableContext tableContext) {
+        ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+        if (resolution == null) {
+            return expression;
+        }
+        EncryptColumnRule rule = resolution.rule();
+        // GROUP BY 只支持简单加密列。复杂表达式继续交给校验器拒绝，避免 hash 后语义不等价。
+        String targetColumn = rule.isStoredInSeparateTable()
+                ? rule.column()
+                : requireAssistedQueryColumn(rule, "GROUP BY");
+        return buildColumn(resolution.column(), targetColumn);
     }
 
     private String requireAssistedQueryColumn(EncryptColumnRule rule, String scenario) {

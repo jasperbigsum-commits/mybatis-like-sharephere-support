@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.config.SqlDialect;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -92,6 +93,51 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
                 "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
                 "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`",
                 "alter table `user_account` add column `phone_masked` varchar(64) after `phone_like`"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证全量 DDL 生成工厂能识别字段级 backupColumn 配置，避免独立表模式只生成外表结构而漏掉主表备份列。
+     * 测试场景：使用纯配置注册身份证独立表字段，并在字段规则上配置 id_card_backup，只调用 generateAllRegisteredTables 断言主表备份列和独立表建表 SQL 都被导出。
+     */
+    @Test
+    void shouldGenerateSeparateTableBackupColumnFromConfiguredFieldRule() throws Exception {
+        DataSource primary = newDataSource("global_schema_separate_backup_primary");
+        executeSql(primary,
+                "create table user_account (id bigint primary key, id_card varchar(80))");
+
+        DatabaseEncryptionProperties properties = properties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule =
+                new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("user_account");
+        DatabaseEncryptionProperties.FieldRuleProperties idCardRule =
+                new DatabaseEncryptionProperties.FieldRuleProperties();
+        idCardRule.setProperty("idCard");
+        idCardRule.setColumn("id_card");
+        idCardRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
+        idCardRule.setStorageTable("user_id_card_encrypt");
+        idCardRule.setStorageColumn("id_card_cipher");
+        idCardRule.setStorageIdColumn("id");
+        idCardRule.setAssistedQueryColumn("id_card_hash");
+        idCardRule.setLikeQueryColumn("id_card_like");
+        idCardRule.setBackupColumn("id_card_backup");
+        tableRule.getFields().add(idCardRule);
+        properties.getTables().add(tableRule);
+
+        EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
+        Map<String, DataSource> dataSources = new LinkedHashMap<>();
+        dataSources.put("primaryDs", primary);
+        GlobalMigrationSchemaSqlGeneratorFactory factory =
+                new DefaultGlobalMigrationSchemaSqlGeneratorFactory(dataSources, registry, properties);
+
+        List<String> ddl = factory.generateAllRegisteredTables("primaryDs");
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`",
+                "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(464), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(80))"
         ), ddl);
     }
 }

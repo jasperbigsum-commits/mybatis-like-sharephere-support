@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.schema.Column;
@@ -38,18 +39,15 @@ final class SqlEqualityConditionRewriter {
             return rewriteSeparateTable(expression, resolution, context, rule);
         }
         String targetColumn = assistedQueryColumnProvider.apply(rule, "equality query");
+        Expression operand = resolution.leftColumn() ? expression.getRightExpression() : expression.getLeftExpression();
+        Expression rewrittenOperand = rewriteAssistedOperand(rule, operand, context,
+                "Encrypted equality condition must use prepared parameter, string literal, or CONCAT of them.");
         if (resolution.leftColumn()) {
             expression.setLeftExpression(columnBuilder.apply(resolution.column(), targetColumn));
-            operandSupport.rewriteOperand(expression.getRightExpression(), context,
-                    valueTransformer.transformAssisted(rule,
-                            operandSupport.readOperandValue(expression.getRightExpression(), context)),
-                    MaskingMode.HASH);
+            expression.setRightExpression(rewrittenOperand);
         } else {
+            expression.setLeftExpression(rewrittenOperand);
             expression.setRightExpression(columnBuilder.apply(resolution.column(), targetColumn));
-            operandSupport.rewriteOperand(expression.getLeftExpression(), context,
-                    valueTransformer.transformAssisted(rule,
-                            operandSupport.readOperandValue(expression.getLeftExpression(), context)),
-                    MaskingMode.HASH);
         }
         context.markChanged();
         return expression;
@@ -61,7 +59,7 @@ final class SqlEqualityConditionRewriter {
                                             EncryptColumnRule rule) {
         Expression operand = resolution.leftColumn() ? expression.getRightExpression() : expression.getLeftExpression();
         QueryOperand queryOperand = operandSupport.readComposableQueryOperand(operand, context,
-                io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
                 "Separate-table encrypted query must use prepared parameter, string literal, or CONCAT of them.");
         String targetColumn = assistedQueryColumnProvider.apply(rule, "equality query");
         String transformed = valueTransformer.transformAssisted(rule, queryOperand.value());
@@ -70,5 +68,17 @@ final class SqlEqualityConditionRewriter {
                 transformed, MaskingMode.HASH);
         return separateTableExistsConditionBuilder.buildExistsCondition(resolution.column(), rule,
                 separateTableExistsConditionBuilder.buildEqualityPredicate(targetColumn, valueExpression));
+    }
+
+    private Expression rewriteAssistedOperand(EncryptColumnRule rule,
+                                              Expression operand,
+                                              SqlRewriteContext context,
+                                              String unsupportedMessage) {
+        QueryOperand queryOperand = operandSupport.readComposableQueryOperand(operand, context,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND, unsupportedMessage);
+        // 同表等值查询也统一走可组合表达式改写，避免 CONCAT/固定值仍停留在明文字面量上。
+        return operandSupport.buildComposableQueryExpression(queryOperand, context,
+                valueTransformer.transformAssisted(rule, queryOperand.value()),
+                MaskingMode.HASH);
     }
 }

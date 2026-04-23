@@ -160,6 +160,10 @@ public class DatabaseEncryptionProperties {
      * @return 解析得到的备份列名；未命中规则时返回 {@code null}
      */
     public String resolveMigrationBackupColumn(String tableName, String property, String column) {
+        String configuredBackupColumn = resolveConfiguredFieldBackupColumn(tableName, property, column);
+        if (StringUtils.isNotBlank(configuredBackupColumn)) {
+            return configuredBackupColumn;
+        }
         if (migration == null) {
             return null;
         }
@@ -220,6 +224,27 @@ public class DatabaseEncryptionProperties {
 
     private static String trimToNull(String value) {
         return StringUtils.isBlank(value) ? null : value.trim();
+    }
+
+    private String resolveConfiguredFieldBackupColumn(String tableName, String property, String column) {
+        String normalizedTable = normalizeTableName(tableName);
+        if (normalizedTable == null) {
+            return null;
+        }
+        String normalizedProperty = NameUtils.normalizeIdentifier(property);
+        String normalizedColumn = NameUtils.normalizeIdentifier(column);
+        for (TableRuleProperties tableRule : tables) {
+            if (tableRule == null || !normalizedTable.equals(normalizeTableName(tableRule.getTable()))) {
+                continue;
+            }
+            for (FieldRuleProperties fieldRule : tableRule.getFields()) {
+                if (fieldRule == null || !fieldRule.matches(normalizedProperty, normalizedColumn)) {
+                    continue;
+                }
+                return trimToNull(fieldRule.getBackupColumn());
+            }
+        }
+        return null;
     }
 
     /**
@@ -496,5 +521,30 @@ public class DatabaseEncryptionProperties {
          * 存储态脱敏列的算法 bean 名称。
          */
         private String maskedAlgorithm = "normalizedLike";
+
+        /**
+         * 迁移覆盖主表原列时使用的明文备份列。
+         *
+         * <p>全量 DDL 生成入口没有单实体 {@code backupColumn(...)} builder 上下文，
+         * 因此字段级配置需要在这里显式承载，才能被 {@code generateAllRegisteredTables()} 自动识别。</p>
+         */
+        private String backupColumn;
+
+        private boolean matches(String normalizedProperty, String normalizedColumn) {
+            String fieldProperty = StringUtils.isNotBlank(property)
+                    ? property
+                    : NameUtils.columnToProperty(column);
+            String fieldColumn = StringUtils.isNotBlank(column)
+                    ? column
+                    : NameUtils.camelToSnake(property);
+            // 属性名和源列名都允许作为备份字段选择器，保持与 builder.backupColumn(...) 的匹配规则一致。
+            return sameIdentifier(fieldProperty, normalizedProperty)
+                    || sameIdentifier(fieldColumn, normalizedColumn);
+        }
+
+        private boolean sameIdentifier(String value, String normalizedExpected) {
+            String normalizedValue = NameUtils.normalizeIdentifier(value);
+            return normalizedValue != null && normalizedValue.equals(normalizedExpected);
+        }
     }
 }

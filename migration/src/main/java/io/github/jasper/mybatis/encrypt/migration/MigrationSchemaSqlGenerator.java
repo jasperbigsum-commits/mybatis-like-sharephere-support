@@ -214,12 +214,19 @@ public final class MigrationSchemaSqlGenerator {
      */
     public Map<String, List<String>> generateAllRegisteredTablesGrouped(
             Consumer<EntityMigrationDefinition.Builder> builderCustomizer) {
-        LinkedHashMap<String, List<String>> statementsByTable = new LinkedHashMap<>();
+        SchemaSnapshot snapshot = loadSnapshot();
+        LinkedHashMap<String, TableRequirement> requirements = new LinkedHashMap<String, TableRequirement>();
+        List<String> orderedMainTables = new ArrayList<String>();
         for (String tableName : metadataRegistry.getRegisteredTableNames()) {
             if (properties.isMigrationTableExcluded(tableName)) {
                 continue;
             }
-            List<String> ddl = generateForTable(tableName, builderCustomizer);
+            orderedMainTables.add(tableName);
+            collectRequirements(buildPlanForTable(tableName, builderCustomizer), snapshot, requirements, tableName);
+        }
+        LinkedHashMap<String, List<String>> statementsByTable = new LinkedHashMap<String, List<String>>();
+        for (String tableName : orderedMainTables) {
+            List<String> ddl = renderStatementsForOwner(snapshot, requirements, tableName);
             if (!ddl.isEmpty()) {
                 statementsByTable.put(tableName, ddl);
             }
@@ -229,62 +236,111 @@ public final class MigrationSchemaSqlGenerator {
 
     private List<String> generate(EntityMigrationPlan plan) {
         SchemaSnapshot snapshot = loadSnapshot();
-        LinkedHashMap<String, TableRequirement> requirements = new LinkedHashMap<>();
+        LinkedHashMap<String, TableRequirement> requirements = new LinkedHashMap<String, TableRequirement>();
+        collectRequirements(plan, snapshot, requirements, plan.getTableName());
+        return renderStatementsForOwner(snapshot, requirements, plan.getTableName());
+    }
+
+    private EntityMigrationPlan buildPlanForTable(String tableName,
+                                                  Consumer<EntityMigrationDefinition.Builder> builderCustomizer) {
+        List<String> cursorColumns = defaultCursorColumns(tableName);
+        EntityMigrationDefinition.Builder builder = EntityMigrationDefinition.builder(
+                tableName,
+                cursorColumns.get(0),
+                cursorColumns.size() <= 1 ? new String[0]
+                        : cursorColumns.subList(1, cursorColumns.size()).toArray(new String[0])
+        );
+        if (builderCustomizer != null) {
+            builderCustomizer.accept(builder);
+        }
+        return planFactory.create(builder.build(), dataSourceName);
+    }
+
+    private void collectRequirements(EntityMigrationPlan plan,
+                                     SchemaSnapshot snapshot,
+                                     Map<String, TableRequirement> requirements,
+                                     String ownerMainTable) {
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             ColumnMetadata sourceColumn = snapshot.requireColumn(plan.getTableName(), columnPlan.getSourceColumn());
             if (columnPlan.isStoredInSeparateTable()) {
                 String storageTable = columnPlan.getStorageTable();
                 String previousColumn = columnPlan.getStorageIdColumn();
                 if (!snapshot.hasTable(storageTable)) {
-                    registerRequirement(requirements, storageTable, columnPlan.getStorageIdColumn(),
+                    registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getStorageIdColumn(),
                             referenceIdType(), true);
                 }
-                previousColumn = registerRequirement(requirements, storageTable, columnPlan.getStorageColumn(),
+                previousColumn = registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getStorageColumn(),
                         cipherType(sourceColumn), false, previousColumn);
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-                    previousColumn = registerRequirement(requirements, storageTable, columnPlan.getAssistedQueryColumn(),
+                    previousColumn = registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getAssistedQueryColumn(),
                             hashType(), false, previousColumn);
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                    previousColumn = registerRequirement(requirements, storageTable, columnPlan.getLikeQueryColumn(),
+                    previousColumn = registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getLikeQueryColumn(),
                             likeType(sourceColumn), false, previousColumn);
                 }
                 if (columnPlan.hasDistinctMaskedColumn()) {
-                    registerRequirement(requirements, storageTable, columnPlan.getMaskedColumn(),
+                    registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getMaskedColumn(),
                             likeType(sourceColumn), false, previousColumn);
                 }
             } else {
                 String previousColumn = columnPlan.getSourceColumn();
-                previousColumn = registerRequirement(requirements, plan.getTableName(), columnPlan.getStorageColumn(),
+                previousColumn = registerRequirement(requirements, ownerMainTable, plan.getTableName(), columnPlan.getStorageColumn(),
                         cipherType(sourceColumn), false, previousColumn);
                 if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-                    previousColumn = registerRequirement(requirements, plan.getTableName(),
+                    previousColumn = registerRequirement(requirements, ownerMainTable, plan.getTableName(),
                             columnPlan.getAssistedQueryColumn(), hashType(), false, previousColumn);
                 }
                 if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                    previousColumn = registerRequirement(requirements, plan.getTableName(),
+                    previousColumn = registerRequirement(requirements, ownerMainTable, plan.getTableName(),
                             columnPlan.getLikeQueryColumn(), likeType(sourceColumn), false, previousColumn);
                 }
                 if (columnPlan.hasDistinctMaskedColumn()) {
-                    previousColumn = registerRequirement(requirements, plan.getTableName(),
+                    previousColumn = registerRequirement(requirements, ownerMainTable, plan.getTableName(),
                             columnPlan.getMaskedColumn(), likeType(sourceColumn), false, previousColumn);
                 }
                 if (columnPlan.shouldWriteBackup()) {
-                    registerRequirement(requirements, plan.getTableName(), columnPlan.getBackupColumn(),
+                    registerRequirement(requirements, ownerMainTable, plan.getTableName(), columnPlan.getBackupColumn(),
                             backupType(sourceColumn), false, previousColumn);
                 }
                 continue;
             }
             if (columnPlan.shouldWriteBackup()) {
-                registerRequirement(requirements, plan.getTableName(), columnPlan.getBackupColumn(),
+                registerRequirement(requirements, ownerMainTable, plan.getTableName(), columnPlan.getBackupColumn(),
                         backupType(sourceColumn), false, columnPlan.getSourceColumn());
             }
         }
+    }
 
+    private List<String> renderStatementsForOwner(SchemaSnapshot snapshot,
+                                                  Map<String, TableRequirement> requirements,
+                                                  String ownerMainTable) {
         List<String> statements = new ArrayList<>();
+        // 先补主表上的备份列或主表扩展列，再输出缺失独立表的 create table 语句；
+        // 这样导出的执行顺序更贴近真实迁移前准备步骤，避免“已配置 backupColumn 但要等到最后才出现”的误判。
+        emitExistingTableStatements(statements, snapshot, requirements, ownerMainTable, true, false);
+        emitMissingTableStatements(statements, snapshot, requirements, ownerMainTable);
+        emitExistingTableStatements(statements, snapshot, requirements, ownerMainTable, false, true);
+        return statements;
+    }
+
+    private void emitExistingTableStatements(List<String> statements,
+                                             SchemaSnapshot snapshot,
+                                             Map<String, TableRequirement> requirements,
+                                             String ownerMainTable,
+                                             boolean mainTableOnly,
+                                             boolean externalTableOnly) {
         for (TableRequirement tableRequirement : requirements.values()) {
+            if (!tableRequirement.belongsTo(ownerMainTable)) {
+                continue;
+            }
+            if (mainTableOnly && !tableRequirement.isMainTable()) {
+                continue;
+            }
+            if (externalTableOnly && tableRequirement.isMainTable()) {
+                continue;
+            }
             if (!snapshot.hasTable(tableRequirement.tableName)) {
-                statements.add(createTableSql(tableRequirement));
                 continue;
             }
             for (ColumnRequirement requirement : tableRequirement.columns.values()) {
@@ -299,7 +355,20 @@ public final class MigrationSchemaSqlGenerator {
                 }
             }
         }
-        return statements;
+    }
+
+    private void emitMissingTableStatements(List<String> statements,
+                                            SchemaSnapshot snapshot,
+                                            Map<String, TableRequirement> requirements,
+                                            String ownerMainTable) {
+        for (TableRequirement tableRequirement : requirements.values()) {
+            if (!tableRequirement.belongsTo(ownerMainTable) || tableRequirement.isMainTable()) {
+                continue;
+            }
+            if (!snapshot.hasTable(tableRequirement.tableName)) {
+                statements.add(createTableSql(tableRequirement));
+            }
+        }
     }
 
     private List<String> defaultCursorColumns(String tableName) {
@@ -312,21 +381,24 @@ public final class MigrationSchemaSqlGenerator {
     }
 
     private void registerRequirement(Map<String, TableRequirement> requirements,
+                                     String ownerMainTable,
                                      String tableName,
                                      String columnName,
                                      ColumnType columnType) {
-        registerRequirement(requirements, tableName, columnName, columnType, false);
+        registerRequirement(requirements, ownerMainTable, tableName, columnName, columnType, false);
     }
 
     private void registerRequirement(Map<String, TableRequirement> requirements,
+                                     String ownerMainTable,
                                      String tableName,
                                      String columnName,
                                      ColumnType columnType,
                                      boolean primaryKey) {
-        registerRequirement(requirements, tableName, columnName, columnType, primaryKey, null);
+        registerRequirement(requirements, ownerMainTable, tableName, columnName, columnType, primaryKey, null);
     }
 
     private String registerRequirement(Map<String, TableRequirement> requirements,
+                                       String ownerMainTable,
                                        String tableName,
                                        String columnName,
                                        ColumnType columnType,
@@ -338,7 +410,7 @@ public final class MigrationSchemaSqlGenerator {
         String normalizedTable = NameUtils.normalizeIdentifier(tableName);
         TableRequirement tableRequirement = requirements.get(normalizedTable);
         if (tableRequirement == null) {
-            tableRequirement = new TableRequirement(tableName);
+            tableRequirement = new TableRequirement(tableName, ownerMainTable);
             requirements.put(normalizedTable, tableRequirement);
         }
         tableRequirement.register(columnName, columnType, primaryKey, afterColumnName);
@@ -372,6 +444,8 @@ public final class MigrationSchemaSqlGenerator {
     }
 
     private ColumnType backupType(ColumnMetadata sourceColumn) {
+        // 备份列需要完整保留迁移前原值，因此长度至少要满足当前源列声明长度；
+        // 不能像 hash/ref 一样降维，否则独立表覆盖主列时会把较长明文截断。
         return sourceColumn.toComparableType(dialect, sizingOptions.getFallbackCharacterLength());
     }
 
@@ -901,12 +975,14 @@ public final class MigrationSchemaSqlGenerator {
     private static final class TableRequirement {
 
         private final String tableName;
+        private final String ownerMainTable;
         private final LinkedHashMap<String, ColumnRequirement> columns =
                 new LinkedHashMap<String, ColumnRequirement>();
         private final List<String> primaryKeyColumns = new ArrayList<>();
 
-        private TableRequirement(String tableName) {
+        private TableRequirement(String tableName, String ownerMainTable) {
             this.tableName = tableName;
+            this.ownerMainTable = ownerMainTable;
         }
 
         private void register(String columnName,
@@ -923,6 +999,16 @@ public final class MigrationSchemaSqlGenerator {
             if (primaryKey && !primaryKeyColumns.contains(normalizedColumn)) {
                 primaryKeyColumns.add(normalizedColumn);
             }
+        }
+
+        private boolean belongsTo(String mainTableName) {
+            return NameUtils.normalizeIdentifier(ownerMainTable)
+                    .equals(NameUtils.normalizeIdentifier(mainTableName));
+        }
+
+        private boolean isMainTable() {
+            return NameUtils.normalizeIdentifier(tableName)
+                    .equals(NameUtils.normalizeIdentifier(ownerMainTable));
         }
     }
 }

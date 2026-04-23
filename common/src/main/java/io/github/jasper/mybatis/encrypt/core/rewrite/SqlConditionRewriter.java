@@ -220,6 +220,7 @@ final class SqlConditionRewriter {
         return sqlLikeConditionRewriter.rewrite(expression, resolution, context);
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     private Expression rewriteInCondition(InExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
@@ -230,13 +231,13 @@ final class SqlConditionRewriter {
             return expression;
         }
         EncryptColumnRule rule = resolution.rule();
-        if (rule.isStoredInSeparateTable()) {
-            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
-                    "IN query is not supported for separate-table encrypted field: " + rule.property());
-        }
-        String targetColumn = assistedQueryColumnProvider.apply(rule, "IN query");
-        expression.setLeftExpression(columnBuilder.apply(resolution.column(), targetColumn));
         if (expression.getRightExpression() instanceof Select) {
+            if (rule.isStoredInSeparateTable()) {
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_IN_QUERY,
+                        "IN subquery is not supported for separate-table encrypted field: " + rule.property());
+            }
+            expression.setLeftExpression(columnBuilder.apply(resolution.column(),
+                    assistedQueryColumnProvider.apply(rule, "IN query")));
             selectRewriteDispatcher.rewrite((Select) expression.getRightExpression(), context, ProjectionMode.COMPARISON);
             context.markChanged();
             return expression;
@@ -245,11 +246,16 @@ final class SqlConditionRewriter {
             throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
                     "Unsupported IN operand for encrypted fields.");
         }
-        ExpressionList<?> expressionList = (ExpressionList<?>) expression.getRightExpression();
-        for (Expression item : expressionList) {
-            operandSupport.rewriteOperand(item, context,
-                    valueTransformer.transformAssisted(rule, operandSupport.readOperandValue(item, context)),
-                    MaskingMode.HASH);
+        // 独立表主表字段保存的就是外表关联 hash/ref，列表型 IN 可以直接比较主表字段，避免逐值 EXISTS。
+        String targetColumn = rule.isStoredInSeparateTable()
+                ? rule.column()
+                : assistedQueryColumnProvider.apply(rule, "IN query");
+        expression.setLeftExpression(columnBuilder.apply(resolution.column(), targetColumn));
+        ExpressionList expressionList = (ExpressionList) expression.getRightExpression();
+        for (int index = 0; index < expressionList.size(); index++) {
+            Expression item = (Expression) expressionList.get(index);
+            expressionList.set(index, rewriteAssistedOperand(rule, item, context,
+                    "Encrypted IN condition must use prepared parameter, string literal, or CONCAT of them."));
         }
         context.markChanged();
         return expression;
@@ -350,6 +356,17 @@ final class SqlConditionRewriter {
         Column column = (Column) expression;
         EncryptColumnRule rule = tableContext.resolve(column).orElse(null);
         return rule == null ? null : new ColumnResolution(column, rule, true);
+    }
+
+    private Expression rewriteAssistedOperand(EncryptColumnRule rule,
+                                              Expression operand,
+                                              SqlRewriteContext context,
+                                              String unsupportedMessage) {
+        QueryOperand queryOperand = operandSupport.readComposableQueryOperand(operand, context,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND, unsupportedMessage);
+        return operandSupport.buildComposableQueryExpression(queryOperand, context,
+                valueTransformer.transformAssisted(rule, queryOperand.value()),
+                MaskingMode.HASH);
     }
 
     @FunctionalInterface

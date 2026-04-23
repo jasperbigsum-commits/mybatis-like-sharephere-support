@@ -676,6 +676,42 @@ class SqlRewriteEngineTest {
     }
 
     /**
+     * 测试目的：验证完整手机号由 SQL 固定片段 CONCAT 得出时，模糊检索仍能复用 LIKE 辅助列和 hash 精确兜底。
+     * 测试场景：模拟运营后台把固定手机号拆成多段写在 SQL 中，断言最终 SQL 不再包含 CONCAT 明文表达式，且无需新增 MyBatis 参数也能命中 hash 常量。
+     */
+    @Test
+    void shouldRewriteSameTableLikeLiteralConcatPattern() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.phone LIKE CONCAT('138', '00138000')",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_like` LIKE '13800138000'")
+                || result.sql().contains("u.phone_like LIKE '13800138000'"));
+        assertTrue(result.sql().contains("u.`phone_hash` = '"
+                + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'")
+                || result.sql().contains("u.phone_hash = '"
+                + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(result.sql().contains(" OR "));
+        assertFalse(result.sql().contains("CONCAT("));
+        result.applyTo(boundSql);
+        assertEquals(0, boundSql.getParameterMappings().size());
+    }
+
+    /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
@@ -1222,6 +1258,86 @@ class SqlRewriteEngineTest {
     }
 
     /**
+     * 测试目的：验证批量用户筛选 SQL 中，IN 候选列表混用固定值、CONCAT 固定表达式和运行时参数时都能转换为 hash 查询。
+     * 测试场景：模拟名单导出按多个手机号过滤，其中部分号码写死在 SQL、部分来自 MyBatis 参数，断言 SQL 常量和参数绑定都完成 hash 改写且业务状态参数顺序保持不变。
+     */
+    @Test
+    void shouldRewriteInListWithLiteralConcatAndParameter() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT phone FROM user_account WHERE status = ? AND phone IN ('13800138000', CONCAT('139', '00139000'), ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "status", Integer.class).build(),
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build()
+                ),
+                Map.of("status", 1, "phone", "13700137000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("status = ?"));
+        assertTrue(result.sql().contains("`phone_hash` IN") || result.sql().contains("phone_hash IN"));
+        assertTrue(result.sql().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(result.sql().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13900139000") + "'"));
+        assertFalse(result.sql().contains("CONCAT("));
+        result.applyTo(boundSql);
+        assertEquals("status", boundSql.getParameterMappings().get(0).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13700137000"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    /**
+     * 测试目的：验证独立表模式下按多个证件号批量过滤时，IN 列表会直接改写为主表 hash/ref 列查询。
+     * 测试场景：模拟业务列表同时传入固定证件号片段和 MyBatis 参数，断言不生成 EXISTS，常量和参数都转换为辅助 hash 值。
+     */
+    @Test
+    void shouldRewriteSeparateTableInListToMainReferenceHashOperands() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.status = ? AND u.id_card IN ('320101199001011234', CONCAT('320101', '199001019999'), ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "status", Integer.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard", String.class).build()
+                ),
+                Map.of("status", 1, "idCard", "320101199001018888")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertFalse(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("u.`id_card` IN") || result.sql().contains("u.id_card IN"));
+        assertTrue(result.sql().contains("'" + new Sm3AssistedQueryAlgorithm().transform("320101199001011234") + "'"));
+        assertTrue(result.sql().contains("'" + new Sm3AssistedQueryAlgorithm().transform("320101199001019999") + "'"));
+        assertFalse(result.sql().contains("CONCAT("));
+        result.applyTo(boundSql);
+        assertEquals("status", boundSql.getParameterMappings().get(0).getProperty());
+        assertTrue(boundSql.getParameterMappings().get(1).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("320101199001018888"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
@@ -1345,7 +1461,7 @@ class SqlRewriteEngineTest {
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
     @Test
-    void shouldRewriteSeparateTableExactLikeToHashEqualityExistsSubQuery() {
+    void shouldRewriteSeparateTableExactLikeToMainReferenceHashEquality() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
         SqlRewriteEngine engine = new SqlRewriteEngine(
@@ -1364,12 +1480,11 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("EXISTS"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
-        assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
-        assertTrue(result.sql().contains(" OR "));
-        assertEquals(2, result.maskedParameters().size());
+        assertFalse(result.sql().contains("EXISTS"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
+        assertFalse(result.sql().contains("id_card_like LIKE"));
+        assertEquals(1, result.maskedParameters().size());
     }
 
     /**
@@ -1401,7 +1516,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("EXISTS"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertTrue(result.sql().contains(" OR "));
         assertFalse(result.sql().contains("CONCAT("));
         result.applyTo(boundSql);
@@ -2100,11 +2215,149 @@ class SqlRewriteEngineTest {
     }
 
     /**
+     * 测试目的：验证 GROUP BY 与 HAVING 同时出现时，同表加密字段会分别改写到 hash 辅助列。
+     * 测试场景：构造按手机号分组再按手机号过滤的统计 SQL，断言 GROUP BY 和 HAVING 都命中 phone_hash。
+     */
+    @Test
+    void shouldRewriteGroupByAndHavingEqualityToAssistedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("GROUP BY `phone_hash`")
+                || result.sql().contains("GROUP BY phone_hash"));
+        assertTrue(result.sql().contains("HAVING `phone_hash` = ?")
+                || result.sql().contains("HAVING phone_hash = ?"));
+    }
+
+    /**
+     * 测试目的：验证 HAVING 中的 IN 条件会复用查询态 hash 改写能力，支持固定值、CONCAT 和预编译参数混合列表。
+     * 测试场景：构造按手机号分组后的名单筛选 SQL，断言 HAVING IN 列表中的每一项都完成 hash 转换。
+     */
+    @Test
+    void shouldRewriteHavingInListWithLiteralConcatAndParameter() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone IN ('13800138000', CONCAT('139', '00139000'), ?)",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13700137000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("GROUP BY `phone_hash`")
+                || result.sql().contains("GROUP BY phone_hash"));
+        assertTrue(result.sql().contains("HAVING `phone_hash` IN")
+                || result.sql().contains("HAVING phone_hash IN"));
+        assertTrue(result.sql().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(result.sql().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13900139000") + "'"));
+        assertFalse(result.sql().contains("CONCAT("));
+        result.applyTo(boundSql);
+        assertTrue(boundSql.getParameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13700137000"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty()));
+    }
+
+    /**
+     * 测试目的：验证独立表模式下 HAVING 使用完整值 LIKE 时，会直接退化为主表 hash/ref 字段等值判断。
+     * 测试场景：构造按身份证分组后的精确 LIKE 过滤 SQL，断言不会生成 EXISTS，而是直接比较主表 id_card 字段。
+     */
+    @Test
+    void shouldRewriteSeparateTableHavingExactLikeToMainReferenceHashEquality() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id_card, COUNT(*) total FROM user_account u GROUP BY u.id_card HAVING u.id_card LIKE ?",
+                List.of(new ParameterMapping.Builder(configuration, "idCardLike", String.class).build()),
+                Map.of("idCardLike", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertFalse(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("GROUP BY u.`id_card`")
+                || result.sql().contains("GROUP BY u.id_card"));
+        assertTrue(result.sql().contains("HAVING u.`id_card` = ?")
+                || result.sql().contains("HAVING u.id_card = ?"));
+    }
+
+    /**
+     * 测试目的：验证混合分组字段下，HAVING 中同表与独立表条件会按各自规则分别改写。
+     * 测试场景：构造 status、phone、id_card 混合分组，并在 HAVING 中同时使用 phone 等值和 id_card IN 列表过滤，断言两种模式都命中正确列。
+     */
+    @Test
+    void shouldRewriteMixedGroupByAndHavingPredicatesIndividually() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.status, u.phone, u.id_card, COUNT(*) total FROM user_account u "
+                        + "GROUP BY u.status, u.phone, u.id_card "
+                        + "HAVING u.phone = ? AND u.id_card IN (?, ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard1", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCard2", String.class).build()
+                ),
+                Map.of("phone", "13800138000",
+                        "idCard1", "320101199001011234",
+                        "idCard2", "320101199001015678")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("GROUP BY u.status, u.`phone_hash`, u.`id_card`")
+                || result.sql().contains("GROUP BY u.status, u.phone_hash, u.id_card"));
+        assertTrue(result.sql().contains("HAVING u.`phone_hash` = ?")
+                || result.sql().contains("HAVING u.phone_hash = ?"));
+        assertTrue(result.sql().contains("u.`id_card` IN (?, ?)")
+                || result.sql().contains("u.id_card IN (?, ?)"));
+    }
+
+    /**
      * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
      */
     @Test
-    void shouldFailFastForEncryptedGroupBy() {
+    void shouldRewriteEncryptedGroupByToAssistedColumn() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
         SqlRewriteEngine engine = new SqlRewriteEngine(
@@ -2116,6 +2369,90 @@ class SqlRewriteEngineTest {
         BoundSql boundSql = new BoundSql(
                 configuration,
                 "SELECT phone FROM user_account GROUP BY phone",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("GROUP BY `phone_hash`")
+                || result.sql().contains("GROUP BY phone_hash"));
+    }
+
+    /**
+     * 测试目的：验证独立表模式下按加密字段分组时，可以直接使用主表中的 hash/ref 字段分组。
+     * 测试场景：构造按身份证独立表引用列分组的统计 SQL，断言 GROUP BY 保留主表逻辑列引用且不再误判为不支持。
+     */
+    @Test
+    void shouldAllowSeparateTableGroupByMainReferenceColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id_card, COUNT(*) total FROM user_account u GROUP BY u.id_card",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertFalse(result.sql().contains("user_id_card_encrypt"));
+        assertTrue(result.sql().contains("GROUP BY u.`id_card`")
+                || result.sql().contains("GROUP BY u.id_card"));
+    }
+
+    /**
+     * 测试目的：验证多字段混合分组会逐项检查，普通字段、同表加密字段和独立表引用字段可以在同一个 GROUP BY 中共存。
+     * 测试场景：构造 status + phone + id_card 三字段分组，断言普通字段保持不变、phone 改写为 hash 辅助列、id_card 保持主表 hash/ref 引用。
+     */
+    @Test
+    void shouldRewriteMixedGroupByFieldsIndividually() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.status, u.phone, u.id_card, COUNT(*) total FROM user_account u GROUP BY u.status, u.phone, u.id_card",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("GROUP BY u.status, u.`phone_hash`, u.`id_card`")
+                || result.sql().contains("GROUP BY u.status, u.phone_hash, u.id_card"));
+    }
+
+    /**
+     * 测试目的：验证加密字段复杂分组表达式仍然会被拒绝，避免把业务函数表达式错误替换成 hash 后改变分组语义。
+     * 测试场景：构造 SUBSTRING(phone, 1, 3) 这类依赖明文内容的分组 SQL，断言仍按不支持 GROUP BY 快速失败。
+     */
+    @Test
+    void shouldRejectEncryptedGroupByExpression() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT COUNT(*) FROM user_account GROUP BY SUBSTRING(phone, 1, 3)",
                 List.of(),
                 Map.of()
         );
@@ -2400,7 +2737,8 @@ class SqlRewriteEngineTest {
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
 
         assertEquals(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND, exception.getErrorCode());
-        assertEquals("Encrypted query condition must use prepared parameter or string literal.", exception.getMessage());
+        assertEquals("Encrypted equality condition must use prepared parameter, string literal, or CONCAT of them.",
+                exception.getMessage());
     }
 
     /**

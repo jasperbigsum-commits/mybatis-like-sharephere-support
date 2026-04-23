@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("unit")
@@ -81,6 +82,27 @@ class SqlConditionRewriterTest {
     }
 
     /**
+     * 测试目的：验证业务 SQL 中把手机号拆成固定片段再 CONCAT 的场景，同表等值查询也会直接改写到 hash 列。
+     * 测试场景：模拟 XML 中写死前缀和后缀来拼接完整手机号，断言改写后不再保留 CONCAT 明文表达式，而是改成可直接命中辅助列的 hash 常量。
+     */
+    @Test
+    void shouldRewriteEqualityLiteralConcatToAssistedLiteral() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone = CONCAT('138', '00138000')"),
+                tableContext,
+                rewriteContext("SELECT id FROM user_account WHERE phone = CONCAT('138', '00138000')",
+                        Collections.<ParameterMapping>emptyList(), Collections.emptyMap())
+        );
+
+        assertTrue(rewritten.toString().contains("`phone_hash` = '"
+                + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertFalse(rewritten.toString().contains("CONCAT("));
+    }
+
+    /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
@@ -105,6 +127,29 @@ class SqlConditionRewriterTest {
     }
 
     /**
+     * 测试目的：验证后台模糊检索 SQL 即使把完整手机号写成固定值 CONCAT，也会同时产出 LIKE 列查询和 hash 精确兜底。
+     * 测试场景：模拟运营列表查询把完整关键字拆成多个常量片段，断言 LIKE 条件、辅助 hash 条件以及常量折叠能够一次完成。
+     */
+    @Test
+    void shouldRewriteLikeLiteralConcatToLikeAndAssistedFallback() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone LIKE CONCAT('138', '00138000')"),
+                tableContext,
+                rewriteContext("SELECT id FROM user_account WHERE phone LIKE CONCAT('138', '00138000')",
+                        Collections.<ParameterMapping>emptyList(), Collections.emptyMap())
+        );
+
+        assertTrue(rewritten.toString().contains("`phone_like` LIKE '13800138000'"));
+        assertTrue(rewritten.toString().contains("`phone_hash` = '"
+                + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(rewritten.toString().contains(" OR "));
+        assertFalse(rewritten.toString().contains("CONCAT("));
+    }
+
+    /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
@@ -121,11 +166,145 @@ class SqlConditionRewriterTest {
 
         assertTrue(rewritten.toString().contains("EXISTS"));
         assertTrue(rewritten.toString().contains("`phone_like` LIKE ?"));
-        assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
+        assertTrue(rewritten.toString().contains("`phone` = ?"));
         assertTrue(rewritten.toString().contains(" OR "));
         assertEquals(2, context.parameterMappings().size());
         assertEquals("%abc%", context.originalValue(0));
         assertEquals(new Sm3AssistedQueryAlgorithm().transform("AbC"), context.originalValue(1));
+    }
+
+    /**
+     * 测试目的：验证独立表模式下批量按证件号、手机号等主表引用字段过滤时，IN 列表可以直接改写为主表 hash/ref 列比较。
+     * 测试场景：模拟独立表字段使用固定值、CONCAT 固定表达式和预编译参数混合查询，断言不再生成 EXISTS，所有候选值都转换为 hash。
+     */
+    @Test
+    void shouldRewriteSeparateTableInListToMainReferenceHashOperands() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+        SqlRewriteContext context = rewriteContext(
+                "SELECT id FROM user_account WHERE phone IN ('13800138000', CONCAT('139', '00139000'), ?)",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13700137000")
+        );
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone IN ('13800138000', CONCAT('139', '00139000'), ?)"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone` IN"));
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertTrue(rewritten.toString().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(rewritten.toString().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13900139000") + "'"));
+        assertFalse(rewritten.toString().contains("CONCAT("));
+        assertEquals(1, context.parameterMappings().size());
+        assertTrue(context.parameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13700137000"), context.originalValue(0));
+    }
+
+    /**
+     * 测试目的：验证独立表模式下 LIKE 精确匹配不必再进入外表 LIKE 列，直接使用主表 hash/ref 列即可完成查询。
+     * 测试场景：模拟用户输入完整证件号、手机号且 SQL 使用 LIKE 但没有通配符，断言改写结果为主表引用列等值 hash 条件。
+     */
+    @Test
+    void shouldRewriteSeparateTableExactLikeToMainReferenceHashPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13800138000"));
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone LIKE ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone` = ?"));
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertEquals(1, context.parameterMappings().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
+    }
+
+    /**
+     * 测试目的：验证 HAVING 子句会复用 WHERE 的同表等值改写规则，按辅助 hash 列完成筛选。
+     * 测试场景：模拟按手机号分组后的统计查询在 HAVING 中继续按手机号精确过滤，断言改写后命中 phone_hash 且参数被转换为 hash。
+     */
+    @Test
+    void shouldRewriteHavingEqualityToAssistedColumn() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+        SqlRewriteContext context = rewriteContext(
+                "SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone = ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13800138000")
+        );
+
+        Expression rewritten = rewriter.rewrite(
+                parseHaving("SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone = ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
+        assertEquals(1, context.parameterMappings().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
+    }
+
+    /**
+     * 测试目的：验证 HAVING 中的名单过滤也会复用 IN 列表批量 hash 改写能力。
+     * 测试场景：模拟分组统计后再用固定值、固定 CONCAT 和预编译参数混合名单过滤手机号，断言每个候选值都被转换为 hash 查询项。
+     */
+    @Test
+    void shouldRewriteHavingInListLiteralConcatAndParameterToHashOperands() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+        SqlRewriteContext context = rewriteContext(
+                "SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone IN ('13800138000', CONCAT('139', '00139000'), ?)",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13700137000")
+        );
+
+        Expression rewritten = rewriter.rewrite(
+                parseHaving("SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone IN ('13800138000', CONCAT('139', '00139000'), ?)"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone_hash` IN"));
+        assertTrue(rewritten.toString().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(rewritten.toString().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13900139000") + "'"));
+        assertFalse(rewritten.toString().contains("CONCAT("));
+        assertEquals(1, context.parameterMappings().size());
+        assertTrue(context.parameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13700137000"), context.originalValue(0));
+    }
+
+    /**
+     * 测试目的：验证独立表模式下 HAVING 精确 LIKE 也会直接命中主表 hash/ref 字段，而不是回退到外表 EXISTS。
+     * 测试场景：模拟按证件号或手机号引用列分组后，HAVING 使用无通配符 LIKE 精确过滤，断言改写结果为主表引用列等值 hash 条件。
+     */
+    @Test
+    void shouldRewriteSeparateTableHavingExactLikeToMainReferenceHashPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+        SqlRewriteContext context = rewriteContext(
+                "SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone LIKE ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13800138000")
+        );
+
+        Expression rewritten = rewriter.rewrite(
+                parseHaving("SELECT phone, COUNT(*) total FROM user_account GROUP BY phone HAVING phone LIKE ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone` = ?"));
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertEquals(1, context.parameterMappings().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
     }
 
     /**
@@ -149,6 +328,35 @@ class SqlConditionRewriterTest {
 
         assertTrue(rewritten.toString().contains("`phone_hash` IN"));
         assertEquals(Collections.singletonList(ProjectionMode.COMPARISON), dispatchedModes);
+    }
+
+    /**
+     * 测试目的：验证批量名单筛选场景中，IN 列表里的固定值、固定值 CONCAT 和预编译参数都会统一改写为 hash 查询项。
+     * 测试场景：模拟导出筛选 SQL 同时混用字面量和参数，断言每个候选值都完成 hash 转换，并且参数槽位不会因为表达式折叠而错位。
+     */
+    @Test
+    void shouldRewriteInListLiteralConcatAndParameterToHashOperands() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+        SqlRewriteContext context = rewriteContext(
+                "SELECT id FROM user_account WHERE phone IN ('13800138000', CONCAT('139', '00139000'), ?)",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13700137000")
+        );
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone IN ('13800138000', CONCAT('139', '00139000'), ?)"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone_hash` IN"));
+        assertTrue(rewritten.toString().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13800138000") + "'"));
+        assertTrue(rewritten.toString().contains("'" + new Sm3AssistedQueryAlgorithm().transform("13900139000") + "'"));
+        assertFalse(rewritten.toString().contains("CONCAT("));
+        assertEquals(1, context.parameterMappings().size());
+        assertTrue(context.parameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13700137000"), context.originalValue(0));
     }
 
     /**
@@ -197,6 +405,13 @@ class SqlConditionRewriterTest {
         Select select = (Select) statement;
         PlainSelect plainSelect = (PlainSelect) select;
         return plainSelect.getWhere();
+    }
+
+    private Expression parseHaving(String sql) throws Exception {
+        Statement statement = JSqlParserSupport.parseStatement(sql);
+        Select select = (Select) statement;
+        PlainSelect plainSelect = (PlainSelect) select;
+        return plainSelect.getHaving();
     }
 
     private SqlTableContext tableContext(EncryptColumnRule rule) {

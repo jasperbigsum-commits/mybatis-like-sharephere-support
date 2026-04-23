@@ -102,11 +102,23 @@ final class SqlRewriteValidator {
             return;
         }
         for (Object item : groupByElement.getGroupByExpressionList()) {
-            if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext)) {
+            if (item instanceof Expression
+                    && containsEncryptedReference((Expression) item, tableContext)
+                    && !isAllowedEncryptedGroupByExpression((Expression) item, tableContext)) {
                 throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_GROUP_BY,
                         "GROUP BY is not supported on encrypted fields.");
             }
         }
+    }
+
+    private boolean isAllowedEncryptedGroupByExpression(Expression expression, SqlTableContext tableContext) {
+        EncryptColumnRule rule = resolveEncryptedRule(expression, tableContext);
+        if (rule == null || !rule.isStoredInSeparateTable() || !(expression instanceof Column)) {
+            return false;
+        }
+        Column column = (Column) expression;
+        return io.github.jasper.mybatis.encrypt.util.NameUtils.normalizeIdentifier(column.getColumnName())
+                .equals(io.github.jasper.mybatis.encrypt.util.NameUtils.normalizeIdentifier(rule.column()));
     }
 
     private void validateOrderBy(List<OrderByElement> orderByElements, SqlTableContext tableContext) {

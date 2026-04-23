@@ -93,10 +93,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 builder -> builder.backupColumn("idCard", "id_card_backup"));
 
         assertEquals(Arrays.asList(
+                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`",
                 "alter table `user_id_card_encrypt` modify column `id_card_cipher` varchar(464)",
                 "alter table `user_id_card_encrypt` modify column `id_card_hash` varchar(64)",
-                "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80) after `id_card_hash`",
-                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`"
+                "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80) after `id_card_hash`"
         ), ddl);
     }
 
@@ -116,6 +116,61 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         List<String> ddl = generator.generateForEntity(SeparateTableUserEntity.class);
 
         assertEquals(Collections.singletonList(
+                "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(464), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(80))"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证独立表缺失时导出的迁移 DDL 仍会同步补齐主表明文备份列。
+     * 测试场景：构造只存在主表、独立表尚未创建的迁移前状态，配置备份列后断言导出 SQL 先补主表备份列，再创建独立表结构。
+     */
+    @Test
+    void shouldGenerateMainTableBackupColumnBeforeMissingSeparateTableDdl() throws Exception {
+        DataSource dataSource = newDataSource("schema-create-separate-table-with-backup");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, id_card varchar(80))");
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry(), properties());
+
+        List<String> ddl = generator.generateForEntity(
+                SeparateTableUserEntity.class,
+                builder -> builder.backupColumn("idCard", "id_card_backup"));
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`",
+                "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(464), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(80))"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证独立表模式下主表备份列如果已经存在但长度偏小，单表导出也会补齐 modify DDL。
+     * 测试场景：模拟身份证原列长度为 80，但历史上误建了 16 长度的备份列，断言生成器会先扩容备份列，再补齐独立表结构。
+     */
+    @Test
+    void shouldModifySeparateTableBackupColumnWhenExistingLengthIsTooSmall() throws Exception {
+        DataSource dataSource = newDataSource("schema-separate-backup-modify");
+        executeSql(dataSource,
+                "create table user_account ("
+                        + "id bigint primary key, "
+                        + "id_card varchar(80), "
+                        + "id_card_backup varchar(16))");
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry(), properties());
+
+        List<String> ddl = generator.generateForEntity(
+                SeparateTableUserEntity.class,
+                builder -> builder.backupColumn("idCard", "id_card_backup"));
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` modify column `id_card_backup` varchar(80)",
                 "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
                         + "`id_card_cipher` varchar(464), "
                         + "`id_card_hash` varchar(64), "
@@ -180,6 +235,203 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 "alter table `user_account` add column `phone_hash` varchar(64) after `phone_cipher`",
                 "alter table `user_account` add column `phone_like` varchar(64) after `phone_hash`"
         )), ddl);
+    }
+
+    /**
+     * 测试目的：验证全量导出入口处理独立表模式时，也会读取全局备份列模板并补齐主表备份列 DDL。
+     * 测试场景：注册身份证独立表加密实体，只调用 generateAllRegisteredTables，不传单实体 builder，断言主表备份列和缺失独立表建表 SQL 同时导出。
+     */
+    @Test
+    void shouldGenerateSeparateTableBackupColumnWhenGeneratingAllRegisteredTables() throws Exception {
+        DataSource dataSource = newDataSource("schema-batch-separate-ddl-with-backup");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, id_card varchar(80))");
+        io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry metadataRegistry = metadataRegistry();
+        metadataRegistry.registerEntityType(SeparateTableUserEntity.class);
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties properties = properties();
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.BackupColumnTemplateRuleProperties backupRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.BackupColumnTemplateRuleProperties();
+        backupRule.setTablePattern("user_account");
+        backupRule.setFieldPattern("idCard|id_card");
+        backupRule.setTemplate("${column}_backup");
+        properties.getMigration().getBackupColumnTemplates().add(backupRule);
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, properties);
+
+        List<String> ddl = generator.generateAllRegisteredTables();
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`",
+                "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(464), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(80))"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证全量导出入口在独立表覆盖主列并配置备份列时，会检查已存在备份列是否满足原始业务长度。
+     * 测试场景：主表身份证列长度为 80，但历史备份列只有 16；只调用 generateAllRegisteredTables，断言返回 modify backup 和独立表建表 SQL。
+     */
+    @Test
+    void shouldModifySeparateTableBackupColumnWhenGeneratingAllRegisteredTables() throws Exception {
+        DataSource dataSource = newDataSource("schema-batch-separate-backup-modify");
+        executeSql(dataSource,
+                "create table user_account ("
+                        + "id bigint primary key, "
+                        + "id_card varchar(80), "
+                        + "id_card_backup varchar(16))");
+        io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry metadataRegistry = metadataRegistry();
+        metadataRegistry.registerEntityType(SeparateTableUserEntity.class);
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties properties = properties();
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.BackupColumnTemplateRuleProperties backupRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.BackupColumnTemplateRuleProperties();
+        backupRule.setTablePattern("user_account");
+        backupRule.setFieldPattern("idCard|id_card");
+        backupRule.setTemplate("${column}_backup");
+        properties.getMigration().getBackupColumnTemplates().add(backupRule);
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, properties);
+
+        List<String> ddl = generator.generateAllRegisteredTables();
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` modify column `id_card_backup` varchar(80)",
+                "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(464), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(80))"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证全量导出时多个主表共用一张独立表会先合并列需求，再输出一份取最大长度的最终 DDL。
+     * 测试场景：用户表和归档表都映射到 shared_id_card_encrypt，但原字段长度分别为 80 和 120，断言只生成一条 create table，且密文和 LIKE 列长度取较大值。
+     */
+    @Test
+    void shouldMergeSharedSeparateTableRequirementsAcrossRegisteredTables() throws Exception {
+        DataSource dataSource = newDataSource("schema-batch-shared-separate-table");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, id_card varchar(80))",
+                "create table user_archive (id bigint primary key, archive_id_card varchar(120))");
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties properties = properties();
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties accountRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties();
+        accountRule.setTable("user_account");
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties accountField =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties();
+        accountField.setProperty("idCard");
+        accountField.setColumn("id_card");
+        accountField.setStorageMode(io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode.SEPARATE_TABLE);
+        accountField.setStorageTable("shared_id_card_encrypt");
+        accountField.setStorageColumn("id_card_cipher");
+        accountField.setStorageIdColumn("id");
+        accountField.setAssistedQueryColumn("id_card_hash");
+        accountField.setLikeQueryColumn("id_card_like");
+        accountRule.getFields().add(accountField);
+        properties.getTables().add(accountRule);
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties archiveRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties();
+        archiveRule.setTable("user_archive");
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties archiveField =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties();
+        archiveField.setProperty("archiveIdCard");
+        archiveField.setColumn("archive_id_card");
+        archiveField.setStorageMode(io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode.SEPARATE_TABLE);
+        archiveField.setStorageTable("shared_id_card_encrypt");
+        archiveField.setStorageColumn("id_card_cipher");
+        archiveField.setStorageIdColumn("id");
+        archiveField.setAssistedQueryColumn("id_card_hash");
+        archiveField.setLikeQueryColumn("id_card_like");
+        archiveRule.getFields().add(archiveField);
+        properties.getTables().add(archiveRule);
+
+        io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry metadataRegistry =
+                new io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry(
+                        properties, new io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader());
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, properties);
+
+        List<String> ddl = generator.generateAllRegisteredTables();
+
+        assertEquals(Collections.singletonList(
+                "create table `shared_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(680), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(120))"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证共享独立表已经存在且字段长度不足时，全量导出只会生成一组最终扩容 SQL。
+     * 测试场景：用户表和归档表共同映射到 shared_id_card_encrypt，现有外表列长度低于两边要求，断言生成器会合并需求后仅输出一次 modify，且长度取最大值。
+     */
+    @Test
+    void shouldModifyExistingSharedSeparateTableUsingMergedMaximumLengths() throws Exception {
+        DataSource dataSource = newDataSource("schema-batch-shared-separate-table-modify");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, id_card varchar(80))",
+                "create table user_archive (id bigint primary key, archive_id_card varchar(120))",
+                "create table shared_id_card_encrypt ("
+                        + "id varchar(32) primary key, "
+                        + "id_card_cipher varchar(200), "
+                        + "id_card_hash varchar(16), "
+                        + "id_card_like varchar(40))");
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties properties = properties();
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties accountRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties();
+        accountRule.setTable("user_account");
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties accountField =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties();
+        accountField.setProperty("idCard");
+        accountField.setColumn("id_card");
+        accountField.setStorageMode(io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode.SEPARATE_TABLE);
+        accountField.setStorageTable("shared_id_card_encrypt");
+        accountField.setStorageColumn("id_card_cipher");
+        accountField.setStorageIdColumn("id");
+        accountField.setAssistedQueryColumn("id_card_hash");
+        accountField.setLikeQueryColumn("id_card_like");
+        accountRule.getFields().add(accountField);
+        properties.getTables().add(accountRule);
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties archiveRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties();
+        archiveRule.setTable("user_archive");
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties archiveField =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties();
+        archiveField.setProperty("archiveIdCard");
+        archiveField.setColumn("archive_id_card");
+        archiveField.setStorageMode(io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode.SEPARATE_TABLE);
+        archiveField.setStorageTable("shared_id_card_encrypt");
+        archiveField.setStorageColumn("id_card_cipher");
+        archiveField.setStorageIdColumn("id");
+        archiveField.setAssistedQueryColumn("id_card_hash");
+        archiveField.setLikeQueryColumn("id_card_like");
+        archiveRule.getFields().add(archiveField);
+        properties.getTables().add(archiveRule);
+
+        io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry metadataRegistry =
+                new io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry(
+                        properties, new io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader());
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, properties);
+
+        List<String> ddl = generator.generateAllRegisteredTables();
+
+        assertEquals(Arrays.asList(
+                "alter table `shared_id_card_encrypt` modify column `id_card_cipher` varchar(680)",
+                "alter table `shared_id_card_encrypt` modify column `id_card_hash` varchar(64)",
+                "alter table `shared_id_card_encrypt` modify column `id_card_like` varchar(120)"
+        ), ddl);
     }
 
     /**

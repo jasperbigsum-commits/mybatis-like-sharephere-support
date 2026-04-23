@@ -32,7 +32,7 @@ class SqlSelectTableContextBuilderTest {
      */
     @Test
     void shouldRegisterDerivedTableRuleAfterDispatchingDerivedSelectRewrite() throws Exception {
-        List<ProjectionMode> dispatchedModes = new ArrayList<ProjectionMode>();
+        List<ProjectionMode> dispatchedModes = new ArrayList<>();
         EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(sampleProperties(), new AnnotationEncryptMetadataLoader());
         DerivedTableRuleBuilder derivedTableRuleBuilder = new DerivedTableRuleBuilder(metadataRegistry);
         SqlSelectTableContextBuilder builder = new SqlSelectTableContextBuilder(

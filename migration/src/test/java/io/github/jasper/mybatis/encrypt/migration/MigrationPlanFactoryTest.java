@@ -18,6 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("migration")
 class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectDtoStyleMultiTableMetadata() {
         MigrationDefinitionException exception = assertThrows(MigrationDefinitionException.class, () ->
@@ -28,6 +32,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("ignores DTO fields"));
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectUnknownIncludedFieldSelector() {
         MigrationFieldSelectorException exception = assertThrows(MigrationFieldSelectorException.class, () ->
@@ -40,6 +48,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("Unknown migration field selector"));
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectUnknownBackupSelector() {
         MigrationFieldSelectorException exception = assertThrows(MigrationFieldSelectorException.class, () ->
@@ -52,6 +64,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("Backup column selector"));
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectBackupColumnConflictsWithMigrationTargets() {
         MigrationDefinitionException exception = assertThrows(MigrationDefinitionException.class, () ->
@@ -64,6 +80,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("Backup column conflicts"));
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectMissingRegisteredTableRule() {
         MigrationDefinitionException exception = assertThrows(MigrationDefinitionException.class, () ->
@@ -74,6 +94,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("Missing registered table encryption rule"));
     }
 
+    /**
+     * 测试目的：验证覆盖式迁移、备份列和断点续跑的幂等安全行为。
+     * 测试场景：准备已迁移或部分迁移的数据状态，执行迁移后校验备份明文、游标检查点和重复执行结果。
+     */
     @Test
     void shouldApplyBackupColumnTemplateRuleForOverwriteField() {
         DatabaseEncryptionProperties properties = properties();
@@ -90,6 +114,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertEquals("phone_backup", plan.getColumnPlans().get(0).getBackupColumn());
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectExcludedMigrationTable() {
         DatabaseEncryptionProperties properties = properties();
@@ -103,6 +131,10 @@ class MigrationPlanFactoryTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("excluded"));
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectMutableCursorColumn() {
         MigrationDefinitionException exception = assertThrows(MigrationDefinitionException.class, () ->

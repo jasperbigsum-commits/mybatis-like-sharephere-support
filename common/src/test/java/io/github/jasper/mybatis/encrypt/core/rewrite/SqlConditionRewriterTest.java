@@ -30,6 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("rewrite")
 class SqlConditionRewriterTest {
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteEqualityToAssistedColumnAndReplaceParameter() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
@@ -48,6 +52,10 @@ class SqlConditionRewriterTest {
         );
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteLikeConcatToLikeAndAssistedFallback() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
@@ -72,6 +80,10 @@ class SqlConditionRewriterTest {
         );
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteExactLikeToLikeAndAssistedFallback() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
@@ -92,6 +104,10 @@ class SqlConditionRewriterTest {
         );
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableLikeToExistsWithAssistedFallback() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
@@ -112,6 +128,10 @@ class SqlConditionRewriterTest {
         assertEquals(new Sm3AssistedQueryAlgorithm().transform("AbC"), context.originalValue(1));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldDispatchComparisonProjectionModeForEncryptedInSubquery() throws Exception {
         List<ProjectionMode> dispatchedModes = new ArrayList<ProjectionMode>();
@@ -131,6 +151,10 @@ class SqlConditionRewriterTest {
         assertEquals(Collections.singletonList(ProjectionMode.COMPARISON), dispatchedModes);
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableEqualityToExistsSubquery() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());

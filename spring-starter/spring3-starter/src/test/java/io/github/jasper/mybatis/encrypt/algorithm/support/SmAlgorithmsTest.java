@@ -13,6 +13,10 @@ import org.junit.jupiter.api.Test;
 @Tag("algorithm")
 class SmAlgorithmsTest {
 
+    /**
+     * 测试目的：验证内置加密、哈希、LIKE 归一化和业务脱敏算法输出稳定。
+     * 测试场景：输入手机号、身份证、银行卡、姓名等典型业务值，断言密文、摘要或脱敏格式符合规则。
+     */
     @Test
     void shouldEncryptAndDecryptWithSm4() {
         Sm4CipherAlgorithm algorithm = new Sm4CipherAlgorithm("rcb@Xk9mPq2L");
@@ -25,6 +29,10 @@ class SmAlgorithmsTest {
         assertEquals("13800138000", algorithm.decrypt(encrypted));
     }
 
+    /**
+     * 测试目的：验证内置加密、哈希、LIKE 归一化和业务脱敏算法输出稳定。
+     * 测试场景：输入手机号、身份证、银行卡、姓名等典型业务值，断言密文、摘要或脱敏格式符合规则。
+     */
     @Test
     void shouldProduceStableSm3Digest() {
 
@@ -37,6 +45,10 @@ class SmAlgorithmsTest {
         assertEquals(digest, algorithm.transform("13800138000"));
     }
 
+    /**
+     * 测试目的：验证内置加密、哈希、LIKE 归一化和业务脱敏算法输出稳定。
+     * 测试场景：输入手机号、身份证、银行卡、姓名等典型业务值，断言密文、摘要或脱敏格式符合规则。
+     */
     @Test
     void shouldExposeBlankSm4KeyErrorCode() {
         EncryptionConfigurationException exception = assertThrows(EncryptionConfigurationException.class,

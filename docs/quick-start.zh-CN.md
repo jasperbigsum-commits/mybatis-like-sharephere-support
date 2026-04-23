@@ -58,14 +58,15 @@ mybatis:
 
 配置项速查：
 
-| 配置项 | 是否必填 | 作用 | 推荐值 / 建议 |
-| --- | --- | --- | --- |
-| `mybatis.configuration.map-underscore-to-camel-case` | 否 | 下划线列到驼峰属性自动映射 | DTO / 实体用驼峰时推荐 `true` |
-| `mybatis.encrypt.enabled` | 否 | 总开关 | 默认即可，通常保持 `true` |
-| `mybatis.encrypt.default-cipher-key` | 是 | 默认主加密算法密钥 | 生产环境必须替换，不能用示例值 |
-| `mybatis.encrypt.scan-entity-annotations` | 否 | 扫描 `@EncryptField` / `@EncryptTable` | 注解模式推荐 `true` |
-| `mybatis.encrypt.scan-packages` | 注解扫描时推荐 | 限定实体扫描包 | 只填业务实体所在包，避免全项目扫描 |
-| `mybatis.encrypt.sensitive-response.enabled` | 否 | controller 边界脱敏开关 | 对外接口要自动脱敏时设为 `true` |
+| 配置项 | 是否必填 | 作用 | 推荐值 / 建议                           |
+| --- | --- | --- |------------------------------------|
+| `mybatis.configuration.map-underscore-to-camel-case` | 否 | 下划线列到驼峰属性自动映射 | DTO / 实体用驼峰时推荐 `true`              |
+| `mybatis.encrypt.enabled` | 否 | 总开关 | 默认即可，通常保持 `true`                   |
+| `mybatis.encrypt.default-cipher-key` | 是 | 默认主加密算法密钥 | 生产环境必须替换，不能用示例值                    |
+| `mybatis.encrypt.scan-entity-annotations` | 否 | 扫描 `@EncryptField` / `@EncryptTable` | 注解模式推荐 `true`                      |
+| `mybatis.encrypt.scan-packages` | 注解扫描时推荐 | 限定实体扫描包 | 只填业务实体所在包，避免全项目扫描                  |
+| `mybatis.encrypt.separate-table-hydration-batch-size` | 否 | 独立表结果回填时单批查询的 hash 数量上限 | 默认 `2000`；结果量很大或数据库对 `IN` 项数敏感时可调小 |
+| `mybatis.encrypt.sensitive-response.enabled` | 否 | controller 边界脱敏开关 | 对外接口要自动脱敏时设为 `true`                |
 
 最少要点：
 

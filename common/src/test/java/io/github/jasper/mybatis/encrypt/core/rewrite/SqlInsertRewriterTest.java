@@ -29,6 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("rewrite")
 class SqlInsertRewriterTest {
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteEncryptedInsertColumnsAndShadowValues() throws Exception {
         SqlInsertRewriter rewriter = newInsertRewriter();
@@ -57,6 +61,10 @@ class SqlInsertRewriterTest {
         assertEquals(4, context.parameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteSeparateTableInsertReferenceOnly() throws Exception {
         SqlInsertRewriter rewriter = newInsertRewriter();

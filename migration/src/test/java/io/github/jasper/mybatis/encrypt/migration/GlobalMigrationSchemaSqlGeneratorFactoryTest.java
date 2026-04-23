@@ -21,6 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @Tag("migration")
 class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldRouteBatchDdlGenerationByDatasourceNameAndDialect() throws Exception {
         DataSource primary = newDataSource("global_schema_primary");
@@ -62,6 +66,10 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         ), archiveDdl);
     }
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldGenerateMaskedColumnDdlFromConfiguredRules() throws Exception {
         DataSource primary = newDataSource("global_schema_masked_primary");

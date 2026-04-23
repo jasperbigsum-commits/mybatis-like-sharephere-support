@@ -17,6 +17,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Tag("migration")
 class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldGenerateAddColumnSqlUsingSourceLengthHeuristics() throws Exception {
         DataSource dataSource = newDataSource("schema-add-columns");
@@ -37,6 +41,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), ddl);
     }
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldGenerateModifyColumnSqlWhenExistingSizeIsTooSmall() throws Exception {
         DataSource dataSource = newDataSource("schema-modify-columns");
@@ -63,6 +71,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), ddl);
     }
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldGenerateExternalTableSqlForSeparateTableField() throws Exception {
         DataSource dataSource = newDataSource("schema-separate-table");
@@ -88,6 +100,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), ddl);
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldGenerateCreateTableSqlWhenSeparateTableIsMissing() throws Exception {
         DataSource dataSource = newDataSource("schema-create-separate-table");
@@ -107,6 +123,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), ddl);
     }
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldGenerateMaskedColumnSqlForSameTableAndSeparateTable() throws Exception {
         DataSource dataSource = newDataSource("schema-masked-columns");
@@ -138,6 +158,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), separateTableDdl);
     }
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldGenerateBatchDdlForRegisteredTables() throws Exception {
         DataSource dataSource = newDataSource("schema-batch-ddl");
@@ -158,6 +182,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         )), ddl);
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldUseMinimumCipherColumnLengthForShortSourceColumn() throws Exception {
         DataSource dataSource = newDataSource("schema-cipher-min-length");
@@ -176,6 +204,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), ddl);
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldUseLargeTextTypeWhenEstimatedCipherLengthExceedsVarcharLimit() throws Exception {
         DataSource dataSource = newDataSource("schema-cipher-large-text");
@@ -194,6 +226,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), ddl);
     }
 
+    /**
+     * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
+     * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
+     */
     @Test
     void shouldSkipExcludedTableWhenGeneratingBatchDdl() throws Exception {
         DataSource dataSource = newDataSource("schema-batch-exclude-ddl");
@@ -211,6 +247,10 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         assertEquals(Collections.emptyList(), generator.generateAllRegisteredTables());
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectAutoCreateTableForClickHouseDialect() throws Exception {
         DataSource dataSource = newDataSource("schema-clickhouse-create");

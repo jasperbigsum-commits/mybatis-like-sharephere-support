@@ -26,6 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("web")
 class SensitiveResponseWebTest {
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldOpenControllerScopeAndMaskRecordedReferenceBeforeResponseWrite() throws Exception {
         SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
@@ -46,6 +50,10 @@ class SensitiveResponseWebTest {
         assertFalse(SensitiveDataContext.isActive());
     }
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldKeepSensitiveValueWhenControllerAllowsSensitiveResponse() throws Exception {
         SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
@@ -66,6 +74,10 @@ class SensitiveResponseWebTest {
         assertFalse(SensitiveDataContext.isActive());
     }
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldPreferStoredMaskedValueWithoutSensitiveFieldAnnotation() throws Exception {
         SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
@@ -87,6 +99,10 @@ class SensitiveResponseWebTest {
         assertFalse(SensitiveDataContext.isActive());
     }
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldCloseNestedAnnotatedScopesInLifoOrderWithinSameRequest() throws Exception {
         SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
@@ -108,6 +124,10 @@ class SensitiveResponseWebTest {
         assertFalse(SensitiveDataContext.isActive());
     }
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldReuseLikeAlgorithmForAnnotatedSensitiveField() {
         AlgorithmRegistry algorithmRegistry = new AlgorithmRegistry(
@@ -124,6 +144,10 @@ class SensitiveResponseWebTest {
         assertEquals("*******8000", dto.phone);
     }
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldUseCustomSensitiveFieldMaskerWithAnnotationOptions() {
         CustomMaskerDto dto = new CustomMaskerDto("abcdefg");

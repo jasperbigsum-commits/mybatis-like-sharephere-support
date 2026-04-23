@@ -5,7 +5,7 @@
 
   <groupId>io.github.jasperbigsum-commits</groupId>
   <artifactId>mybatis-like-sharephere-support</artifactId>
-  <version>1.0.3-SNAPSHOT</version>
+  <version>1.0.4-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>mybatis-like-sharephere-support</name>
   <description>MyBatis database field encryption plugin inspired by ShardingSphere.</description>

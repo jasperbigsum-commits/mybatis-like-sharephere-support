@@ -30,6 +30,10 @@ class SqlSelectProjectionRewriterTest {
             this::requireAssistedQueryColumn
     );
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteEncryptedProjectionToStorageAlias() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT phone FROM user_account");
@@ -41,6 +45,10 @@ class SqlSelectProjectionRewriterTest {
                 || plainSelect.toString().contains("phone_cipher phone"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldPrependEncryptedAliasBeforeWildcard() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT * FROM user_account");
@@ -52,6 +60,10 @@ class SqlSelectProjectionRewriterTest {
                 || plainSelect.toString().contains("phone_cipher phone, user_account.*"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldKeepWildcardWhenStorageColumnEqualsLogicalColumn() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT * FROM user_account");
@@ -62,6 +74,10 @@ class SqlSelectProjectionRewriterTest {
         assertEquals("SELECT * FROM user_account", plainSelect.toString());
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldNotDuplicateEncryptedProjectionWhenExplicitColumnAppearsBeforeWildcard() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT phone, * FROM user_account");
@@ -74,6 +90,10 @@ class SqlSelectProjectionRewriterTest {
                 || plainSelect.toString().contains("phone_cipher phone, user_account.*"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldNotDuplicateEncryptedProjectionWhenExplicitColumnAppearsAfterWildcard() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT *, phone FROM user_account");
@@ -86,6 +106,10 @@ class SqlSelectProjectionRewriterTest {
                 || plainSelect.toString().contains("phone_cipher phone, user_account.*"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldAppendDerivedHelperColumnsForDerivedProjection() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT phone FROM user_account");
@@ -97,6 +121,10 @@ class SqlSelectProjectionRewriterTest {
         assertTrue(plainSelect.toString().contains("__enc_like_phone"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldRejectWildcardInComparisonSubqueryProjection() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT * FROM user_account");

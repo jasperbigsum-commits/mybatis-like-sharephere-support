@@ -36,6 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("migration")
 class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldResumeFromLastCommittedBatchAfterFailure() throws Exception {
         DataSource dataSource = newDataSource("resume");
@@ -103,6 +107,10 @@ class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
         assertEquals("3", report.getLastProcessedCursor());
     }
 
+    /**
+     * 测试目的：验证覆盖式迁移、备份列和断点续跑的幂等安全行为。
+     * 测试场景：准备已迁移或部分迁移的数据状态，执行迁移后校验备份明文、游标检查点和重复执行结果。
+     */
     @Test
     void shouldResumeFromCompositeCursorCheckpoint() throws Exception {
         DataSource dataSource = newDataSource("resume_composite_cursor");
@@ -191,6 +199,10 @@ class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
         assertEquals(expectedLastProcessed, report.getLastProcessedCursorMap());
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectConcurrentExecutionWhenCheckpointLockIsHeld() throws Exception {
         DataSource dataSource = newDataSource("resume_lock");
@@ -229,6 +241,10 @@ class MigrationResumeBehaviorTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldSkipVerificationForAlreadyMigratedSeparateTableFieldWhenOtherFieldStillRequiresMigration() throws Exception {
         DataSource dataSource = newDataSource("resume_mixed_state_verify");

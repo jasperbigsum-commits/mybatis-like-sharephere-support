@@ -55,7 +55,7 @@ public class SeparateTableEncryptionManager {
         this.referencePreparer = new SeparateTableReferencePreparer(
                 dataSource, metadataRegistry, algorithmRegistry, rowPersister, ruleSupport);
         this.resultHydrator = new SeparateTableResultHydrator(
-                dataSource, metadataRegistry, algorithmRegistry, ruleSupport);
+                dataSource, metadataRegistry, algorithmRegistry, properties, ruleSupport);
     }
 
     /**

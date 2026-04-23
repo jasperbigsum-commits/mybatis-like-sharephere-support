@@ -32,6 +32,10 @@ import static org.junit.jupiter.api.Assertions.*;
 @Tag("rewrite")
 class SqlRewriteEngineTest {
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteInsertToStorageAndShadowColumns() {
         Configuration configuration = new Configuration();
@@ -65,6 +69,10 @@ class SqlRewriteEngineTest {
         assertEquals(5, boundSql.getParameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteInsertAcrossStorageModes() {
         Configuration configuration = new Configuration();
@@ -106,6 +114,10 @@ class SqlRewriteEngineTest {
         assertEquals(7, boundSql.getParameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteInsertOnceWhenLikeAndMaskedShareColumn() {
         Configuration configuration = new Configuration();
@@ -135,6 +147,10 @@ class SqlRewriteEngineTest {
         assertEquals(4, boundSql.getParameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSelectColumnToStorageColumnAndEqualityToAssistedColumn() {
         Configuration configuration = new Configuration();
@@ -161,6 +177,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldRewriteSqlContainingRepeatedBlankLines() {
         Configuration configuration = new Configuration();
@@ -185,6 +205,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteWildcardSelectByAppendingStorageAlias() {
         Configuration configuration = new Configuration();
@@ -210,6 +234,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteExplicitPlainColumnAndWildcardWithoutAlias() {
         Configuration configuration = new Configuration();
@@ -236,6 +264,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteEncryptedColumnAndWildcardWithoutAlias() {
         Configuration configuration = new Configuration();
@@ -263,6 +295,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteExplicitPlainColumnAndWildcardWithTableAlias() {
         Configuration configuration = new Configuration();
@@ -289,6 +325,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteEncryptedColumnAndWildcardWithTableAlias() {
         Configuration configuration = new Configuration();
@@ -316,6 +356,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldKeepWildcardSelectWhenStorageColumnEqualsLogicalColumn() {
         Configuration configuration = new Configuration();
@@ -342,6 +386,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldAvoidDuplicatedEncryptedProjectionWhenSelectContainsExplicitColumnAndWildcard() {
         Configuration configuration = new Configuration();
@@ -368,6 +416,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteAliasedWildcardByPrependingEncryptedAliasBeforeTableWildcard() {
         Configuration configuration = new Configuration();
@@ -394,6 +446,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteMultiTableSelectUsingExplicitTableWildcardWithoutAlias() {
         Configuration configuration = new Configuration();
@@ -423,6 +479,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("user_account.`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteMultiTableSelectUsingExplicitTableWildcardWithAlias() {
         Configuration configuration = new Configuration();
@@ -450,6 +510,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForBareWildcardMixedWithEncryptedProjectionInJoin() {
         Configuration configuration = new Configuration();
@@ -476,6 +540,10 @@ class SqlRewriteEngineTest {
         assertTrue(exception.getMessage().contains("table.*") || exception.getMessage().contains("alias.*"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForBareWildcardOnlyInJoinWithEncryptedTableRule() {
         Configuration configuration = new Configuration();
@@ -502,6 +570,10 @@ class SqlRewriteEngineTest {
         assertTrue(exception.getMessage().contains("table.*") || exception.getMessage().contains("alias.*"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForBareWildcardBeforeEncryptedProjectionInJoin() {
         Configuration configuration = new Configuration();
@@ -528,6 +600,10 @@ class SqlRewriteEngineTest {
         assertTrue(exception.getMessage().contains("table.*") || exception.getMessage().contains("alias.*"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteJoinAndNestedWhereConditions() {
         Configuration configuration = new Configuration();
@@ -557,6 +633,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_like` LIKE ?"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSameTableLikeConcatPattern() {
         Configuration configuration = new Configuration();
@@ -595,6 +675,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteExactLikeToLikeAndAssistedFallback() {
         Configuration configuration = new Configuration();
@@ -628,6 +712,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailEqualityQueryWithoutAssistedQueryColumn() {
         Configuration configuration = new Configuration();
@@ -657,6 +745,10 @@ class SqlRewriteEngineTest {
         );
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailLikeQueryWithoutLikeQueryColumn() {
         Configuration configuration = new Configuration();
@@ -686,6 +778,10 @@ class SqlRewriteEngineTest {
         );
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailInsertSelectWithStructuredErrorCode() {
         Configuration configuration = new Configuration();
@@ -712,6 +808,10 @@ class SqlRewriteEngineTest {
         assertEquals("Only VALUES inserts are supported for encrypted tables.", exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailSeparateTableEqualityQueryWithoutAssistedQueryColumn() {
         Configuration configuration = new Configuration();
@@ -728,6 +828,10 @@ class SqlRewriteEngineTest {
         );
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldExposeStructuredRewriteFailureWhenParserCannotHandleSql() {
         Configuration configuration = new Configuration();
@@ -754,6 +858,10 @@ class SqlRewriteEngineTest {
         assertTrue(exception.getMessage().startsWith("Failed to rewrite encrypted SQL:"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteEncryptedProjectionInComplexDerivedJoinQuery() {
         Configuration configuration = new Configuration();
@@ -790,6 +898,10 @@ class SqlRewriteEngineTest {
         assertEquals(0, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteExistsSubquery() {
         Configuration configuration = new Configuration();
@@ -814,6 +926,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteUnionBranches() {
         Configuration configuration = new Configuration();
@@ -844,6 +960,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`archive_phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteMultiUnionWithNestedSubqueriesAcrossStorageModes() {
         Configuration configuration = new Configuration();
@@ -893,6 +1013,10 @@ class SqlRewriteEngineTest {
         assertEquals(6, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRewriteWrappedPermissionUnionWithNestedSubqueriesWithoutTypeCastError() {
         Configuration configuration = new Configuration();
@@ -974,6 +1098,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("ORDER BY h.sort_no ASC"));
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldRewriteEncryptedInSubquery() {
         Configuration configuration = new Configuration();
@@ -1000,6 +1128,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`archive_phone_like` LIKE ?"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteDerivedTableEqualityPredicate() {
         Configuration configuration = new Configuration();
@@ -1026,6 +1158,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteDerivedTableLikePredicate() {
         Configuration configuration = new Configuration();
@@ -1054,6 +1190,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteNotInList() {
         Configuration configuration = new Configuration();
@@ -1081,6 +1221,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteNotWrappedEquality() {
         Configuration configuration = new Configuration();
@@ -1105,6 +1249,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteIsNullToStorageColumn() {
         Configuration configuration = new Configuration();
@@ -1128,6 +1276,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_cipher` IS NULL"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableEqualityUsingReferencedStorageId() {
         Configuration configuration = new Configuration();
@@ -1156,6 +1308,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableLikeUsingReferencedStorageId() {
         Configuration configuration = new Configuration();
@@ -1184,6 +1340,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableExactLikeToHashEqualityExistsSubQuery() {
         Configuration configuration = new Configuration();
@@ -1212,6 +1372,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableLikeConcatPatternUsingReferencedStorageId() {
         Configuration configuration = new Configuration();
@@ -1251,6 +1415,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableIsNullUsingReferencedStorageId() {
         Configuration configuration = new Configuration();
@@ -1277,6 +1445,10 @@ class SqlRewriteEngineTest {
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableIsNullAndIsNotNull() {
         Configuration configuration = new Configuration();
@@ -1310,6 +1482,10 @@ class SqlRewriteEngineTest {
         assertFalse(isNotNullResult.sql().contains("NOT EXISTS"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteNestedConditionsContainingSeparateTablePredicates() {
         Configuration configuration = new Configuration();
@@ -1342,6 +1518,10 @@ class SqlRewriteEngineTest {
         assertEquals(4, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTablePredicateWrappedByExtraParentheses() {
         Configuration configuration = new Configuration();
@@ -1370,6 +1550,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableLikeWrappedByExtraParentheses() {
         Configuration configuration = new Configuration();
@@ -1398,6 +1582,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTableIsNullWrappedByExtraParentheses() {
         Configuration configuration = new Configuration();
@@ -1424,6 +1612,10 @@ class SqlRewriteEngineTest {
                 || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteNestedParenthesizedSeparateTableEqualityOrIsNull() {
         Configuration configuration = new Configuration();
@@ -1454,6 +1646,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteNestedParenthesizedSeparateTableLikeOrEquality() {
         Configuration configuration = new Configuration();
@@ -1487,6 +1683,10 @@ class SqlRewriteEngineTest {
         assertEquals(3, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteSeparateTablePredicateInsideExistsSubquery() {
         Configuration configuration = new Configuration();
@@ -1516,6 +1716,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldPreserveSelectPlaceholderParameterOrderWhenRewritingSeparateTableWherePredicate() {
         Configuration configuration = new Configuration();
@@ -1551,6 +1755,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldPreserveMultipleSelectPlaceholdersBeforeEncryptedWhereParameter() {
         Configuration configuration = new Configuration();
@@ -1587,6 +1795,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldPreserveMultipleSelectPlaceholdersBeforeSameTableEncryptedWhereParameter() {
         Configuration configuration = new Configuration();
@@ -1623,6 +1835,10 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldPreserveCrmCustomerCountQueryParameterOrderWhenEncryptingOuterContactNamePredicate() {
         Configuration configuration = new Configuration();
@@ -1713,6 +1929,10 @@ class SqlRewriteEngineTest {
         );
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteUpdateAcrossStorageModes() {
         Configuration configuration = new Configuration();
@@ -1756,6 +1976,10 @@ class SqlRewriteEngineTest {
         assertEquals(7, boundSql.getParameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteUpdateOnceWhenLikeAndMaskedShareColumn() {
         Configuration configuration = new Configuration();
@@ -1785,6 +2009,10 @@ class SqlRewriteEngineTest {
         assertEquals(4, boundSql.getParameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldTreatLiteralUpdateSetRewriteAsChanged() {
         Configuration configuration = new Configuration();
@@ -1810,6 +2038,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_like` = '"));
     }
 
+    /**
+     * 测试目的：验证写入类 SQL 会把明文字段改写为密文列、辅助查询列、LIKE 列和脱敏列。
+     * 测试场景：构造 INSERT/UPDATE/DELETE 语句和 MyBatis 参数绑定，断言改写后的 SQL、生成参数和写入列集合正确。
+     */
     @Test
     void shouldRewriteDeleteAcrossStorageModes() {
         Configuration configuration = new Configuration();
@@ -1840,6 +2072,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteHavingCondition() {
         Configuration configuration = new Configuration();
@@ -1863,6 +2099,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("HAVING `phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForEncryptedGroupBy() {
         Configuration configuration = new Configuration();
@@ -1885,6 +2125,10 @@ class SqlRewriteEngineTest {
         assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_GROUP_BY, exception.getErrorCode());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForEncryptedOrderBy() {
         Configuration configuration = new Configuration();
@@ -1908,6 +2152,10 @@ class SqlRewriteEngineTest {
         assertEquals("ORDER BY is not supported on encrypted field: phone", exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForEncryptedRangePredicate() {
         Configuration configuration = new Configuration();
@@ -1931,6 +2179,10 @@ class SqlRewriteEngineTest {
         assertEquals("Range comparison is not supported on encrypted fields.", exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteCaseWhenCondition() {
         Configuration configuration = new Configuration();
@@ -1954,6 +2206,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("CASE WHEN `phone_hash` = ? THEN 1 ELSE 0 END = 1"));
     }
 
+    /**
+     * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
+     * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
+     */
     @Test
     void shouldRewriteQualifyCondition() {
         Configuration configuration = new Configuration();
@@ -1977,6 +2233,10 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("QUALIFY `phone_hash` = ?"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForWindowFunctionUsingEncryptedField() {
         Configuration configuration = new Configuration();
@@ -1999,6 +2259,10 @@ class SqlRewriteEngineTest {
         assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW, exception.getErrorCode());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForDistinctEncryptedField() {
         Configuration configuration = new Configuration();
@@ -2021,6 +2285,10 @@ class SqlRewriteEngineTest {
         assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_DISTINCT, exception.getErrorCode());
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldAllowDistinctNonEncryptedField() {
         Configuration configuration = new Configuration();
@@ -2042,6 +2310,10 @@ class SqlRewriteEngineTest {
         assertFalse(result.changed());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForAggregateUsingEncryptedField() {
         Configuration configuration = new Configuration();
@@ -2075,6 +2347,10 @@ class SqlRewriteEngineTest {
         assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION, havingException.getErrorCode());
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForAmbiguousEncryptedColumnReference() {
         Configuration configuration = new Configuration();
@@ -2099,6 +2375,10 @@ class SqlRewriteEngineTest {
         assertTrue(exception.getMessage().contains("Ambiguous encrypted column reference"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldFailFastForEncryptedQueryUsingNonLiteralOperand() {
         Configuration configuration = new Configuration();
@@ -2123,6 +2403,10 @@ class SqlRewriteEngineTest {
         assertEquals("Encrypted query condition must use prepared parameter or string literal.", exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldAllowCountStar() {
         Configuration configuration = new Configuration();
@@ -2144,6 +2428,10 @@ class SqlRewriteEngineTest {
         assertFalse(result.changed());
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldRewriteAcrossStorageModesUsingOracle12Dialect() {
         Configuration configuration = new Configuration();
@@ -2178,6 +2466,10 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldRewriteAcrossStorageModesUsingClickHouseDialect() {
         Configuration configuration = new Configuration();

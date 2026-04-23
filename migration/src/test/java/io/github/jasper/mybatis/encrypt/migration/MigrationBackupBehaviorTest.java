@@ -22,6 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("migration")
 class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证覆盖式迁移、备份列和断点续跑的幂等安全行为。
+     * 测试场景：准备已迁移或部分迁移的数据状态，执行迁移后校验备份明文、游标检查点和重复执行结果。
+     */
     @Test
     void shouldBackupPlaintextBeforeOverwritingSourceColumn() throws Exception {
         DataSource dataSource = newDataSource("separate_table_backup");
@@ -61,6 +65,10 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证覆盖式迁移、备份列和断点续跑的幂等安全行为。
+     * 测试场景：准备已迁移或部分迁移的数据状态，执行迁移后校验备份明文、游标检查点和重复执行结果。
+     */
     @Test
     void shouldBackupPlaintextBeforeReplacingSourceColumnWithHashValue() throws Exception {
         DataSource dataSource = newDataSource("same_table_hash_overwrite_backup");
@@ -101,6 +109,10 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证覆盖式迁移、备份列和断点续跑的幂等安全行为。
+     * 测试场景：准备已迁移或部分迁移的数据状态，执行迁移后校验备份明文、游标检查点和重复执行结果。
+     */
     @Test
     void shouldBackupPlaintextBeforeReplacingSourceColumnWithLikeValue() throws Exception {
         DataSource dataSource = newDataSource("same_table_like_overwrite_backup");
@@ -141,6 +153,10 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证覆盖式迁移、备份列和断点续跑的幂等安全行为。
+     * 测试场景：准备已迁移或部分迁移的数据状态，执行迁移后校验备份明文、游标检查点和重复执行结果。
+     */
     @Test
     void shouldResumeOverwriteMigrationFromBackupColumnWhenSourceWasAlreadyReplaced() throws Exception {
         DataSource dataSource = newDataSource("same_table_hash_overwrite_backup_resume");

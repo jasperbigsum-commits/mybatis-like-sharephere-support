@@ -24,6 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("migration")
 class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldCreateConfirmationTemplateAndBlockUntilApproved() throws Exception {
         DataSource dataSource = newDataSource("confirm_template");
@@ -58,6 +62,10 @@ class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
         assertEquals("UPDATE|user_account|phone_like", properties.getProperty("entry.3"));
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldExecuteWhenConfirmationFileIsApprovedAndScopeMatches() throws Exception {
         DataSource dataSource = newDataSource("confirm_approved");
@@ -90,6 +98,10 @@ class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
         assertEquals(1L, report.getMigratedRows());
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldFailWhenConfirmationScopeDoesNotMatchActualMutationFields() throws Exception {
         DataSource dataSource = newDataSource("confirm_mismatch");
@@ -131,6 +143,10 @@ class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("does not match actual mutation scope"));
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldFailWhenConfiguredExpectedScopeDiffersFromActualFields() throws Exception {
         DataSource dataSource = newDataSource("expected_scope_mismatch");
@@ -161,6 +177,10 @@ class MigrationConfirmationPolicyTest extends MigrationJdbcTestSupport {
         assertTrue(exception.getMessage().contains("does not match actual mutation scope"));
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldSupportOneExpectedRiskPolicyConfiguredForMultipleTables() throws Exception {
         DataSource dataSource = newDataSource("expected_scope_multi_table");

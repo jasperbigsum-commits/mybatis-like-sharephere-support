@@ -16,6 +16,10 @@ class AnnotationEncryptMetadataLoaderTest {
 
     private final AnnotationEncryptMetadataLoader loader = new AnnotationEncryptMetadataLoader();
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldResolveColumnFromMybatisPlusBeforeJpa() {
         EncryptTableRule tableRule = loader.load(MixedAnnotationEntity.class);
@@ -26,6 +30,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("mp_phone", rule.storageColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldResolveColumnFromJpaWhenMybatisPlusAbsent() {
         EncryptTableRule tableRule = loader.load(JpaOnlyEntity.class);
@@ -36,6 +44,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("email_addr", rule.storageColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldFallbackToSnakeCaseWhenNoThirdPartyColumnAnnotationExists() {
         EncryptTableRule tableRule = loader.load(DefaultNamingEntity.class);
@@ -46,6 +58,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("mobile_phone", rule.storageColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldDefaultSeparateTableStorageIdColumnToIdWhenNotConfigured() {
         EncryptTableRule tableRule = loader.load(MybatisPlusSeparateUserEntity.class);
@@ -55,6 +71,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("id", rule.storageIdColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldKeepExplicitSeparateTableStorageIdColumn() {
         EncryptTableRule tableRule = loader.load(SeparateUserEntity.class);
@@ -64,6 +84,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("user_id", rule.storageIdColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldDefaultSeparateTableStorageIdColumnToIdForJpaEntity() {
         EncryptTableRule tableRule = loader.load(JpaSeparateUserEntity.class);
@@ -73,6 +97,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("id", rule.storageIdColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldDefaultSeparateTableStorageIdColumnToIdWithoutIdMetadata() {
         EncryptTableRule tableRule = loader.load(SnakeCaseSeparateUserEntity.class);
@@ -82,6 +110,10 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("id", rule.storageIdColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldKeepFieldLevelSourceTableForDtoField() {
         EncryptTableRule tableRule = loader.load(MultiTableDto.class);

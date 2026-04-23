@@ -14,6 +14,10 @@ import org.junit.jupiter.api.Test;
 @Tag("metadata")
 class EncryptMetadataRegistryTest {
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldUseConfiguredSeparateTableStorageIdColumn() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -38,6 +42,10 @@ class EncryptMetadataRegistryTest {
         assertEquals("encrypt_id", rule.storageIdColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldDefaultSeparateTableStorageIdColumnToIdWithoutBusinessSourceLink() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -61,6 +69,10 @@ class EncryptMetadataRegistryTest {
         assertEquals("id", rule.storageIdColumn());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldInferConfiguredPropertyFromColumnAndResolveConfigOnlyEntityRule() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -88,6 +100,10 @@ class EncryptMetadataRegistryTest {
                 .isPresent());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldReturnEmptyForEntityWithoutEncryptAnnotation() {
         EncryptMetadataRegistry registry =
@@ -96,6 +112,10 @@ class EncryptMetadataRegistryTest {
         assertTrue(registry.findByEntity(PlainEntity.class).isEmpty());
     }
 
+    /**
+     * 测试目的：验证注解和外部配置能正确合并为表级、字段级加密规则。
+     * 测试场景：构造实体注解、第三方列注解和配置属性，断言字段名、来源表、存储列和默认值推断正确。
+     */
     @Test
     void shouldRegisterFieldLevelRulesToDifferentSourceTables() {
         EncryptMetadataRegistry registry =
@@ -115,6 +135,10 @@ class EncryptMetadataRegistryTest {
                 .isPresent());
     }
 
+    /**
+     * 测试目的：验证非法加密元数据配置会在加载阶段被明确拒绝。
+     * 测试场景：构造缺失表名、缺失辅助列或算法冲突的规则，断言配置异常和错误码符合预期。
+     */
     @Test
     void shouldRejectConfiguredTableRuleWithoutTableName() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -128,6 +152,10 @@ class EncryptMetadataRegistryTest {
         assertEquals("Configured table rule must define table name.", exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证非法加密元数据配置会在加载阶段被明确拒绝。
+     * 测试场景：构造缺失表名、缺失辅助列或算法冲突的规则，断言配置异常和错误码符合预期。
+     */
     @Test
     void shouldRejectConfiguredSeparateTableFieldWithoutAssistedQueryColumn() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -150,6 +178,10 @@ class EncryptMetadataRegistryTest {
                 exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证非法加密元数据配置会在加载阶段被明确拒绝。
+     * 测试场景：构造缺失表名、缺失辅助列或算法冲突的规则，断言配置异常和错误码符合预期。
+     */
     @Test
     void shouldRejectConfiguredSharedLikeAndMaskedColumnUsingDifferentAlgorithms() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -178,6 +210,10 @@ class EncryptMetadataRegistryTest {
                 exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证非法加密元数据配置会在加载阶段被明确拒绝。
+     * 测试场景：构造缺失表名、缺失辅助列或算法冲突的规则，断言配置异常和错误码符合预期。
+     */
     @Test
     void shouldRejectAnnotatedSharedLikeAndMaskedColumnUsingDifferentAlgorithms() {
         EncryptMetadataRegistry registry =

@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.*;
 @Tag("parser")
 class JSqlParserSupportTest {
 
+    /**
+     * 测试目的：验证 SQL 解析工具在包含空行或引号文本时仍能稳定解析。
+     * 测试场景：构造带重复空行、字符串字面量和普通 SQL 的输入，断言预处理不会破坏 SQL 语义。
+     */
     @Test
     void shouldParseSqlContainingRepeatedBlankLines() throws Exception {
         String sql = "\ufeffselect id\n\n\nfrom user_account\n\nwhere phone = ?";
@@ -20,6 +24,10 @@ class JSqlParserSupportTest {
         assertInstanceOf(Select.class, statement);
     }
 
+    /**
+     * 测试目的：验证 SQL 解析工具在包含空行或引号文本时仍能稳定解析。
+     * 测试场景：构造带重复空行、字符串字面量和普通 SQL 的输入，断言预处理不会破坏 SQL 语义。
+     */
     @Test
     void shouldCollapseBlankLinesOutsideQuotedTextOnly() {
         String sql = "select 'a\n\nb' as payload\n\n\nfrom user_account";

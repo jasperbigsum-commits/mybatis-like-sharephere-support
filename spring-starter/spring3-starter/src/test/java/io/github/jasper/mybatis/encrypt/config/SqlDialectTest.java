@@ -9,27 +9,47 @@ import org.junit.jupiter.api.Test;
 @Tag("config")
 class SqlDialectTest {
 
+    /**
+     * 测试目的：验证 SQL 方言能按数据源或显式配置正确处理标识符引用规则。
+     * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
+     */
     @Test
     void shouldQuoteMysqlIdentifiers() {
         assertEquals("`user_account`", SqlDialect.MYSQL.quote("user_account"));
         assertEquals("`phone_hash`", SqlDialect.OCEANBASE.quote("phone_hash"));
     }
 
+    /**
+     * 测试目的：验证 SQL 方言能按数据源或显式配置正确处理标识符引用规则。
+     * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
+     */
     @Test
     void shouldQuoteDmIdentifiers() {
         assertEquals("\"USER_ACCOUNT\"", SqlDialect.DM.quote("USER_ACCOUNT"));
     }
 
+    /**
+     * 测试目的：验证 SQL 方言能按数据源或显式配置正确处理标识符引用规则。
+     * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
+     */
     @Test
     void shouldQuoteOracle12Identifiers() {
         assertEquals("\"user_account\"", SqlDialect.ORACLE12.quote("user_account"));
     }
 
+    /**
+     * 测试目的：验证 SQL 方言能按数据源或显式配置正确处理标识符引用规则。
+     * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
+     */
     @Test
     void shouldQuoteClickHouseIdentifiers() {
         assertEquals("`user_account`", SqlDialect.CLICKHOUSE.quote("user_account"));
     }
 
+    /**
+     * 测试目的：验证 SQL 方言能按数据源或显式配置正确处理标识符引用规则。
+     * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
+     */
     @Test
     void shouldResolveDialectByDatasourcePipePattern() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
@@ -48,6 +68,10 @@ class SqlDialectTest {
         assertEquals(SqlDialect.ORACLE12, properties.resolveSqlDialect("oracle-report"));
     }
 
+    /**
+     * 测试目的：验证 SQL 方言能按数据源或显式配置正确处理标识符引用规则。
+     * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
+     */
     @Test
     void shouldUseContextDatasourceDialectWhenReadingGlobalDialect() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();

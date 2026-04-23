@@ -37,6 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("migration")
 class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldMigrateSameTableColumnsAndPersistProgressFile() throws Exception {
         DataSource dataSource = newDataSource("same_table");
@@ -89,6 +93,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals("2", state.getProperty("lastProcessedId"));
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldMigrateSeparateTableColumnsAndReplaceMainColumnWithReferenceHash() throws Exception {
         DataSource dataSource = newDataSource("separate_table");
@@ -136,6 +144,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldPersistStoredMaskedColumnsDuringMigration() throws Exception {
         DataSource dataSource = newDataSource("masked_columns_migration");
@@ -195,6 +207,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldReuseLikeColumnWhenMaskedColumnSharesSamePhysicalColumnDuringMigration() throws Exception {
         DataSource dataSource = newDataSource("shared_like_masked_columns_migration");
@@ -252,6 +268,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldMigrateConfiguredTableRuleByTableName() throws Exception {
         DataSource dataSource = newDataSource("config_table_name");
@@ -282,6 +302,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals(1L, report.getVerifiedRows());
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldMigrateUsingNonIdCursorColumnName() throws Exception {
         DataSource dataSource = newDataSource("non_id_cursor");
@@ -320,6 +344,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldMigrateAnnotatedTableRuleByTableNameAfterRegistryWarmUp() throws Exception {
         DataSource dataSource = newDataSource("annotation_table_name");
@@ -354,6 +382,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals(1L, report.getVerifiedRows());
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldUseDefaultCursorColumnsForFactoryShortcutMethods() throws Exception {
         DataSource dataSource = newDataSource("default_cursor_shortcut");
@@ -381,6 +413,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals("1", report.getLastProcessedCursor());
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldMigrateUsingTimestampCursorColumn() throws Exception {
         DataSource dataSource = newDataSource("timestamp_cursor");
@@ -421,6 +457,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldUseTableSpecificDefaultCursorColumns() throws Exception {
         DataSource dataSource = newDataSource("table_specific_cursor");
@@ -456,6 +496,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals("11", report.getLastProcessedCursor());
     }
 
+    /**
+     * 测试目的：验证迁移配置、检查点或数据状态异常时能够安全拒绝执行。
+     * 测试场景：构造异常的迁移定义、状态文件或源数据，断言任务快速失败且不会破坏已有迁移进度。
+     */
     @Test
     void shouldRejectIncompatibleCheckpointWithoutOverwritingState() throws Exception {
         DataSource dataSource = newDataSource("stale_checkpoint");
@@ -517,6 +561,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldReuseCompletedCheckpointWithoutReadingBatchesAgainWhenSnapshotIsUnchanged() throws Exception {
         DataSource dataSource = newDataSource("completed_state_fast_reuse");
@@ -565,6 +613,10 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         assertEquals(0, countingReader.batchReadCount());
     }
 
+    /**
+     * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
+     * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
+     */
     @Test
     void shouldTrustCompletedCheckpointWhenRollbackKeepsSameCountAndCursorRange() throws Exception {
         DataSource dataSource = newDataSource("completed_state_plaintext_rollback");

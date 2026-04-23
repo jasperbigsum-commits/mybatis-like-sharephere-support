@@ -46,6 +46,10 @@ class DefaultSeparateTableRowPersisterTest {
         }
     }
 
+    /**
+     * 测试目的：验证独立表写入请求为空或非法时会被安全拒绝。
+     * 测试场景：构造缺少目标表或列值的插入请求，断言不会执行无意义 JDBC 写入。
+     */
     @Test
     void shouldRejectEmptyInsertRequest() {
         EncryptionConfigurationException exception = assertThrows(
@@ -57,6 +61,10 @@ class DefaultSeparateTableRowPersisterTest {
         assertEquals("Separate-table insert request must not be empty.", exception.getMessage());
     }
 
+    /**
+     * 测试目的：验证独立表支撑组件能正确执行 JDBC 兜底写入和托管语句识别。
+     * 测试场景：构造独立表列值和 StatementId，断言插入参数、SQL 生成和托管前缀判断符合预期。
+     */
     @Test
     void shouldInsertSeparateTableRowViaJdbcFallback() throws Exception {
         LinkedHashMap<String, Object> columnValues = new LinkedHashMap<>();
@@ -79,6 +87,10 @@ class DefaultSeparateTableRowPersisterTest {
         }
     }
 
+    /**
+     * 测试目的：验证独立表支撑组件能正确执行 JDBC 兜底写入和托管语句识别。
+     * 测试场景：构造独立表列值和 StatementId，断言插入参数、SQL 生成和托管前缀判断符合预期。
+     */
     @Test
     void shouldRecognizeManagedStatementIdPrefix() {
         assertTrue(DefaultSeparateTableRowPersister.isManagedStatementId(

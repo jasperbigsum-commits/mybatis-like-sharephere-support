@@ -11,6 +11,10 @@ import org.junit.jupiter.api.Test;
 @Tag("rewrite")
 class SqlLogMaskerTest {
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldMaskCipherAndPreserveHashValues() {
         SqlLogMasker masker = new SqlLogMasker();

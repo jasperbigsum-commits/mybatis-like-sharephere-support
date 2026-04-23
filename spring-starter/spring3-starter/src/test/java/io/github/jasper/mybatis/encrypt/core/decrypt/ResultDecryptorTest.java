@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,7 @@ import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ResultMap;
@@ -35,6 +37,10 @@ import io.github.jasper.mybatis.encrypt.annotation.SensitiveField;
 @Tag("decrypt")
 class ResultDecryptorTest {
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptAnnotatedEntityCollection() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -51,6 +57,10 @@ class ResultDecryptorTest {
         assertEquals("jasper", entity.getName());
     }
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptFieldLevelAnnotatedDtoWithoutEncryptTable() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -67,6 +77,10 @@ class ResultDecryptorTest {
         assertEquals("nora", dto.getName());
     }
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptMappedNestedPropertyWithoutTraversingUnmappedGetter() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -82,6 +96,10 @@ class ResultDecryptorTest {
         assertEquals("13700137000", wrapper.getUser().getPhone());
     }
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptConfiguredDtoWithoutEncryptFieldByExplicitResultMapping() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -97,6 +115,10 @@ class ResultDecryptorTest {
         assertEquals("iris", dto.getName());
     }
 
+    /**
+     * 测试目的：验证同表模式与独立表模式存在列名冲突时，结果计划不会绑定到错误字段规则。
+     * 测试场景：构造物理列、投影别名和返回属性冲突的查询，断言优先按别名消歧或在无别名时保守跳过。
+     */
     @Test
     void shouldDecryptConfiguredDtoWithoutEncryptFieldByAutoMappedProjectionAlias() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -112,6 +134,29 @@ class ResultDecryptorTest {
         assertEquals("zoe", dto.getName());
     }
 
+    /**
+     * 测试目的：验证 Map 返回结果也能按 ResultMap 或 SQL 投影生成解密计划。
+     * 测试场景：构造 Map 行数据和显式结果映射，断言密文字段按 key 写回为明文且普通字段不受影响。
+     */
+    @Test
+    void shouldDecryptMapResultByExplicitResultMapping() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        Map<String, Object> row = new java.util.LinkedHashMap<>();
+        row.put("phone", sm4.encrypt("13500135001"));
+        row.put("name", "map-user");
+        MappedStatement mappedStatement = configuredMapMappedStatement();
+
+        decrypt(decryptor, mappedStatement, List.of(row));
+
+        assertEquals("13500135001", row.get("phone"));
+        assertEquals("map-user", row.get("name"));
+    }
+
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptPlainDtoWithoutEncryptFieldByMethodHintAndAutoMappedProjection() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -127,6 +172,10 @@ class ResultDecryptorTest {
         assertEquals("maya", dto.getName());
     }
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptPlainDtoWithoutEncryptFieldByMethodHintAndSelectAll() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -142,6 +191,10 @@ class ResultDecryptorTest {
         assertEquals("wildcard", dto.getName());
     }
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptPlainDtoWithoutEncryptFieldByAutoDetectedSqlSourceTable() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -157,6 +210,10 @@ class ResultDecryptorTest {
         assertEquals("auto", dto.getName());
     }
 
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldDecryptAutoDetectedDtoWhenSqlContainsRepeatedBlankLines() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -172,6 +229,42 @@ class ResultDecryptorTest {
         assertEquals("blank-lines", dto.getName());
     }
 
+    /**
+     * 测试目的：验证同表模式与独立表模式存在列名冲突时，结果计划不会绑定到错误字段规则。
+     * 测试场景：构造物理列、投影别名和返回属性冲突的查询，断言优先按别名消歧或在无别名时保守跳过。
+     */
+    @Test
+    void shouldPreferProjectionAliasWhenPhysicalColumnMatchesAnotherStorageModeRule() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, conflictingStorageModeProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13000130000"));
+        MappedStatement mappedStatement = conflictingProjectionStatement();
+
+        decrypt(decryptor, mappedStatement, List.of(dto));
+
+        assertEquals("13000130000", dto.getPhone());
+    }
+
+    /**
+     * 测试目的：验证同表模式与独立表模式存在列名冲突时，结果计划不会绑定到错误字段规则。
+     * 测试场景：构造物理列、投影别名和返回属性冲突的查询，断言优先按别名消歧或在无别名时保守跳过。
+     */
+    @Test
+    void shouldSkipAmbiguousPhysicalProjectionWithoutAlias() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, conflictingStorageModeProperties());
+        MappedStatement mappedStatement = conflictingProjectionWithoutAliasStatement();
+
+        QueryResultPlan queryResultPlan = decryptor.resolvePlan(mappedStatement, mappedStatement.getBoundSql(null));
+
+        assertTrue(queryResultPlan.isEmpty());
+    }
+
+    /**
+     * 测试目的：验证查询结果解密能按 MyBatis 映射边界精确处理返回对象。
+     * 测试场景：构造实体、DTO、嵌套对象或提示注解，断言解密计划、属性写回和敏感值记录符合预期。
+     */
     @Test
     void shouldUseBackingFieldAndRecordSensitiveValueWhenGetterHasSideEffect() {
         Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
@@ -256,6 +349,20 @@ class ResultDecryptorTest {
                 .build();
     }
 
+    private MappedStatement configuredMapMappedStatement() {
+        Configuration configuration = new Configuration();
+        ResultMapping nameMapping = new ResultMapping.Builder(configuration, "name", "name", String.class).build();
+        ResultMapping phoneMapping = new ResultMapping.Builder(configuration, "phone", "phone_value", String.class).build();
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.configuredMapResult", Map.class, List.of(nameMapping, phoneMapping)).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.name, u.phone as phone_value from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, "test.selectConfiguredMapResult", sqlSource,
+                SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
     private MappedStatement hintedAutoMappedDtoStatement() {
         Configuration configuration = new Configuration();
         configuration.setMapUnderscoreToCamelCase(true);
@@ -308,6 +415,32 @@ class ResultDecryptorTest {
                 .build();
     }
 
+    private MappedStatement conflictingProjectionStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.conflictingProjection", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id, u.phone_cipher as phone from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration,
+                AutoDetectedMapper.class.getName() + ".selectPlainUserProjection", sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement conflictingProjectionWithoutAliasStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.conflictingProjectionWithoutAlias", PhoneCipherProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select u.id, u.phone_cipher from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration,
+                AutoDetectedMapper.class.getName() + ".selectPhoneCipherProjection", sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
     private DatabaseEncryptionProperties configuredUserTableProperties() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
@@ -320,6 +453,31 @@ class ResultDecryptorTest {
         tableRule.setFields(List.of(phoneRule));
         properties.setTables(List.of(tableRule));
         assertNotNull(properties.getTables());
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties conflictingStorageModeProperties() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("user_account");
+
+        DatabaseEncryptionProperties.FieldRuleProperties separateRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        separateRule.setProperty("idCard");
+        separateRule.setColumn("phone_cipher");
+        separateRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
+        separateRule.setStorageTable("user_id_card_encrypt");
+        separateRule.setStorageColumn("id_card_cipher");
+        separateRule.setStorageIdColumn("id");
+        separateRule.setAssistedQueryColumn("phone_hash");
+
+        DatabaseEncryptionProperties.FieldRuleProperties sameTableRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        sameTableRule.setProperty("phone");
+        sameTableRule.setColumn("phone");
+        sameTableRule.setStorageColumn("phone_cipher");
+        sameTableRule.setAssistedQueryColumn("phone_hash");
+
+        tableRule.setFields(List.of(separateRule, sameTableRule));
+        properties.setTables(List.of(tableRule));
         return properties;
     }
 
@@ -422,6 +580,19 @@ class ResultDecryptorTest {
         }
     }
 
+    static class PhoneCipherProjectionDto {
+
+        private String phoneCipher;
+
+        public String getPhoneCipher() {
+            return phoneCipher;
+        }
+
+        public void setPhoneCipher(String phoneCipher) {
+            this.phoneCipher = phoneCipher;
+        }
+    }
+
     static class ProjectionWrapper {
 
         private UserProjectionDto user;
@@ -451,6 +622,8 @@ class ResultDecryptorTest {
     interface AutoDetectedMapper {
 
         PlainUserProjectionDto selectPlainUserProjection();
+
+        PhoneCipherProjectionDto selectPhoneCipherProjection();
 
         int insertUser(UserEntity user);
     }

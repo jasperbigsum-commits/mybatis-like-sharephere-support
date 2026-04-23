@@ -159,6 +159,15 @@ public final class QueryResultPlanFactory {
         if (projectionRuleResolver.isEmpty()) {
             return;
         }
+        if (Map.class.isAssignableFrom(mappedType)) {
+            for (ProjectedRule projectedRule : projectionRuleResolver.projectedRules()) {
+                // Map 结果没有固定 getter/setter，直接按 MyBatis 结果 key 记录路径即可。
+                String propertyPath = concatPropertyPath(propertyPrefix, projectedRule.projectedColumn());
+                propertyPlans.putIfAbsent(propertyPath,
+                        new QueryResultPlan.PropertyPlan(propertyPath, projectedRule.rule()));
+            }
+            return;
+        }
         MetaClass metaClass = MetaClass.forClass(mappedType, reflectorFactory);
         for (ProjectedRule projectedRule : projectionRuleResolver.projectedRules()) {
             String property = metaClass.findProperty(projectedRule.projectedColumn(),
@@ -271,12 +280,17 @@ public final class QueryResultPlanFactory {
             return null;
         }
         String normalized = NameUtils.normalizeIdentifier(mappedColumn);
+        EncryptColumnRule candidate = null;
         for (EncryptColumnRule rule : tableRule.getColumnRules()) {
             if (matchesProjectedColumn(rule, normalized)) {
-                return rule;
+                // 物理列名可能同时是另一条规则的逻辑列；多条命中时放弃推断，避免绑定错规则。
+                if (candidate != null && !candidate.equals(rule)) {
+                    return null;
+                }
+                candidate = rule;
             }
         }
-        return null;
+        return candidate;
     }
 
     private boolean matchesProjectedColumn(EncryptColumnRule rule, String normalizedColumn) {
@@ -335,7 +349,7 @@ public final class QueryResultPlanFactory {
         return type != null
                 && !type.isPrimitive()
                 && !type.isEnum()
-                && !type.getName().startsWith("java.");
+                && (Map.class.isAssignableFrom(type) || !type.getName().startsWith("java."));
     }
 
     private static final class ResultProjectionRuleResolver {
@@ -431,15 +445,16 @@ public final class QueryResultPlanFactory {
                 if (!(expression instanceof Column)) {
                     continue;
                 }
-                Column column = (Column) expression;
-                EncryptColumnRule rule = tableContext.resolveProjected(column).orElse(null);
-                if (rule == null) {
-                    continue;
-                }
                 String alias = item.getAlias() != null && StringUtils.isNotBlank(item.getAlias().getName())
                         ? item.getAlias().getName()
-                        : column.getColumnName();
+                        : ((Column) expression).getColumnName();
                 if (alias.startsWith(HIDDEN_ASSISTED_PREFIX) || alias.startsWith(HIDDEN_LIKE_PREFIX)) {
+                    continue;
+                }
+                Column column = (Column) expression;
+                // 投影别名是 MyBatis 最终映射到属性的名称，优先级高于表达式里的物理列名。
+                EncryptColumnRule rule = tableContext.resolveProjected(column, alias).orElse(null);
+                if (rule == null) {
                     continue;
                 }
                 registerProjection(alias, rule);
@@ -524,14 +539,14 @@ public final class QueryResultPlanFactory {
                     continue;
                 }
                 Column column = (Column) expression;
-                EncryptColumnRule sourceRule = tableContext.resolveProjected(column).orElse(null);
-                if (sourceRule == null) {
-                    continue;
-                }
                 String aliasName = item.getAlias() != null && StringUtils.isNotBlank(item.getAlias().getName())
                         ? item.getAlias().getName()
                         : column.getColumnName();
                 if (aliasName.startsWith(HIDDEN_ASSISTED_PREFIX) || aliasName.startsWith(HIDDEN_LIKE_PREFIX)) {
+                    continue;
+                }
+                EncryptColumnRule sourceRule = tableContext.resolveProjected(column, aliasName).orElse(null);
+                if (sourceRule == null) {
                     continue;
                 }
                 derivedRule.addColumnRule(projectDerivedRule(aliasName, sourceRule));
@@ -594,16 +609,16 @@ public final class QueryResultPlanFactory {
             return new ArrayList<>(uniqueRules.iterator().next().getColumnRules());
         }
 
-        private Optional<EncryptColumnRule> resolveProjected(Column column) {
+        private Optional<EncryptColumnRule> resolveProjected(Column column, String projectedName) {
             if (column.getTable() != null && StringUtils.isNotBlank(column.getTable().getName())) {
                 EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
                 if (tableRule != null) {
-                    return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName()));
+                    return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName(), projectedName));
                 }
             }
             EncryptColumnRule candidate = null;
             for (EncryptTableRule tableRule : uniqueRules()) {
-                EncryptColumnRule rule = matchProjectedRule(tableRule, column.getColumnName());
+                EncryptColumnRule rule = matchProjectedRule(tableRule, column.getColumnName(), projectedName);
                 if (rule == null) {
                     continue;
                 }
@@ -615,8 +630,15 @@ public final class QueryResultPlanFactory {
             return Optional.ofNullable(candidate);
         }
 
-        private EncryptColumnRule matchProjectedRule(EncryptTableRule tableRule, String columnName) {
+        private EncryptColumnRule matchProjectedRule(EncryptTableRule tableRule, String columnName, String projectedName) {
+            // 先用结果列名/别名匹配实体属性名，解决 storageColumn 与其他规则 column 重名的问题。
+            // 这里不能按逻辑 column 消歧：无别名场景下结果名可能就是物理列名，强行消歧仍会选错规则。
+            EncryptColumnRule ruleByResultName = matchProjectedResultNameRule(tableRule, projectedName);
+            if (ruleByResultName != null) {
+                return ruleByResultName;
+            }
             String normalized = NameUtils.normalizeIdentifier(columnName);
+            EncryptColumnRule candidate = null;
             for (EncryptColumnRule rule : tableRule.getColumnRules()) {
                 if (NameUtils.normalizeIdentifier(rule.column()).equals(normalized)
                         || NameUtils.normalizeIdentifier(rule.storageColumn()).equals(normalized)
@@ -624,10 +646,33 @@ public final class QueryResultPlanFactory {
                         && NameUtils.normalizeIdentifier(rule.assistedQueryColumn()).equals(normalized))
                         || (rule.hasLikeQueryColumn()
                         && NameUtils.normalizeIdentifier(rule.likeQueryColumn()).equals(normalized))) {
-                    return rule;
+                    // 只剩物理列名可用时必须保守：列名冲突说明来源不唯一，不能取第一条规则。
+                    if (candidate != null && !candidate.equals(rule)) {
+                        return null;
+                    }
+                    candidate = rule;
                 }
             }
-            return null;
+            return candidate;
+        }
+
+        private EncryptColumnRule matchProjectedResultNameRule(EncryptTableRule tableRule, String projectedName) {
+            if (StringUtils.isBlank(projectedName)) {
+                return null;
+            }
+            String normalized = NameUtils.normalizeIdentifier(projectedName);
+            EncryptColumnRule candidate = null;
+            for (EncryptColumnRule rule : tableRule.getColumnRules()) {
+                if (projectedName.equals(rule.property())
+                        || (StringUtils.isNotBlank(rule.property())
+                        && NameUtils.normalizeIdentifier(rule.property()).equals(normalized))) {
+                    if (candidate != null && !candidate.equals(rule)) {
+                        return null;
+                    }
+                    candidate = rule;
+                }
+            }
+            return candidate;
         }
 
         private Collection<EncryptTableRule> uniqueRules() {

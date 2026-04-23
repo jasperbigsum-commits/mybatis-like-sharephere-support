@@ -42,6 +42,10 @@ import static org.junit.jupiter.api.Assertions.*;
 @Tag("plugin")
 class DatabaseEncryptionInterceptorTest {
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldRewriteUpdateAtExecutorLayer() throws Throwable {
         Configuration configuration = new Configuration();
@@ -74,6 +78,10 @@ class DatabaseEncryptionInterceptorTest {
         assertEquals(4, executor.lastBoundSql.getParameterMappings().size());
     }
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldReuseProvidedBoundSqlForSixArgQuery() throws Throwable {
         Configuration configuration = new Configuration();
@@ -109,6 +117,10 @@ class DatabaseEncryptionInterceptorTest {
         assertTrue(executor.lastBoundSql.getSql().contains("phone_cipher"));
     }
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldNotResolvePlanDuringExecutorQueryInterception() throws Throwable {
         Configuration configuration = new Configuration();
@@ -136,6 +148,10 @@ class DatabaseEncryptionInterceptorTest {
         assertEquals(0, decryptor.decryptWithPlanCalls);
     }
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldResolvePlanAndDecryptDuringResultSetInterception() throws Throwable {
         Configuration configuration = new Configuration();
@@ -165,6 +181,10 @@ class DatabaseEncryptionInterceptorTest {
         assertEquals(1, decryptor.decryptWithPlanCalls);
     }
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldBypassPlanResolutionForEmptyResultSetInterception() throws Throwable {
         Configuration configuration = new Configuration();
@@ -194,6 +214,10 @@ class DatabaseEncryptionInterceptorTest {
         assertEquals(0, decryptor.decryptWithPlanCalls);
     }
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldPrepareSeparateTableReferencesBeforeExecutorUpdateRewrite() throws Throwable {
         Configuration configuration = new Configuration();
@@ -228,6 +252,10 @@ class DatabaseEncryptionInterceptorTest {
         assertNotSame(mappedStatement, executor.lastMappedStatement);
     }
 
+    /**
+     * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
+     * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
+     */
     @Test
     void shouldPrepareSeparateTableReferencesForFieldLevelAnnotatedDtoBeforeExecutorUpdateRewrite() throws Throwable {
         Configuration configuration = new Configuration();

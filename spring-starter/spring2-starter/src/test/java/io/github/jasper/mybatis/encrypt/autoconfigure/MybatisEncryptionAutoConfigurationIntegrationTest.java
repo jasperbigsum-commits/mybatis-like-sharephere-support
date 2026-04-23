@@ -104,6 +104,10 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证 Spring Boot 自动配置能正确注册插件、算法、实体扫描和迁移任务工厂。
+     * 测试场景：启动测试应用上下文并执行典型读写或迁移入口，断言 Bean 装配和端到端加解密行为可用。
+     */
     @Test
     void shouldAutoConfigurePluginBeansAndEntityScanning() {
         assertNotNull(interceptor);
@@ -121,6 +125,10 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
                 .count());
     }
 
+    /**
+     * 测试目的：验证 Spring Boot 自动配置能正确注册插件、算法、实体扫描和迁移任务工厂。
+     * 测试场景：启动测试应用上下文并执行典型读写或迁移入口，断言 Bean 装配和端到端加解密行为可用。
+     */
     @Test
     void shouldExecuteMigrationThroughAutoConfiguredTaskFactory() throws Exception {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
@@ -154,6 +162,10 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证 Spring Boot 自动配置能正确注册插件、算法、实体扫描和迁移任务工厂。
+     * 测试场景：启动测试应用上下文并执行典型读写或迁移入口，断言 Bean 装配和端到端加解密行为可用。
+     */
     @Test
     void shouldEncryptAndDecryptThroughSpringBootAutoConfiguration() throws Exception {
         AutoConfiguredUserRecord user = new AutoConfiguredUserRecord();

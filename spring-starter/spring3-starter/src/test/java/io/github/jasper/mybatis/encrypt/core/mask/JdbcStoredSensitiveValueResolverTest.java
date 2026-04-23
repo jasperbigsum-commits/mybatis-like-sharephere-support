@@ -26,6 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @Tag("mask")
 class JdbcStoredSensitiveValueResolverTest {
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldResolveStoredMaskedValueFromDatabase() throws Exception {
         AlgorithmRegistry algorithms = algorithms();
@@ -78,6 +82,10 @@ class JdbcStoredSensitiveValueResolverTest {
         }
     }
 
+    /**
+     * 测试目的：验证敏感响应脱敏能按记录值、存储态脱敏列或自定义脱敏器选择正确来源。
+     * 测试场景：构造控制器作用域、敏感字段注解和数据库脱敏值，断言响应写出前的脱敏结果和作用域释放顺序。
+     */
     @Test
     void shouldResolveSharedLikeMaskedColumnFromDatabase() throws Exception {
         AlgorithmRegistry algorithms = algorithms();

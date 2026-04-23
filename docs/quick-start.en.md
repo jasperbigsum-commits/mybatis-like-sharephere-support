@@ -63,6 +63,7 @@ Configuration quick reference:
 | `mybatis.encrypt.default-cipher-key` | Yes | default primary cipher key | replace before production |
 | `mybatis.encrypt.scan-entity-annotations` | No | scan `@EncryptField` / `@EncryptTable` metadata | `true` for annotation-driven setups |
 | `mybatis.encrypt.scan-packages` | Recommended with scanning | limit entity scanning scope | point only to domain packages |
+| `mybatis.encrypt.separate-table-hydration-batch-size` | No | max hash count per separate-table hydration query batch | default `200`; lower it when result sets are large or the database is sensitive to long `IN` lists |
 | `mybatis.encrypt.sensitive-response.enabled` | No | enable controller-boundary masking | `true` for external APIs |
 
 ## 3. Annotate one entity field

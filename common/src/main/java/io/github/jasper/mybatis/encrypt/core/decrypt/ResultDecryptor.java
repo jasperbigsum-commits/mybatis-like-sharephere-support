@@ -11,8 +11,6 @@ import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 
-import java.util.Map;
-
 /**
  * 按查询结果计划原地解密 MyBatis 返回对象。
  *
@@ -83,7 +81,7 @@ public class ResultDecryptor {
     }
 
     private void decryptCandidate(Object candidate, QueryResultPlan queryResultPlan) {
-        if (candidate == null || candidate instanceof Map<?, ?> || ObjectTraversalUtils.isSimpleValueType(candidate.getClass())) {
+        if (candidate == null || ObjectTraversalUtils.isSimpleValueType(candidate.getClass())) {
             return;
         }
         QueryResultPlan.TypePlan typePlan = queryResultPlan.findPlan(candidate.getClass());

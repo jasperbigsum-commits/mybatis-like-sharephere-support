@@ -23,6 +23,10 @@ class SqlRewriteValidatorTest {
 
     private final SqlRewriteValidator validator = new SqlRewriteValidator();
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldRejectOrderByOnEncryptedField() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT phone FROM user_account ORDER BY phone");
@@ -36,6 +40,10 @@ class SqlRewriteValidatorTest {
         assertTrue(exception.getMessage().contains("ORDER BY"));
     }
 
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
     @Test
     void shouldRejectAggregateOnEncryptedField() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT MAX(phone) FROM user_account");
@@ -49,6 +57,10 @@ class SqlRewriteValidatorTest {
         assertTrue(exception.getMessage().contains("Aggregate"));
     }
 
+    /**
+     * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
+     * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
+     */
     @Test
     void shouldAllowPlainOrderByWhenEncryptedColumnIsNotReferenced() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT name FROM user_account ORDER BY name");

@@ -26,6 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("rewrite")
 class SqlSelectTableContextBuilderTest {
 
+    /**
+     * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
+     * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
+     */
     @Test
     void shouldRegisterDerivedTableRuleAfterDispatchingDerivedSelectRewrite() throws Exception {
         List<ProjectionMode> dispatchedModes = new ArrayList<ProjectionMode>();

@@ -23,6 +23,10 @@ class EncryptEntityScannerTest {
                     "mybatis.encrypt.scan-packages=io.github.jasper.mybatis.encrypt.config"
             );
 
+    /**
+     * 测试目的：验证配置扫描和内置算法自动注册符合 starter 默认行为。
+     * 测试场景：构造扫描包、实体类型或算法配置，断言注册结果和默认 Bean 与预期一致。
+     */
     @Test
     void shouldRegisterAnnotatedEntityByScanning() {
         contextRunner.run(context -> {

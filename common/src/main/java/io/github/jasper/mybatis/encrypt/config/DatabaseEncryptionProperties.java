@@ -70,6 +70,11 @@ public class DatabaseEncryptionProperties {
     private MigrationProperties migration = new MigrationProperties();
 
     /**
+     * 独立表结果回填查询的单批最大 hash 数量。
+     */
+    private int separateTableHydrationBatchSize = 2000;
+
+    /**
      * 配置中显式声明的按表加密规则列表。
      */
     private List<TableRuleProperties> tables = new ArrayList<>();
@@ -261,6 +266,24 @@ public class DatabaseEncryptionProperties {
      */
     public void setMigration(MigrationProperties migration) {
         this.migration = migration;
+    }
+
+    /**
+     * 返回独立表结果回填查询的单批最大 hash 数量。
+     *
+     * @return 独立表结果回填批大小
+     */
+    public int getSeparateTableHydrationBatchSize() {
+        return separateTableHydrationBatchSize;
+    }
+
+    /**
+     * 设置独立表结果回填查询的单批最大 hash 数量。
+     *
+     * @param separateTableHydrationBatchSize 独立表结果回填批大小
+     */
+    public void setSeparateTableHydrationBatchSize(int separateTableHydrationBatchSize) {
+        this.separateTableHydrationBatchSize = separateTableHydrationBatchSize;
     }
 
     /**

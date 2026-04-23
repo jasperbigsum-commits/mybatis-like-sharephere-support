@@ -1,18 +1,23 @@
 package io.github.jasper.mybatis.encrypt.integration;
 
 import java.io.InputStream;
+import java.io.PrintWriter;
 import java.io.StringReader;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.logging.Logger;
 
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
@@ -62,6 +67,7 @@ import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
+import javax.sql.DataSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -72,23 +78,29 @@ class MybatisEncryptionIntegrationTest {
     private static final String H2_DB_NAME = "mybatis-encryption-integration";
     private static final Path H2_DB_FILE = H2_DB_DIR.resolve(H2_DB_NAME + ".mv.db");
 
-    private JdbcDataSource dataSource;
+    private CountingDataSource dataSource;
     private SqlSessionFactory sqlSessionFactory;
     private ParameterCaptureInterceptor parameterCaptureInterceptor;
     private TrackingSeparateTableEncryptionManager trackingSeparateTableManager;
+    private int separateTableHydrationBatchSize = 200;
 
     @BeforeEach
     void setUp() throws Exception {
         Files.createDirectories(H2_DB_DIR);
-        dataSource = new JdbcDataSource();
-        dataSource.setURL(databaseUrl());
-        dataSource.setUser("sa");
-        dataSource.setPassword("");
+        JdbcDataSource jdbcDataSource = new JdbcDataSource();
+        jdbcDataSource.setURL(databaseUrl());
+        jdbcDataSource.setUser("sa");
+        jdbcDataSource.setPassword("");
+        dataSource = new CountingDataSource(jdbcDataSource);
         initializeSchema();
         parameterCaptureInterceptor = new ParameterCaptureInterceptor();
         sqlSessionFactory = buildSqlSessionFactory();
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldEncryptSameTableFieldAndDecryptOnRead() throws Exception {
         UserRecord user = user(1L, "Alice", "13800138000", null);
@@ -106,6 +118,10 @@ class MybatisEncryptionIntegrationTest {
         assertSameTableStorage(1L, "13800138000");
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldStoreSeparateTableIdInMainTableAndHydrateResultByReference() throws Exception {
         UserRecord user = user(2L, "Bob", "13900139000", "320101199001011234");
@@ -131,6 +147,114 @@ class MybatisEncryptionIntegrationTest {
         assertSeparateTableStorage(referenceId, "320101199001011234");
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
+    @Test
+    void shouldHydrateLargeSeparateTableReferenceSetsInChunks() {
+        separateTableHydrationBatchSize = 2;
+        parameterCaptureInterceptor = new ParameterCaptureInterceptor();
+        sqlSessionFactory = buildSqlSessionFactory();
+
+        List<UserRecord> users = List.of(
+                user(101L, "Atlas", "13000130001", "320101199001010101"),
+                user(102L, "Blair", "13000130002", "320101199001010102"),
+                user(103L, "Cora", "13000130003", "320101199001010103"),
+                user(104L, "Drew", "13000130004", "320101199001010104"),
+                user(105L, "Evan", "13000130005", "320101199001010105")
+        );
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            for (UserRecord user : users) {
+                assertEquals(1, mapper.insertUser(user));
+            }
+        }
+
+        dataSource.resetSeparateTableBatchLoadTracking();
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<UserRecord> loaded = mapper.selectAllUsersOrderById();
+            assertEquals(users.size(), loaded.size());
+            for (int index = 0; index < users.size(); index++) {
+                assertEquals(users.get(index).getId(), loaded.get(index).getId());
+                assertEquals(users.get(index).getPhone(), loaded.get(index).getPhone());
+                assertEquals(users.get(index).getIdCard(), loaded.get(index).getIdCard());
+            }
+        }
+
+        List<String> batchLoadSqls = dataSource.getSeparateTableBatchLoadSqls();
+        assertEquals(3, batchLoadSqls.size());
+        assertEquals(List.of(2, 2, 1), batchLoadSqls.stream()
+                .map(MybatisEncryptionIntegrationTest::countPlaceholders)
+                .toList());
+    }
+
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
+    @Test
+    void shouldMergeSeparateTableHydrationAcrossDifferentPropertyPathsOfSameRule() throws Exception {
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user(201L, "Owner", "13000130201", "320101199001010201")));
+            assertEquals(1, mapper.insertUser(user(202L, "Reviewer", "13000130202", "320101199001010202")));
+        }
+        insertOrderAccountRow(501L, 201L, 202L, 9001L, "path-merge", "owner-grid", 0);
+
+        dataSource.resetSeparateTableBatchLoadTracking();
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<OrderAssociationView> views = mapper.selectOrderAssociations();
+            assertEquals(1, views.size());
+            OrderAssociationView view = views.get(0);
+            assertEquals("320101199001010201", view.getOwner().getIdCard());
+            assertEquals("320101199001010202", view.getReviewer().getIdCard());
+        }
+
+        List<String> batchLoadSqls = dataSource.getSeparateTableBatchLoadSqls();
+        assertEquals(1, batchLoadSqls.size());
+        assertEquals(2, countPlaceholders(batchLoadSqls.get(0)));
+    }
+
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
+    @Test
+    void shouldMergeFallbackSeparateTableHydrationAcrossNestedObjects() throws Exception {
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user(211L, "FallbackOwner", "13000130211", "320101199001010211")));
+            assertEquals(1, mapper.insertUser(user(212L, "FallbackReviewer", "13000130212", "320101199001010212")));
+        }
+
+        UserAssociationDto owner = new UserAssociationDto();
+        owner.setIdCard(loadReferenceId(211L));
+        UserAssociationDto reviewer = new UserAssociationDto();
+        reviewer.setIdCard(loadReferenceId(212L));
+        OrderAssociationView view = new OrderAssociationView();
+        view.setOwner(owner);
+        view.setReviewer(reviewer);
+
+        dataSource.resetSeparateTableBatchLoadTracking();
+        trackingSeparateTableManager.hydrateResults(List.of(view));
+
+        assertEquals("320101199001010211", owner.getIdCard());
+        assertEquals("320101199001010212", reviewer.getIdCard());
+        List<String> batchLoadSqls = dataSource.getSeparateTableBatchLoadSqls();
+        assertEquals(1, batchLoadSqls.size());
+        assertEquals(2, countPlaceholders(batchLoadSqls.get(0)));
+    }
+
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldStoreSeparateTableReferenceAsStringInBoundSql() {
         UserRecord user = user(4L, "Dave", "13600136000", "320101199001018888");
@@ -145,6 +269,10 @@ class MybatisEncryptionIntegrationTest {
         assertInstanceOf(String.class, referenceValue);
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldInsertSeparateTableRowThroughMybatisExecutorChain() {
         UserRecord user = user(12L, "Luna", "13600136012", "320101199001010212");
@@ -163,6 +291,10 @@ class MybatisEncryptionIntegrationTest {
         assertTrue(singleLine(separateInsert.sql).toLowerCase(Locale.ROOT).contains("values (?, ?, ?, ?, ?)"));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldSkipSeparateTablePreparationForSameTableOnlyWrite() {
         UserRecord user = user(5L, "Eve", "13500135000", null);
@@ -175,6 +307,10 @@ class MybatisEncryptionIntegrationTest {
         assertEquals(0, trackingSeparateTableManager.prepareWriteReferencesCalls);
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldSwitchToNewSeparateTableReferenceOnUpdateWithoutMutatingExistingRow() throws Exception {
         UserRecord user = user(3L, "Carol", "13700137000", "320101199001011234");
@@ -205,6 +341,10 @@ class MybatisEncryptionIntegrationTest {
         assertSeparateTableStorage(updatedReferenceId, "320101199001019999");
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReuseExistingSeparateTableReferenceWhenAssignedHashMatches() throws Exception {
         UserRecord first = user(7L, "Gary", "13100131001", "320101199001015555");
@@ -235,6 +375,10 @@ class MybatisEncryptionIntegrationTest {
         assertEquals(2, queryForInt("select count(1) from user_id_card_encrypt"));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldPersistAndReadConsistentlyAcrossStorageModesOnInsertAndUpdate() throws Exception {
         UserRecord inserted = user(6L, "Frank", "13400134000", "320101199001017777");
@@ -265,6 +409,10 @@ class MybatisEncryptionIntegrationTest {
         assertSeparateTableStorage(updatedReferenceId, "320101199001016666");
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldKeepSelectPlaceholderParameterBeforeEncryptedWhereParameter() throws Exception {
         UserRecord user = user(9L, "Iris", "13600136009", "320101199001010209");
@@ -300,6 +448,10 @@ class MybatisEncryptionIntegrationTest {
         assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(1));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldKeepMultipleSelectPlaceholdersBeforeEncryptedWhereParameter() throws Exception {
         UserRecord user = user(10L, "Jill", "13600136010", "320101199001010210");
@@ -338,6 +490,10 @@ class MybatisEncryptionIntegrationTest {
         assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(2));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldKeepMultipleSelectPlaceholdersBeforeSameTableEncryptedWhereParameter() throws Exception {
         UserRecord user = user(11L, "Kara", "13600136011", "320101199001010211");
@@ -374,6 +530,10 @@ class MybatisEncryptionIntegrationTest {
         assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(2));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldRewriteDirectLikeToLikeAndAssistedFallbackParameters() throws Exception {
         UserRecord user = user(13L, "Mia", "13600136013", "320101199001010213");
@@ -406,6 +566,10 @@ class MybatisEncryptionIntegrationTest {
                 mainSelect.parameters.get(1));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldRewriteConcatLikeToLikeAndAssistedFallbackParameters() throws Exception {
         UserRecord user = user(14L, "Nina", "13600136014", "320101199001010214");
@@ -438,6 +602,10 @@ class MybatisEncryptionIntegrationTest {
                 mainSelect.parameters.get(1));
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadComplexDerivedJoinQueryAcrossStorageModes() throws Exception {
         UserRecord matched = user(31L, "Kate", "13000130001", "320101199001010131");
@@ -464,6 +632,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadAssociatedEntityListAcrossStorageModes() throws Exception {
         UserRecord ownerOne = user(41L, "Mia", "13100131001", "320101199001010141");
@@ -513,6 +685,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadAnnotatedDtoAcrossStorageModes() {
         UserRecord user = user(51L, "Quinn", "13200132051", "320101199001010151");
@@ -532,6 +708,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainDtoWithoutEncryptFieldUsingMappedStatementProjection() {
         UserRecord user = user(52L, "Rita", "13200132052", "320101199001010152");
@@ -551,6 +731,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainDtoWithoutEncryptFieldUsingEncryptResultHint() throws Exception {
         insertEncryptedUserRow(53L, "Sia", "13200132053", "320101199001010153");
@@ -566,6 +750,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainResultTypeAliasFieldsUsingEncryptResultHint() throws Exception {
         insertEncryptedUserRow(54L, "Tess", "13200132054", "320101199001010154");
@@ -583,6 +771,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadNestedDtoAssociationListAcrossStorageModes() throws Exception {
         UserRecord owner = user(61L, "Rita", "13300133061", "320101199001010161");
@@ -615,6 +807,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainNestedDtoUsingEncryptResultHintTablesOnly() throws Exception {
         UserRecord owner = user(63L, "Tori", "13300133063", "320101199001010163");
@@ -647,6 +843,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainResultTypeForComplexJoinUsingEncryptResultHintTablesOnly() throws Exception {
         UserRecord owner = user(65L, "Vita", "13300133065", "320101199001010165");
@@ -676,6 +876,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainResultTypeForUnionNestedSubqueryUsingEncryptResultHintTablesOnly() throws Exception {
         UserRecord first = user(94L, "Pia", "13600136094", "320101199001010194");
@@ -726,6 +930,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptPlainResultTypeWithXmlMapperWithoutHint() throws Exception {
         insertEncryptedUserRow(67L, "Xiom", "13300133067", "320101199001010167");
@@ -749,6 +957,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldCompareXmlMapperDecryptBehaviorWithAndWithoutEncryptResultHint() throws Exception {
         insertEncryptedUserRow(69L, "Zed", "13300133069", "320101199001010169");
@@ -779,6 +991,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReturnPlainTextInsteadOfStoredCipherForXmlResultType() throws Exception {
         insertEncryptedUserRow(77L, "Ione", "13400134077", "320101199001010177");
@@ -812,6 +1028,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReturnPlainTextForComplexJoinResultTypeComparedWithStoredCipher() throws Exception {
         insertEncryptedUserRow(79L, "Kira", "13400134079", "320101199001010179");
@@ -845,6 +1065,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReturnPlainTextForUnionNestedSubqueryResultTypeComparedWithStoredCipher() throws Exception {
         insertEncryptedUserRow(97L, "Mira", "13600136097", "320101199001010197");
@@ -876,6 +1100,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadParentListContainingChildDtoListAcrossStorageModes() throws Exception {
         UserRecord firstA = user(71L, "Tina", "13400134071", "320101199001010171");
@@ -929,6 +1157,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldDecryptComplexDtoWithMixedFieldModesAcrossStorageModes() throws Exception {
         UserRecord ownerOne = user(81L, "Xena", "13500135081", "320101199001010181");
@@ -1012,6 +1244,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadComplexDashboardProjectionWithoutTouchingUnmappedBusinessGetters() throws Exception {
         UserRecord owner = user(87L, "Dora", "13500135087", "320101199001010187");
@@ -1063,6 +1299,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadMultiUnionNestedSubqueryQueryAcrossStorageModes() throws Exception {
         UserRecord first = user(91L, "Milo", "13600136091", "320101199001010191");
@@ -1113,6 +1353,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldReadWrappedUnionNestedSubqueryQueryAcrossStorageModesWithoutTypeCastError() throws Exception {
         UserRecord first = user(101L, "Paul", "13600136101", "320101199001010201");
@@ -1163,6 +1407,10 @@ class MybatisEncryptionIntegrationTest {
         }
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldBatchInsertAcrossStorageModesUsingBatchExecutor() throws Exception {
         List<UserRecord> users = List.of(
@@ -1195,6 +1443,10 @@ class MybatisEncryptionIntegrationTest {
         assertSeparateTableStorage(loadReferenceId(12L), "320101199001010022");
     }
 
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
     @Test
     void shouldBatchUpdateAcrossStorageModesUsingBatchExecutor() throws Exception {
         List<UserRecord> originalUsers = List.of(
@@ -1252,6 +1504,7 @@ class MybatisEncryptionIntegrationTest {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         properties.setDefaultCipherKey("integration-test-key");
         properties.setLogMaskedSql(false);
+        properties.setSeparateTableHydrationBatchSize(separateTableHydrationBatchSize);
 
         EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(
                 properties, new AnnotationEncryptMetadataLoader());
@@ -1603,6 +1856,13 @@ class MybatisEncryptionIntegrationTest {
                 where id = #{id}
                 """)
         UserRecord selectById(@Param("id") Long id);
+
+        @Select("""
+                select id, name, phone, id_card
+                from user_account
+                order by id
+                """)
+        List<UserRecord> selectAllUsersOrderById();
 
         @Select("""
                 select c.id, c.name, c.phone, c.id_card
@@ -2847,7 +3107,7 @@ class MybatisEncryptionIntegrationTest {
 
         private int prepareWriteReferencesCalls;
 
-        TrackingSeparateTableEncryptionManager(JdbcDataSource dataSource,
+        TrackingSeparateTableEncryptionManager(DataSource dataSource,
                                                EncryptMetadataRegistry metadataRegistry,
                                                AlgorithmRegistry algorithmRegistry,
                                                DatabaseEncryptionProperties properties) {
@@ -2873,6 +3133,98 @@ class MybatisEncryptionIntegrationTest {
             this.sql = sql;
             this.parameters = parameters;
             this.parameterObject = parameterObject;
+        }
+    }
+
+    static class CountingDataSource implements DataSource {
+
+        private final DataSource delegate;
+        private final List<String> separateTableBatchLoadSqls = new ArrayList<>();
+
+        CountingDataSource(DataSource delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Connection getConnection() throws java.sql.SQLException {
+            return wrap(delegate.getConnection());
+        }
+
+        @Override
+        public Connection getConnection(String username, String password) throws java.sql.SQLException {
+            return wrap(delegate.getConnection(username, password));
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> iface) throws java.sql.SQLException {
+            if (iface.isInstance(this)) {
+                return iface.cast(this);
+            }
+            return delegate.unwrap(iface);
+        }
+
+        @Override
+        public boolean isWrapperFor(Class<?> iface) throws java.sql.SQLException {
+            return iface.isInstance(this) || delegate.isWrapperFor(iface);
+        }
+
+        @Override
+        public PrintWriter getLogWriter() throws java.sql.SQLException {
+            return delegate.getLogWriter();
+        }
+
+        @Override
+        public void setLogWriter(PrintWriter out) throws java.sql.SQLException {
+            delegate.setLogWriter(out);
+        }
+
+        @Override
+        public void setLoginTimeout(int seconds) throws java.sql.SQLException {
+            delegate.setLoginTimeout(seconds);
+        }
+
+        @Override
+        public int getLoginTimeout() throws java.sql.SQLException {
+            return delegate.getLoginTimeout();
+        }
+
+        @Override
+        public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+            return delegate.getParentLogger();
+        }
+
+        void resetSeparateTableBatchLoadTracking() {
+            separateTableBatchLoadSqls.clear();
+        }
+
+        List<String> getSeparateTableBatchLoadSqls() {
+            return List.copyOf(separateTableBatchLoadSqls);
+        }
+
+        private Connection wrap(Connection connection) {
+            return (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[]{Connection.class},
+                    (proxy, method, args) -> invokeConnectionMethod(connection, method.getName(), method, args)
+            );
+        }
+
+        private Object invokeConnectionMethod(Connection connection,
+                                              String methodName,
+                                              java.lang.reflect.Method method,
+                                              Object[] args) throws Throwable {
+            try {
+                if ("prepareStatement".equals(methodName)
+                        && args != null
+                        && args.length > 0
+                        && args[0] instanceof String sql
+                        && isSeparateTableBatchLoadSql(sql)) {
+                    separateTableBatchLoadSqls.add(normalizeSql(sql));
+                }
+                return method.invoke(connection, args);
+            } catch (InvocationTargetException ex) {
+                throw ex.getCause();
+            }
         }
     }
 
@@ -2954,5 +3306,26 @@ class MybatisEncryptionIntegrationTest {
             lastResolvedParameters = List.of();
             preparedStatements.clear();
         }
+    }
+
+    private static boolean isSeparateTableBatchLoadSql(String sql) {
+        String normalized = normalizeSql(sql);
+        return normalized.contains("from `user_id_card_encrypt`")
+                && normalized.contains("where `id_card_hash` in (")
+                && normalized.startsWith("select ");
+    }
+
+    private static String normalizeSql(String sql) {
+        return sql == null ? "" : sql.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static int countPlaceholders(String sql) {
+        int count = 0;
+        for (int index = 0; index < sql.length(); index++) {
+            if (sql.charAt(index) == '?') {
+                count++;
+            }
+        }
+        return count;
     }
 }

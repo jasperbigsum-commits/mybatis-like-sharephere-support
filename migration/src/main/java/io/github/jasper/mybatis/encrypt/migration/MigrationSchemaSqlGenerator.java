@@ -263,6 +263,9 @@ public final class MigrationSchemaSqlGenerator {
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             ColumnMetadata sourceColumn = snapshot.requireColumn(plan.getTableName(), columnPlan.getSourceColumn());
             if (columnPlan.isStoredInSeparateTable()) {
+                // 独立表迁移会把主表原字段覆盖成 hash/ref，因此主表源列本身也必须至少容纳 hash 长度。
+                registerRequirement(requirements, ownerMainTable, plan.getTableName(), columnPlan.getSourceColumn(),
+                        hashType(), false, null);
                 String storageTable = columnPlan.getStorageTable();
                 String previousColumn = columnPlan.getStorageIdColumn();
                 if (!snapshot.hasTable(storageTable)) {

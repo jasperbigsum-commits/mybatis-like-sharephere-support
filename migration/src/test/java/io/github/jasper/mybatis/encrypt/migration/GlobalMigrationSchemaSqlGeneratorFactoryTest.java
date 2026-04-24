@@ -97,14 +97,14 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
     }
 
     /**
-     * 测试目的：验证全量 DDL 生成工厂能识别字段级 backupColumn 配置，避免独立表模式只生成外表结构而漏掉主表备份列。
-     * 测试场景：使用纯配置注册身份证独立表字段，并在字段规则上配置 id_card_backup，只调用 generateAllRegisteredTables 断言主表备份列和独立表建表 SQL 都被导出。
+     * 测试目的：验证全量 DDL 生成工厂能识别字段级 backupColumn 配置，并在独立表覆盖主列时同步校验主表源列长度。
+     * 测试场景：使用纯配置注册身份证独立表字段，主表原列长度只有 18 且配置 id_card_backup；只调用 generateAllRegisteredTables，断言会先扩容主表原列，再导出备份列和独立表建表 SQL。
      */
     @Test
     void shouldGenerateSeparateTableBackupColumnFromConfiguredFieldRule() throws Exception {
         DataSource primary = newDataSource("global_schema_separate_backup_primary");
         executeSql(primary,
-                "create table user_account (id bigint primary key, id_card varchar(80))");
+                "create table user_account (id bigint primary key, id_card varchar(18))");
 
         DatabaseEncryptionProperties properties = properties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule =
@@ -133,11 +133,12 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
         List<String> ddl = factory.generateAllRegisteredTables("primaryDs");
 
         assertEquals(Arrays.asList(
-                "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`",
+                "alter table `user_account` modify column `id_card` varchar(64)",
+                "alter table `user_account` add column `id_card_backup` varchar(18) after `id_card`",
                 "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
-                        + "`id_card_cipher` varchar(464), "
+                        + "`id_card_cipher` varchar(136), "
                         + "`id_card_hash` varchar(64), "
-                        + "`id_card_like` varchar(80))"
+                        + "`id_card_like` varchar(18))"
         ), ddl);
     }
 }

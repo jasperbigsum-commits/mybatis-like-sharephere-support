@@ -179,6 +179,33 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
     }
 
     /**
+     * 测试目的：验证独立表模式会同时校验主表源列是否足以容纳迁移后写回的 hash 引用值。
+     * 测试场景：主表身份证列长度只有 18，但迁移会把该列覆盖成 64 位 hash；断言生成器会先扩容主表源列，再输出备份列和独立表建表 SQL。
+     */
+    @Test
+    void shouldModifySeparateTableSourceColumnWhenHashReferenceExceedsSourceLength() throws Exception {
+        DataSource dataSource = newDataSource("schema-separate-source-modify");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, id_card varchar(18))");
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry(), properties());
+
+        List<String> ddl = generator.generateForEntity(
+                SeparateTableUserEntity.class,
+                builder -> builder.backupColumn("idCard", "id_card_backup"));
+
+        assertEquals(Arrays.asList(
+                "alter table `user_account` modify column `id_card` varchar(64)",
+                "alter table `user_account` add column `id_card_backup` varchar(18) after `id_card`",
+                "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
+                        + "`id_card_cipher` varchar(136), "
+                        + "`id_card_hash` varchar(64), "
+                        + "`id_card_like` varchar(18))"
+        ), ddl);
+    }
+
+    /**
      * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
      * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。
      */
@@ -431,6 +458,78 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 "alter table `shared_id_card_encrypt` modify column `id_card_cipher` varchar(680)",
                 "alter table `shared_id_card_encrypt` modify column `id_card_hash` varchar(64)",
                 "alter table `shared_id_card_encrypt` modify column `id_card_like` varchar(120)"
+        ), ddl);
+    }
+
+    /**
+     * 测试目的：验证共享独立表同时承载 masked 列时，也会按多个来源字段长度合并需求且不重复输出 SQL。
+     * 测试场景：两个主表共同映射 shared_id_card_encrypt，并都配置独立的 id_card_masked 列；现有外表 masked/like/cipher 列长度不足，断言全量导出仅输出一组按最大长度扩容后的 modify SQL。
+     */
+    @Test
+    void shouldMergeMaskedColumnRequirementsForSharedSeparateTable() throws Exception {
+        DataSource dataSource = newDataSource("schema-batch-shared-separate-table-masked-modify");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, id_card varchar(80))",
+                "create table user_archive (id bigint primary key, archive_id_card varchar(120))",
+                "create table shared_id_card_encrypt ("
+                        + "id varchar(64) primary key, "
+                        + "id_card_cipher varchar(200), "
+                        + "id_card_hash varchar(16), "
+                        + "id_card_like varchar(40), "
+                        + "id_card_masked varchar(20))");
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties properties = properties();
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties accountRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties();
+        accountRule.setTable("user_account");
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties accountField =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties();
+        accountField.setProperty("idCard");
+        accountField.setColumn("id_card");
+        accountField.setStorageMode(io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode.SEPARATE_TABLE);
+        accountField.setStorageTable("shared_id_card_encrypt");
+        accountField.setStorageColumn("id_card_cipher");
+        accountField.setStorageIdColumn("id");
+        accountField.setAssistedQueryColumn("id_card_hash");
+        accountField.setLikeQueryColumn("id_card_like");
+        accountField.setMaskedColumn("id_card_masked");
+        accountField.setMaskedAlgorithm("idCardMaskLike");
+        accountRule.getFields().add(accountField);
+        properties.getTables().add(accountRule);
+
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties archiveRule =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.TableRuleProperties();
+        archiveRule.setTable("user_archive");
+        io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties archiveField =
+                new io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties.FieldRuleProperties();
+        archiveField.setProperty("archiveIdCard");
+        archiveField.setColumn("archive_id_card");
+        archiveField.setStorageMode(io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode.SEPARATE_TABLE);
+        archiveField.setStorageTable("shared_id_card_encrypt");
+        archiveField.setStorageColumn("id_card_cipher");
+        archiveField.setStorageIdColumn("id");
+        archiveField.setAssistedQueryColumn("id_card_hash");
+        archiveField.setLikeQueryColumn("id_card_like");
+        archiveField.setMaskedColumn("id_card_masked");
+        archiveField.setMaskedAlgorithm("idCardMaskLike");
+        archiveRule.getFields().add(archiveField);
+        properties.getTables().add(archiveRule);
+
+        io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry metadataRegistry =
+                new io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry(
+                        properties, new io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader());
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry, properties);
+
+        List<String> ddl = generator.generateAllRegisteredTables();
+
+        assertEquals(Arrays.asList(
+                "alter table `shared_id_card_encrypt` modify column `id_card_cipher` varchar(680)",
+                "alter table `shared_id_card_encrypt` modify column `id_card_hash` varchar(64)",
+                "alter table `shared_id_card_encrypt` modify column `id_card_like` varchar(120)",
+                "alter table `shared_id_card_encrypt` modify column `id_card_masked` varchar(120)"
         ), ddl);
     }
 

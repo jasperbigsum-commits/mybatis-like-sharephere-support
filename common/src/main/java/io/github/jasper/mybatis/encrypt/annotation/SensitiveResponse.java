@@ -19,7 +19,9 @@ import java.lang.annotation.Target;
  *
  * <p>Method-level annotations override class-level annotations through Spring's merged annotation
  * lookup. The annotation does not change SQL execution, encryption or decryption by itself; it only
- * controls the final response boundary decision.</p>
+ * controls the final response boundary decision. If internal service or assembler methods want to
+ * consume the already-open request scope, they may use {@link SensitiveResponseTrigger}, which
+ * never opens a new scope by itself.</p>
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)

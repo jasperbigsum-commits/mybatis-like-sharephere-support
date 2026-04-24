@@ -47,8 +47,9 @@ Behavior:
 
 - Read plaintext from the main table source column
 - Derive ciphertext, hash, and like values
+- When `backupColumn(...)` is configured, persist the main-table backup column first inside the current transaction
 - Reuse an external row by hash when possible, otherwise insert a new external row
-- Update the main table source column to the external reference id
+- Update the main table source column to the external reference id last
 - Optionally verify both the main-table reference and external-table row
 
 ## Main entry point
@@ -639,6 +640,7 @@ All of them extend `MigrationException`, and callers can read `getErrorCode()` f
 - `STATE_STORE_DATA_INVALID`
 - `STATE_INCOMPATIBLE`
 - `PLAINTEXT_UNRECOVERABLE`
+- `BACKUP_VALUE_INCONSISTENT`
 - `VERIFICATION_VALUE_MISMATCH`
 
 ### What `STATE_INCOMPATIBLE` means
@@ -656,6 +658,29 @@ Recommended action:
 1. to resume the previous migration, restore the exact same configuration and rerun
 2. to start a new migration intentionally, archive or move the old checkpoint first
 3. do not manually edit `planSignature`, `dataSourceFingerprint`, or cursor values to bypass the check
+
+### What `BACKUP_VALUE_INCONSISTENT` means
+
+This code means a backup column exists, but its value neither matches the current source plaintext nor explains why the source column is already in a valid overwrite target state.
+
+Typical causes:
+
+- `backupColumn(...)` is configured
+- the backup column is non-empty
+- the source column is also non-empty
+- but the source value is neither equal to the backup plaintext nor equal to the hash / like / ciphertext / separate-table reference hash derived from that backup plaintext
+
+Why execution must fail:
+
+- the migrator can no longer safely decide whether the source column or the backup column is authoritative
+- blindly trusting the backup can spread an already-wrong backup into new ciphertext and derived values
+- blindly trusting the source would break resumable overwrite migrations that intentionally recover from the backup first
+
+Recommended action:
+
+1. manually determine whether the source or backup column contains the real plaintext
+2. correct the wrong value and rerun the migration
+3. do not bypass this by deleting the checkpoint blindly
 
 ## State files and resume behavior
 

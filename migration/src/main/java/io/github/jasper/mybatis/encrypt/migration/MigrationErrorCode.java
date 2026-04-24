@@ -57,6 +57,10 @@ public enum MigrationErrorCode {
      */
     PLAINTEXT_UNRECOVERABLE,
     /**
+     * 备份列与当前源列/目标态不一致
+     */
+    BACKUP_VALUE_INCONSISTENT,
+    /**
      * 需确认信息
      */
     CONFIRMATION_REQUIRED,

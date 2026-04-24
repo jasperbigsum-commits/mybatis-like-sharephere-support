@@ -43,7 +43,7 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
         this.algorithmRegistry = algorithmRegistry;
         this.properties = properties;
         this.valueResolver = new MigrationValueResolver(algorithmRegistry);
-        this.recordStateSupport = new MigrationRecordStateSupport(properties);
+        this.recordStateSupport = new MigrationRecordStateSupport(properties, algorithmRegistry);
     }
 
     @Override
@@ -54,6 +54,16 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                 continue;
             }
             ensurePlaintextRecoverable(connection, plan, columnPlan, mainRow);
+            Object backupValue = columnPlan.shouldWriteBackup() ? mainRow.get(columnPlan.getBackupColumn()) : null;
+            if (columnPlan.shouldWriteBackup()
+                    && backupValue != null
+                    && !StringUtils.isBlank(String.valueOf(backupValue))) {
+                recordStateSupport.ensureBackupValueConsistentForVerify(
+                        plan,
+                        columnPlan,
+                        mainRow,
+                        valueResolver.resolve(columnPlan, backupValue));
+            }
             Object plainValue = recordStateSupport.resolvePlainValue(columnPlan, record, mainRow);
             MigrationValueResolver.DerivedFieldValues expected = valueResolver.resolve(columnPlan, plainValue);
             if (expected.isEmpty()) {

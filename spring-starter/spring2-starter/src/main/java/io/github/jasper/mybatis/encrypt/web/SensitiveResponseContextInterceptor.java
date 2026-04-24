@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.web;
 
 import io.github.jasper.mybatis.encrypt.annotation.SensitiveResponse;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
@@ -26,12 +27,11 @@ public class SensitiveResponseContextInterceptor implements AsyncHandlerIntercep
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        SensitiveResponse annotation = resolveAnnotation(handler);
-        if (annotation == null) {
+        ScopeSettings settings = resolveSettings(handler);
+        if (settings == null) {
             return true;
         }
-        SensitiveDataContext.Scope scope =
-                SensitiveDataContext.open(annotation.returnSensitive(), annotation.strategy());
+        SensitiveDataContext.Scope scope = SensitiveDataContext.open(settings.returnSensitive, settings.strategy);
         scopeStack(request).push(scope);
         return true;
     }
@@ -47,7 +47,7 @@ public class SensitiveResponseContextInterceptor implements AsyncHandlerIntercep
     }
 
     private void closeScope(HttpServletRequest request, Object handler) {
-        if (resolveAnnotation(handler) == null) {
+        if (resolveSettings(handler) == null) {
             return;
         }
         Object scopes = request.getAttribute(SCOPES_ATTRIBUTE);
@@ -74,7 +74,7 @@ public class SensitiveResponseContextInterceptor implements AsyncHandlerIntercep
         return stack;
     }
 
-    private SensitiveResponse resolveAnnotation(Object handler) {
+    private ScopeSettings resolveSettings(Object handler) {
         if (!(handler instanceof HandlerMethod)) {
             return null;
         }
@@ -82,8 +82,27 @@ public class SensitiveResponseContextInterceptor implements AsyncHandlerIntercep
         SensitiveResponse methodAnnotation = AnnotatedElementUtils.findMergedAnnotation(
                 handlerMethod.getMethod(), SensitiveResponse.class);
         if (methodAnnotation != null) {
-            return methodAnnotation;
+            return ScopeSettings.from(methodAnnotation.returnSensitive(), methodAnnotation.strategy());
         }
-        return AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getBeanType(), SensitiveResponse.class);
+        SensitiveResponse controllerAnnotation =
+                AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getBeanType(), SensitiveResponse.class);
+        return controllerAnnotation == null
+                ? null
+                : ScopeSettings.from(controllerAnnotation.returnSensitive(), controllerAnnotation.strategy());
+    }
+
+    private static final class ScopeSettings {
+
+        private final boolean returnSensitive;
+        private final SensitiveResponseStrategy strategy;
+
+        private ScopeSettings(boolean returnSensitive, SensitiveResponseStrategy strategy) {
+            this.returnSensitive = returnSensitive;
+            this.strategy = strategy == null ? SensitiveResponseStrategy.RECORDED_ONLY : strategy;
+        }
+
+        private static ScopeSettings from(boolean returnSensitive, SensitiveResponseStrategy strategy) {
+            return new ScopeSettings(returnSensitive, strategy);
+        }
     }
 }

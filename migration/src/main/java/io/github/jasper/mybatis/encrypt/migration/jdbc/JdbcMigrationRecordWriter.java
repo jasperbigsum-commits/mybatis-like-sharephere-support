@@ -52,18 +52,27 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         this.algorithmRegistry = algorithmRegistry;
         this.referenceIdGenerator = referenceIdGenerator;
         this.valueResolver = new MigrationValueResolver(algorithmRegistry);
-        this.recordStateSupport = new MigrationRecordStateSupport(properties);
+        this.recordStateSupport = new MigrationRecordStateSupport(properties, algorithmRegistry);
     }
 
     @Override
     public boolean write(Connection connection, EntityMigrationPlan plan, MigrationRecord record) throws SQLException {
         Map<String, Object> currentRow = loadCurrentMainRow(connection, plan, record.getCursor());
+        Map<String, Object> backupUpdates = new LinkedHashMap<>();
         Map<String, Object> mainTableUpdates = new LinkedHashMap<>();
+        boolean changed = false;
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             if (isAlreadyMigratedWithoutPlaintext(connection, columnPlan, currentRow)) {
                 continue;
             }
             ensurePlaintextRecoverable(connection, plan, columnPlan, currentRow);
+            if (columnPlan.shouldWriteBackup() && !isBlankValue(currentRow.get(columnPlan.getBackupColumn()))) {
+                recordStateSupport.ensureBackupValueConsistentForWrite(
+                        plan,
+                        columnPlan,
+                        currentRow,
+                        valueResolver.resolve(columnPlan, currentRow.get(columnPlan.getBackupColumn())));
+            }
             Object plainValue = recordStateSupport.resolvePlainValue(columnPlan, record, currentRow);
             MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
             if (derivedFieldValues.isEmpty()) {
@@ -73,32 +82,39 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 continue;
             }
             if (columnPlan.shouldWriteBackup()) {
-                mainTableUpdates.put(columnPlan.getBackupColumn(), plainValue);
+                putIfChanged(backupUpdates, columnPlan.getBackupColumn(), plainValue, currentRow);
             }
             if (columnPlan.isStoredInSeparateTable()) {
+                changed = flushBackupUpdates(connection, plan, record.getCursor(), currentRow, backupUpdates) || changed;
                 String referenceHash = derivedFieldValues.getHashValue();
                 if (!existsSeparateReference(connection, columnPlan, referenceHash)) {
                     Object storageId = referenceIdGenerator.nextReferenceId(columnPlan, record);
                     insertSeparateRow(connection, columnPlan, storageId, derivedFieldValues);
+                    changed = true;
                 }
-                mainTableUpdates.put(columnPlan.getSourceColumn(), referenceHash);
+                putIfChanged(mainTableUpdates, columnPlan.getSourceColumn(), referenceHash, currentRow);
                 continue;
             }
-            mainTableUpdates.put(columnPlan.getStorageColumn(), derivedFieldValues.getCipherText());
+            putIfChanged(mainTableUpdates, columnPlan.getStorageColumn(), derivedFieldValues.getCipherText(), currentRow);
             if (StringUtils.isNotBlank(columnPlan.getAssistedQueryColumn())) {
-                mainTableUpdates.put(columnPlan.getAssistedQueryColumn(), derivedFieldValues.getHashValue());
+                putIfChanged(mainTableUpdates, columnPlan.getAssistedQueryColumn(),
+                        derivedFieldValues.getHashValue(), currentRow);
             }
             if (StringUtils.isNotBlank(columnPlan.getLikeQueryColumn())) {
-                mainTableUpdates.put(columnPlan.getLikeQueryColumn(), derivedFieldValues.getLikeValue());
+                putIfChanged(mainTableUpdates, columnPlan.getLikeQueryColumn(),
+                        derivedFieldValues.getLikeValue(), currentRow);
             }
             if (columnPlan.hasDistinctMaskedColumn()) {
-                mainTableUpdates.put(columnPlan.getMaskedColumn(), derivedFieldValues.getMaskedValue());
+                putIfChanged(mainTableUpdates, columnPlan.getMaskedColumn(),
+                        derivedFieldValues.getMaskedValue(), currentRow);
             }
         }
-        if (mainTableUpdates.isEmpty()) {
-            return false;
+        if (backupUpdates.isEmpty() && mainTableUpdates.isEmpty()) {
+            return changed;
         }
-        updateMainTable(connection, plan, record.getCursor(), mainTableUpdates);
+        Map<String, Object> finalUpdates = new LinkedHashMap<String, Object>(backupUpdates);
+        finalUpdates.putAll(mainTableUpdates);
+        updateMainTable(connection, plan, record.getCursor(), finalUpdates);
         return true;
     }
 
@@ -110,6 +126,13 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 continue;
             }
             ensurePlaintextRecoverable(connection, plan, columnPlan, currentRow);
+            if (columnPlan.shouldWriteBackup() && !isBlankValue(currentRow.get(columnPlan.getBackupColumn()))) {
+                recordStateSupport.ensureBackupValueConsistentForWrite(
+                        plan,
+                        columnPlan,
+                        currentRow,
+                        valueResolver.resolve(columnPlan, currentRow.get(columnPlan.getBackupColumn())));
+            }
             Object plainValue = recordStateSupport.resolvePlainValue(columnPlan, record, currentRow);
             MigrationValueResolver.DerivedFieldValues derivedFieldValues = valueResolver.resolve(columnPlan, plainValue);
             if (derivedFieldValues.isEmpty()) {
@@ -260,6 +283,32 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             logCursorDebug("migration-update-main-row", sql.toString(), rowCursor);
             statement.executeUpdate();
         }
+    }
+
+    private boolean flushBackupUpdates(Connection connection,
+                                       EntityMigrationPlan plan,
+                                       MigrationCursor rowCursor,
+                                       Map<String, Object> currentRow,
+                                       Map<String, Object> backupUpdates) throws SQLException {
+        if (backupUpdates.isEmpty()) {
+            return false;
+        }
+        // In separate-table mode, persist the plaintext backup before attempting the external-table insert.
+        // This keeps the current transaction ordered as backup -> external row -> source hash replacement.
+        updateMainTable(connection, plan, rowCursor, backupUpdates);
+        currentRow.putAll(backupUpdates);
+        backupUpdates.clear();
+        return true;
+    }
+
+    private void putIfChanged(Map<String, Object> updates,
+                              String column,
+                              Object value,
+                              Map<String, Object> currentRow) {
+        if (StringUtils.isBlank(column) || valueEquals(currentRow.get(column), value)) {
+            return;
+        }
+        updates.put(column, value);
     }
 
     private void appendCursorEqualityPredicate(StringBuilder sql, List<String> cursorColumns) {

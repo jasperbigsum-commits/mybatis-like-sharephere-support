@@ -1,7 +1,12 @@
 package io.github.jasper.mybatis.encrypt.migration.jdbc;
 
+import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
+import io.github.jasper.mybatis.encrypt.migration.MigrationExecutionException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationVerificationException;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
@@ -21,9 +26,11 @@ import java.util.Map;
 final class MigrationRecordStateSupport {
 
     private final DatabaseEncryptionProperties properties;
+    private final AlgorithmRegistry algorithmRegistry;
 
-    MigrationRecordStateSupport(DatabaseEncryptionProperties properties) {
+    MigrationRecordStateSupport(DatabaseEncryptionProperties properties, AlgorithmRegistry algorithmRegistry) {
         this.properties = properties;
+        this.algorithmRegistry = algorithmRegistry;
     }
 
     Object resolvePlainValue(EntityMigrationColumnPlan columnPlan,
@@ -38,6 +45,20 @@ final class MigrationRecordStateSupport {
         return currentRow.containsKey(columnPlan.getSourceColumn())
                 ? currentRow.get(columnPlan.getSourceColumn())
                 : record.getColumnValue(columnPlan.getSourceColumn());
+    }
+
+    void ensureBackupValueConsistentForWrite(EntityMigrationPlan plan,
+                                             EntityMigrationColumnPlan columnPlan,
+                                             Map<String, Object> currentRow,
+                                             MigrationValueResolver.DerivedFieldValues derivedFromBackup) {
+        ensureBackupValueConsistent(plan, columnPlan, currentRow, derivedFromBackup, true);
+    }
+
+    void ensureBackupValueConsistentForVerify(EntityMigrationPlan plan,
+                                              EntityMigrationColumnPlan columnPlan,
+                                              Map<String, Object> currentRow,
+                                              MigrationValueResolver.DerivedFieldValues derivedFromBackup) {
+        ensureBackupValueConsistent(plan, columnPlan, currentRow, derivedFromBackup, false);
     }
 
     boolean isAlreadyMigratedWithoutPlaintext(Connection connection,
@@ -158,6 +179,44 @@ final class MigrationRecordStateSupport {
         }
     }
 
+    private void ensureBackupValueConsistent(EntityMigrationPlan plan,
+                                             EntityMigrationColumnPlan columnPlan,
+                                             Map<String, Object> currentRow,
+                                             MigrationValueResolver.DerivedFieldValues derivedFromBackup,
+                                             boolean writePhase) {
+        if (!columnPlan.shouldWriteBackup()) {
+            return;
+        }
+        Object backupValue = currentRow.get(columnPlan.getBackupColumn());
+        Object sourceValue = currentRow.get(columnPlan.getSourceColumn());
+        if (isBlankValue(backupValue) || isBlankValue(sourceValue)) {
+            return;
+        }
+        if (valueEquals(sourceValue, backupValue)) {
+            return;
+        }
+        if (sourceValueMatches(columnPlan, backupValue, sourceValue, derivedFromBackup)) {
+            return;
+        }
+        String message = buildBackupValueInconsistentMessage(plan, columnPlan, sourceValue, backupValue);
+        if (writePhase) {
+            throw new MigrationExecutionException(MigrationErrorCode.BACKUP_VALUE_INCONSISTENT, message, null);
+        }
+        throw new MigrationVerificationException(MigrationErrorCode.BACKUP_VALUE_INCONSISTENT, message);
+    }
+
+    private String buildBackupValueInconsistentMessage(EntityMigrationPlan plan,
+                                                       EntityMigrationColumnPlan columnPlan,
+                                                       Object sourceValue,
+                                                       Object backupValue) {
+        return "Cannot continue migration for table " + plan.getTableName()
+                + " property " + columnPlan.getProperty()
+                + " because backup column " + plan.getTableName() + '.' + columnPlan.getBackupColumn()
+                + " does not match source column " + plan.getTableName() + '.' + columnPlan.getSourceColumn()
+                + " and the source value is not in the expected overwrite target state. "
+                + "source=" + sourceValue + ", backup=" + backupValue;
+    }
+
     private String quote(String identifier) {
         return properties.getSqlDialect().quote(identifier);
     }
@@ -195,5 +254,41 @@ final class MigrationRecordStateSupport {
 
     private boolean matchesSameColumn(String left, String right) {
         return StringUtils.isNotBlank(left) && left.equals(right);
+    }
+
+    private boolean cipherMatches(EntityMigrationColumnPlan columnPlan, Object plainValue, Object actualCipherValue) {
+        String plainText = plainValue == null ? null : String.valueOf(plainValue);
+        String actualCipher = actualCipherValue == null ? null : String.valueOf(actualCipherValue);
+        if (plainText == null || actualCipher == null) {
+            return plainText == null && actualCipher == null;
+        }
+        try {
+            String decrypted = algorithmRegistry.cipher(columnPlan.getCipherAlgorithm()).decrypt(actualCipher);
+            return plainText.equals(decrypted);
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private boolean sourceValueMatches(EntityMigrationColumnPlan columnPlan,
+                                       Object plainValue,
+                                       Object actualSourceValue,
+                                       MigrationValueResolver.DerivedFieldValues derivedFieldValues) {
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getStorageColumn())) {
+            return cipherMatches(columnPlan, plainValue, actualSourceValue);
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getAssistedQueryColumn())) {
+            return valueEquals(actualSourceValue, derivedFieldValues.getHashValue());
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getLikeQueryColumn())) {
+            return valueEquals(actualSourceValue, derivedFieldValues.getLikeValue());
+        }
+        if (matchesSameColumn(columnPlan.getSourceColumn(), columnPlan.getMaskedColumn())) {
+            return valueEquals(actualSourceValue, derivedFieldValues.getMaskedValue());
+        }
+        if (columnPlan.isStoredInSeparateTable()) {
+            return valueEquals(actualSourceValue, derivedFieldValues.getHashValue());
+        }
+        return actualSourceValue == null;
     }
 }

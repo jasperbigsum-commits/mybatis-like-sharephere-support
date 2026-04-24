@@ -164,4 +164,73 @@ class MigrationCompensationIdempotencyTest extends MigrationJdbcTestSupport {
         assertEquals(MigrationErrorCode.PLAINTEXT_UNRECOVERABLE, exception.getErrorCode());
         assertTrue(exception.getMessage().contains("phone"));
     }
+
+    /**
+     * 测试目的：验证存在备份列时，如果主表源列仍像明文但与备份列不一致，会快速失败避免错误补偿。
+     * 测试场景：构造同表覆盖字段，源列与备份列均为非空明文但内容不同，断言迁移拒绝继续。
+     */
+    @Test
+    void shouldFailFastWhenBackupValueConflictsWithSameTablePlaintextSource() throws Exception {
+        DataSource dataSource = newDataSource("backup_conflict_same_table");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "phone varchar(128), " +
+                        "phone_cipher varchar(512), " +
+                        "phone_like varchar(255), " +
+                        "phone_backup varchar(128))",
+                "insert into user_account (id, phone, phone_backup) values (1, '13800138000', '13900139000')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(HashOverwriteUserEntity.class, "id")
+                        .backupColumn("phone", "phone_backup")
+                        .build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-backup-conflict-same"))
+        );
+
+        MigrationExecutionException exception = assertThrows(MigrationExecutionException.class, task::execute);
+
+        assertEquals(MigrationErrorCode.BACKUP_VALUE_INCONSISTENT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("phone_backup"));
+    }
+
+    /**
+     * 测试目的：验证存在备份列时，如果独立表字段的主表源列仍像明文但与备份列不一致，会快速失败避免错误补偿。
+     * 测试场景：构造独立表覆盖字段，源列与备份列均为非空明文但内容不同，断言迁移拒绝继续。
+     */
+    @Test
+    void shouldFailFastWhenBackupValueConflictsWithSeparateTablePlaintextSource() throws Exception {
+        DataSource dataSource = newDataSource("backup_conflict_separate_table");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "id_card varchar(64), " +
+                        "id_card_backup varchar(64))",
+                "create table user_id_card_encrypt (" +
+                        "id varchar(64) primary key, " +
+                        "id_card_cipher varchar(512), " +
+                        "id_card_hash varchar(128), " +
+                        "id_card_like varchar(255))",
+                "insert into user_account (id, id_card, id_card_backup) values (1, '320101199001011234', '320101199001011235')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SeparateTableUserEntity.class, "id")
+                        .backupColumnByColumn("id_card", "id_card_backup")
+                        .build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-backup-conflict-separate"))
+        );
+
+        MigrationExecutionException exception = assertThrows(MigrationExecutionException.class, task::execute);
+
+        assertEquals(MigrationErrorCode.BACKUP_VALUE_INCONSISTENT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("id_card_backup"));
+    }
 }

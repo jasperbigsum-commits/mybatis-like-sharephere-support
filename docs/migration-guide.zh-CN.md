@@ -47,8 +47,9 @@
 
 - 读取主表原字段明文
 - 计算密文、hash、like
+- 如配置了 `backupColumn(...)`，先在当前事务内把主表备份列落库
 - 依据 hash 优先复用外表已存在记录，未命中则新建
-- 将主表原字段更新为外表引用 id
+- 最后再将主表原字段更新为外表引用 id
 - 可选校验主表引用和外表数据是否一致
 
 ## 核心入口
@@ -638,6 +639,7 @@ builder 方式的匹配顺序：
 - `STATE_STORE_DATA_INVALID`
 - `STATE_INCOMPATIBLE`
 - `PLAINTEXT_UNRECOVERABLE`
+- `BACKUP_VALUE_INCONSISTENT`
 - `VERIFICATION_VALUE_MISMATCH`
 
 ### `PLAINTEXT_UNRECOVERABLE` 代表什么
@@ -661,6 +663,29 @@ builder 方式的匹配顺序：
 1. 从业务备份、审计表或旧备份列恢复原始明文
 2. 校正不完整的同表派生列或独立表记录
 3. 对未来所有会覆盖源列的字段补充 `backupColumn(...)` 或统一 `backup-column-templates`
+
+### `BACKUP_VALUE_INCONSISTENT` 代表什么
+
+这个错误码用于“备份列已存在，但它既不等于当前源列明文，也无法解释当前源列为什么已经处于合法覆盖目标态”的场景。
+
+典型触发条件：
+
+- 已配置 `backupColumn(...)`
+- 备份列里有值
+- 主表源列里也有值
+- 但源列值既不等于备份明文，也不等于基于该备份明文推导出的 hash / like / 密文 / 独立表引用 hash
+
+为什么此时必须失败：
+
+- 迁移器无法再安全判断到底应该信任源列还是备份列
+- 如果继续无条件信任备份列，可能把错误备份扩散成新的密文和派生列
+- 如果继续无条件信任源列，又会破坏“备份优先恢复”的断点续跑语义
+
+推荐处理方式：
+
+1. 人工核对源列与备份列哪个才是真实明文
+2. 修正错误值后重新执行迁移
+3. 不要直接删除 checkpoint 规避该错误
 
 ### `STATE_INCOMPATIBLE` 代表什么
 

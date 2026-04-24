@@ -145,6 +145,55 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
     }
 
     /**
+     * 测试目的：验证独立表写入失败时整批事务会回滚，不会让主表留下半迁移状态。
+     * 测试场景：故意把外表密文字段长度设得过短，执行迁移后校验主表明文与备份列、外表行数都保持未提交状态。
+     */
+    @Test
+    void shouldRollbackSeparateTableBatchWhenExternalCipherColumnIsTooShort() throws Exception {
+        DataSource dataSource = newDataSource("separate_table_insert_failure_rollback");
+        executeSql(dataSource,
+                "create table user_account (" +
+                        "id bigint primary key, " +
+                        "id_card varchar(64), " +
+                        "id_card_backup varchar(64))",
+                "create table user_id_card_encrypt (" +
+                        "id varchar(64) primary key, " +
+                        "id_card_cipher varchar(8), " +
+                        "id_card_hash varchar(128), " +
+                        "id_card_like varchar(255))",
+                "insert into user_account (id, id_card) values (1, '320101199001011234')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(SeparateTableUserEntity.class, "id")
+                        .backupColumnByColumn("id_card", "id_card_backup")
+                        .build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-separate-rollback"))
+        );
+
+        MigrationExecutionException exception = assertThrows(MigrationExecutionException.class, task::execute);
+
+        assertEquals(MigrationErrorCode.EXECUTION_FAILED, exception.getErrorCode());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet mainResult = statement.executeQuery(
+                     "select id_card, id_card_backup from user_account where id = 1")) {
+            assertTrue(mainResult.next());
+            assertEquals("320101199001011234", mainResult.getString("id_card"));
+            assertNull(mainResult.getString("id_card_backup"));
+        }
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet externalCount = statement.executeQuery("select count(1) from user_id_card_encrypt")) {
+            assertTrue(externalCount.next());
+            assertEquals(0, externalCount.getInt(1));
+        }
+    }
+
+    /**
      * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
      * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。
      */

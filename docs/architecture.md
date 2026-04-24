@@ -63,6 +63,9 @@
 
 - `SensitiveResponseContextInterceptor`
   - 在命中 `@SensitiveResponse` 的 controller 方法前打开请求级别 `SensitiveDataContext`
+- `SensitiveResponseTriggerAspect`
+  - 对 service、装配器等 Spring Bean 方法上的 `@SensitiveResponseTrigger` 消费当前线程里已经打开的 `SensitiveDataContext`
+  - 没有 controller 先打开上下文时，不做任何操作
 - `SensitiveResponseBodyAdvice`
   - 在响应写回前触发 `SensitiveDataMasker`
 - `SensitiveDataMasker`
@@ -105,6 +108,7 @@
 4. 查询条件遇到等值或 LIKE 时，改写到对应辅助列，并对参数做算法转换。
 5. 查询结果返回后，按实体字段规则解密成业务可读值。
 6. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
+7. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
 
 ## 风险控制
 

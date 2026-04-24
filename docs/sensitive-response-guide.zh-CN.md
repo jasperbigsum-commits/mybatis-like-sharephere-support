@@ -33,7 +33,9 @@
 1. 写入链路会在 `maskedColumn` 中持久化脱敏值。
 2. 查询链路仍然只返回业务字段对应的密文字段，运行时先解密回 DTO 明文。
 3. 如果 controller 标注了 `@SensitiveResponse` 且 `returnSensitive=false`，则在响应返回前统一做脱敏替换。
-4. 响应层优先从数据库存储态脱敏列回填；取不到时才回退到算法脱敏；再不满足时才落到 `@SensitiveField` 的对象图脱敏。
+4. 只有 controller 上的 `@SensitiveResponse` 才负责打开响应脱敏上下文。
+5. `@SensitiveResponseTrigger` 只能消费已经打开的上下文；没有上下文时不做任何操作。
+6. 响应层优先从数据库存储态脱敏列回填；取不到时才回退到算法脱敏；再不满足时才落到 `@SensitiveField` 的对象图脱敏。
 
 ## 适用边界
 
@@ -42,6 +44,7 @@
 - 手机号、身份证号、银行卡号、姓名、邮箱等敏感字段
 - 同一个 DTO 既要支持内部明文处理，又要支持外部接口脱敏输出
 - 希望脱敏策略由 controller 入口统一控制
+- 希望在 service、导出组装或其它 Spring Bean 方法返回时复用 controller 已打开的脱敏上下文
 
 不适合：
 
@@ -99,24 +102,25 @@
 职责：
 
 - 在 controller 入口打开一次请求级脱敏上下文
+- 在命中 `@SensitiveResponseTrigger` 的 service / 装配方法上复用当前线程里已打开的脱敏上下文
 - 在响应写回前根据上下文与注解做最终脱敏替换
 
 ## 组件关系图
 
 ```mermaid
 flowchart LR
-    A[Controller<br/>@SensitiveResponse] --> B[SensitiveResponseContextInterceptor]
+    A[Controller / Service<br/>@SensitiveResponse / @SensitiveResponseTrigger] --> B[SensitiveResponseContextInterceptor / SensitiveResponseTriggerAspect]
     B --> C[SensitiveDataContext<br/>ThreadLocal Scope]
     D[DatabaseEncryptionInterceptor] --> E[SqlRewriteEngine]
     D --> F[ResultDecryptor]
     F --> C
     F --> G[SeparateTableEncryptionManager]
-    H[SensitiveResponseBodyAdvice] --> I[SensitiveDataMasker]
+    H[SensitiveResponseBodyAdvice / TriggerAspect] --> I[SensitiveDataMasker]
     C --> I
     I --> J[StoredSensitiveValueResolver]
     J --> K[JdbcStoredSensitiveValueResolver]
     K --> L[(DB maskedColumn)]
-    H --> M[HTTP Response]
+    H --> M[Masked Result / HTTP Response]
 ```
 
 ## 请求时序图
@@ -462,6 +466,45 @@ public UserDto internalDetail(@PathVariable Long id) {
 | --- | --- | --- | --- |
 | `returnSensitive` | `false` | 是否允许接口直接返回明文 | 内部接口、管理接口确实需要明文时 |
 | `strategy` | `RECORDED_ONLY` | 响应脱敏策略 | 返回手工 DTO 或混合对象图时 |
+
+### 3.1 `@SensitiveResponseTrigger`
+
+当一个 controller 已经通过 `@SensitiveResponse` 打开了脱敏上下文，而你又希望某个 service、导出组装或局部方法在返回前先消费这份上下文时，可以在该方法上追加触发注解：
+
+```java
+@RestController
+@RequestMapping("/users")
+@SensitiveResponse
+public class UserController {
+
+    @GetMapping("/export")
+    public ExportView export() {
+        return userService.export();
+    }
+}
+```
+
+也可以直接用于 service / 组装方法：
+
+```java
+@Service
+public class ExportAssembler {
+
+    @SensitiveResponseTrigger
+    public ExportView build(UserAccount account) {
+        return new ExportView(account.getPhone());
+    }
+}
+```
+
+行为规则：
+
+- `@SensitiveResponseTrigger` 本身不会打开 `SensitiveDataContext`
+- 只有当前线程已经存在由 controller `@SensitiveResponse` 打开的上下文时，它才会对方法返回值执行一次 `SensitiveDataMasker.mask(...)`
+- 没有上下文时，它完全透传，不会自行决定策略，也不会创建额外 scope
+- controller 方法是否开启上下文、是否允许明文、使用什么策略，仍然只由 `@SensitiveResponse` 决定
+- 如果某个入口方法本身就需要决定 `returnSensitive` 或完整覆盖策略，仍然直接在方法上使用 `@SensitiveResponse`
+- 对同一个 Spring Bean 内部的 `this.xxx()` 自调用，标准 Spring AOP 代理不会拦截；这类内部方法如需自动触发，需要改成经代理调用或启用 AspectJ weaving
 
 ### 4. `@SensitiveField`
 
@@ -833,15 +876,20 @@ Configure the same algorithm for both roles.
 
 - `common`
   - `io.github.jasper.mybatis.encrypt.annotation.SensitiveResponse`
+  - `io.github.jasper.mybatis.encrypt.annotation.SensitiveResponseTrigger`
   - `io.github.jasper.mybatis.encrypt.annotation.SensitiveField`
   - `io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext`
   - `io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker`
   - `io.github.jasper.mybatis.encrypt.core.mask.JdbcStoredSensitiveValueResolver`
 - `spring2-starter`
+  - `SensitiveMaskingAutoConfiguration`
   - `SensitiveResponseAutoConfiguration`
+  - `SensitiveResponseTriggerAspect`
   - `SensitiveResponseContextInterceptor`
   - `SensitiveResponseBodyAdvice`
 - `spring3-starter`
+  - `SensitiveMaskingAutoConfiguration`
   - `SensitiveResponseAutoConfiguration`
+  - `SensitiveResponseTriggerAspect`
   - `SensitiveResponseContextInterceptor`
   - `SensitiveResponseBodyAdvice`

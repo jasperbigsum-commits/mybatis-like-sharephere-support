@@ -58,6 +58,8 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
             if (columnPlan.shouldWriteBackup()
                     && backupValue != null
                     && !StringUtils.isBlank(String.valueOf(backupValue))) {
+                // Verification must honor the same backup trust boundary as write-side recovery.
+                // Otherwise resumable overwrite states could pass write() but fail verify() for the same row.
                 recordStateSupport.ensureBackupValueConsistentForVerify(
                         plan,
                         columnPlan,

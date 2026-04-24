@@ -22,10 +22,20 @@ public class SensitiveResponseTriggerAspect {
 
     private final SensitiveDataMasker sensitiveDataMasker;
 
+    /**
+     * 初始化创建脱敏触发器AOP
+     * @param sensitiveDataMasker 敏感信息脱敏处理器
+     */
     public SensitiveResponseTriggerAspect(SensitiveDataMasker sensitiveDataMasker) {
         this.sensitiveDataMasker = sensitiveDataMasker;
     }
 
+    /**
+     * 脱敏触发器AOP拦截点配置
+     * @param joinPoint 切面点
+     * @return 切面方法结果返回
+     * @throws Throwable 处理异常
+     */
     @Around("@annotation(io.github.jasper.mybatis.encrypt.annotation.SensitiveResponseTrigger)")
     public Object aroundTriggeredMethod(ProceedingJoinPoint joinPoint) throws Throwable {
         Method method = mostSpecificMethod(joinPoint);

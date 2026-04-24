@@ -25,6 +25,13 @@ import java.util.Map;
         havingValue = "true", matchIfMissing = true)
 public class SensitiveMaskingAutoConfiguration {
 
+    /**
+     * 注入敏感信息脱敏器
+     * @param storedSensitiveValueResolver 存储敏感信息解决器
+     * @param algorithmRegistry 算法注册表
+     * @param sensitiveFieldMaskers 敏感字段脱敏器
+     * @return 敏感信息脱敏器
+     */
     @Bean
     @ConditionalOnMissingBean
     public SensitiveDataMasker sensitiveDataMasker(
@@ -36,6 +43,13 @@ public class SensitiveMaskingAutoConfiguration {
         return new SensitiveDataMasker(storedSensitiveValueResolver, algorithmRegistry, sensitiveFieldMaskers);
     }
 
+    /**
+     * 注入存储敏感信息解决器
+     * @param dataSources 数据源
+     * @param algorithmRegistry 注册表
+     * @param properties 配置参数
+     * @return 存储敏感信息解决器
+     */
     @Bean
     @ConditionalOnBean(DataSource.class)
     @ConditionalOnMissingBean(StoredSensitiveValueResolver.class)
@@ -45,6 +59,11 @@ public class SensitiveMaskingAutoConfiguration {
         return new JdbcStoredSensitiveValueResolver(dataSources, algorithmRegistry, properties);
     }
 
+    /**
+     * 注入敏感信息响应触发器器切面
+     * @param sensitiveDataMasker 敏感信息脱敏器
+     * @return 敏感信息响应触发器器切面
+     */
     @Bean
     @ConditionalOnClass(Aspect.class)
     @ConditionalOnMissingBean

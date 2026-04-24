@@ -57,7 +57,11 @@ public enum MigrationErrorCode {
      */
     PLAINTEXT_UNRECOVERABLE,
     /**
-     * 备份列与当前源列/目标态不一致
+     * 备份列已存在，但它既不等于当前源列明文，也无法解释当前源列为何已经处于合法覆盖目标态。
+     *
+     * <p>该错误码用于拦截“错误备份继续被当作权威明文”这类场景，同时保留
+     * 正常断点续跑语义：如果源列已经是基于备份明文推导出的 hash / like /
+     * 独立表引用值，则不应视为冲突。</p>
      */
     BACKUP_VALUE_INCONSISTENT,
     /**

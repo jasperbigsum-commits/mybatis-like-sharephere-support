@@ -22,6 +22,12 @@ import java.util.Map;
  *
  * <p>This helper keeps the "already migrated without plaintext" rules in one place so
  * resumable execution and write-after verification observe the same state model.</p>
+ *
+ * <p>It also centralizes backup-column trust rules. A non-empty backup column is treated
+ * as the preferred plaintext source only when the current source column is either still
+ * equal to that plaintext or already matches one legal overwrite target derived from it.
+ * This preserves resumable overwrite migrations while refusing obviously inconsistent
+ * backup/source combinations.</p>
  */
 final class MigrationRecordStateSupport {
 
@@ -33,6 +39,13 @@ final class MigrationRecordStateSupport {
         this.algorithmRegistry = algorithmRegistry;
     }
 
+    /**
+     * Resolve the plaintext that should drive rewrite and verification for one field.
+     *
+     * <p>When a backup column exists and already contains a non-blank value, the backup is
+     * treated as the authoritative plaintext source. This is what allows overwrite-style
+     * migrations to resume after the main-table source column has been replaced.</p>
+     */
     Object resolvePlainValue(EntityMigrationColumnPlan columnPlan,
                              MigrationRecord record,
                              Map<String, Object> currentRow) {
@@ -47,6 +60,14 @@ final class MigrationRecordStateSupport {
                 : record.getColumnValue(columnPlan.getSourceColumn());
     }
 
+    /**
+     * Validate backup/source consistency before write-side mutation continues.
+     *
+     * <p>This method must allow normal resume states where the source column has already
+     * been replaced by a legal derived target value, for example a hash or separate-table
+     * reference, while still rejecting backup values that would cause future writes to be
+     * derived from the wrong plaintext.</p>
+     */
     void ensureBackupValueConsistentForWrite(EntityMigrationPlan plan,
                                              EntityMigrationColumnPlan columnPlan,
                                              Map<String, Object> currentRow,
@@ -54,6 +75,12 @@ final class MigrationRecordStateSupport {
         ensureBackupValueConsistent(plan, columnPlan, currentRow, derivedFromBackup, true);
     }
 
+    /**
+     * Apply the same backup/source consistency rule during post-write verification.
+     *
+     * <p>Writer and verifier intentionally share one rule here so that a row accepted by
+     * resumable write logic is not later rejected by verification for the same state.</p>
+     */
     void ensureBackupValueConsistentForVerify(EntityMigrationPlan plan,
                                               EntityMigrationColumnPlan columnPlan,
                                               Map<String, Object> currentRow,

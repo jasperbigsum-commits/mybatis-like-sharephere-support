@@ -67,6 +67,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             }
             ensurePlaintextRecoverable(connection, plan, columnPlan, currentRow);
             if (columnPlan.shouldWriteBackup() && !isBlankValue(currentRow.get(columnPlan.getBackupColumn()))) {
+                // A non-empty backup is the preferred resume source, but only if the current source column
+                // is still plaintext or already matches one legal overwrite target derived from that backup.
                 recordStateSupport.ensureBackupValueConsistentForWrite(
                         plan,
                         columnPlan,
@@ -127,6 +129,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             }
             ensurePlaintextRecoverable(connection, plan, columnPlan, currentRow);
             if (columnPlan.shouldWriteBackup() && !isBlankValue(currentRow.get(columnPlan.getBackupColumn()))) {
+                // requiresMigration(...) shares the same guard as write(...) so completion probing
+                // cannot silently trust an inconsistent backup/source pair.
                 recordStateSupport.ensureBackupValueConsistentForWrite(
                         plan,
                         columnPlan,

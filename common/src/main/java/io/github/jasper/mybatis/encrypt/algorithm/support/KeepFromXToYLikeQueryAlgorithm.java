@@ -39,9 +39,10 @@ public final class KeepFromXToYLikeQueryAlgorithm extends AbstractMaskLikeQueryA
 
     @Override
     public String transform(String plainText) {
-        if (null == plainText || plainText.isEmpty()) {
-            return plainText;
-        }
+        return transformLiteralSegments(plainText, this::maskSegment);
+    }
+
+    private String maskSegment(String plainText) {
         char[] chars = plainText.toCharArray();
         for (int index = 0; index < Math.min(fromX, plainText.length()); index++) {
             chars[index] = replaceChar;

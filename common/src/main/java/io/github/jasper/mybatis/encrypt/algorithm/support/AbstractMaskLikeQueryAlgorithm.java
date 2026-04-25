@@ -4,6 +4,8 @@ import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 
+import java.util.function.Function;
+
 /**
  * 基于字符覆盖的 LIKE 预处理算法基类。
  *
@@ -47,6 +49,50 @@ abstract class AbstractMaskLikeQueryAlgorithm implements LikeQueryAlgorithm {
      */
     protected String asString(char[] chars, String original) {
         return null == chars ? null : new String(chars);
+    }
+
+    /**
+     * 保留 SQL LIKE 通配符，仅转换普通文本片段。
+     *
+     * <p>例如 {@code %李三%} 会拆成 {@code "%"}、{@code "李三"}、{@code "%"}，
+     * 仅对中间文本片段应用掩码算法，最终得到 {@code %李*%}。</p>
+     *
+     * @param plainText 原始查询值
+     * @param segmentTransformer 普通文本片段转换器
+     * @return 保留通配符后的转换结果
+     */
+    protected String transformLiteralSegments(String plainText, Function<String, String> segmentTransformer) {
+        if (null == plainText || plainText.isEmpty()) {
+            return plainText;
+        }
+        StringBuilder result = new StringBuilder(plainText.length());
+        int index = 0;
+        while (index < plainText.length()) {
+            char current = plainText.charAt(index);
+            if (isLikeWildcard(current)) {
+                result.append(current);
+                index++;
+                continue;
+            }
+            int segmentEnd = index;
+            while (segmentEnd < plainText.length() && !isLikeWildcard(plainText.charAt(segmentEnd))) {
+                segmentEnd++;
+            }
+            String segment = plainText.substring(index, segmentEnd);
+            result.append(segmentTransformer.apply(segment));
+            index = segmentEnd;
+        }
+        return result.toString();
+    }
+
+    /**
+     * 判断字符是否为 SQL LIKE 通配符。
+     *
+     * @param ch 待判断字符
+     * @return 是通配符时返回 {@code true}
+     */
+    protected boolean isLikeWildcard(char ch) {
+        return ch == '%' || ch == '_';
     }
 
     /**

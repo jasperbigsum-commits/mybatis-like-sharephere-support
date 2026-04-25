@@ -19,6 +19,8 @@ class BusinessLikeQueryAlgorithmsTest {
         IdCardMaskLikeQueryAlgorithm algorithm = new IdCardMaskLikeQueryAlgorithm();
 
         assertEquals("110************234", algorithm.transform("110101199001011234"));
+        assertEquals("%110************234%", algorithm.transform("%110101199001011234%"));
+        assertEquals("110************234_", algorithm.transform("110101199001011234_"));
         assertEquals("abc123", algorithm.transform("abc123"));
         assertNull(algorithm.transform(null));
     }
@@ -32,6 +34,8 @@ class BusinessLikeQueryAlgorithmsTest {
         PhoneNumberMaskLikeQueryAlgorithm algorithm = new PhoneNumberMaskLikeQueryAlgorithm();
 
         assertEquals("*******8000", algorithm.transform("13800138000"));
+        assertEquals("%*******8000%", algorithm.transform("%13800138000%"));
+        assertEquals("*******5678_", algorithm.transform("01012345678_"));
         assertEquals("*******5678", algorithm.transform("01012345678"));
         assertEquals("1234", algorithm.transform("1234"));
     }
@@ -45,6 +49,8 @@ class BusinessLikeQueryAlgorithmsTest {
         BankCardMaskLikeQueryAlgorithm algorithm = new BankCardMaskLikeQueryAlgorithm();
 
         assertEquals("***************0123", algorithm.transform("6222021234567890123"));
+        assertEquals("%***************0123%", algorithm.transform("%6222021234567890123%"));
+        assertEquals("***************0123_", algorithm.transform("6222021234567890123_"));
         assertEquals("0123", algorithm.transform("0123"));
     }
 
@@ -59,6 +65,8 @@ class BusinessLikeQueryAlgorithmsTest {
         assertEquals("张*", algorithm.transform("张三"));
         assertEquals("王*明", algorithm.transform("王小明"));
         assertEquals("欧**娜", algorithm.transform("欧阳娜娜"));
+        assertEquals("%李*%", algorithm.transform("%李三%"));
+        assertEquals("李*_", algorithm.transform("李三_"));
     }
 
     /**

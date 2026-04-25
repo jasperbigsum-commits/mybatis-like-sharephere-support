@@ -378,6 +378,41 @@ class SqlConditionRewriterTest {
         assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
     }
 
+    @Test
+    void shouldRewriteSameTableEncryptedColumnEqualityToAssistedColumns() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(sameTableRule(), sameTableBackupRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = backup_phone",
+                Collections.<ParameterMapping>emptyList(), Collections.emptyMap());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone = backup_phone"),
+                tableContext,
+                context
+        );
+
+        assertEquals("`phone_hash` = `backup_phone_hash`", rewritten.toString());
+        assertEquals(0, context.parameterMappings().size());
+    }
+
+    @Test
+    void shouldRewriteSeparateTableEncryptedColumnEqualityToReferenceColumns() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule(), separateTableBackupRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = backup_phone",
+                Collections.<ParameterMapping>emptyList(), Collections.emptyMap());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone = backup_phone"),
+                tableContext,
+                context
+        );
+
+        assertEquals("`phone` = `backup_phone`", rewritten.toString());
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertEquals(0, context.parameterMappings().size());
+    }
+
     private SqlConditionRewriter newRewriter(List<ProjectionMode> dispatchedModes) {
         EncryptionValueTransformer transformer = new EncryptionValueTransformer(new AlgorithmRegistry(
                 Collections.emptyMap(),
@@ -414,9 +449,11 @@ class SqlConditionRewriterTest {
         return plainSelect.getHaving();
     }
 
-    private SqlTableContext tableContext(EncryptColumnRule rule) {
+    private SqlTableContext tableContext(EncryptColumnRule... rules) {
         EncryptTableRule tableRule = new EncryptTableRule("user_account");
-        tableRule.addColumnRule(rule);
+        for (EncryptColumnRule rule : rules) {
+            tableRule.addColumnRule(rule);
+        }
         SqlTableContext tableContext = new SqlTableContext();
         tableContext.register("user_account", null, tableRule);
         return tableContext;
@@ -453,6 +490,40 @@ class SqlConditionRewriterTest {
                 "user_phone_encrypt",
                 "phone_cipher",
                 "phone_hash"
+        );
+    }
+
+    private EncryptColumnRule sameTableBackupRule() {
+        return new EncryptColumnRule(
+                "backupPhone",
+                "user_account",
+                "backup_phone",
+                "sm4",
+                "backup_phone_hash",
+                "sm3",
+                "backup_phone_like",
+                "like",
+                FieldStorageMode.SAME_TABLE,
+                null,
+                "backup_phone_cipher",
+                null
+        );
+    }
+
+    private EncryptColumnRule separateTableBackupRule() {
+        return new EncryptColumnRule(
+                "backupPhone",
+                "user_account",
+                "backup_phone",
+                "sm4",
+                "backup_phone_hash",
+                "sm3",
+                "backup_phone_like",
+                "like",
+                FieldStorageMode.SEPARATE_TABLE,
+                "user_backup_phone_encrypt",
+                "backup_phone_cipher",
+                "backup_phone_hash"
         );
     }
 

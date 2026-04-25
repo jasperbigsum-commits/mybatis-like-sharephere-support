@@ -201,7 +201,13 @@ final class SqlConditionRewriter {
     }
 
     private Expression rewriteEquality(BinaryExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
-        ColumnResolution resolution = resolveComparison(expression, tableContext);
+        ColumnResolution left = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
+        ColumnResolution right = resolveEncryptedColumn(expression.getRightExpression(), tableContext);
+        if (left != null && right != null) {
+            return sqlEqualityConditionRewriter.rewriteColumnComparison(expression, left, right, context);
+        }
+        ColumnResolution resolution = left != null ? new ColumnResolution(left.column(), left.rule(), true)
+                : right == null ? null : new ColumnResolution(right.column(), right.rule(), false);
         if (resolution == null) {
             expression.setLeftExpression(rewrite(expression.getLeftExpression(), tableContext, context));
             expression.setRightExpression(rewrite(expression.getRightExpression(), tableContext, context));
@@ -338,15 +344,6 @@ final class SqlConditionRewriter {
         if (resolveEncryptedColumn(expression, tableContext) != null) {
             throw new UnsupportedEncryptedOperationException(errorCode, message);
         }
-    }
-
-    private ColumnResolution resolveComparison(BinaryExpression expression, SqlTableContext tableContext) {
-        ColumnResolution left = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
-        if (left != null) {
-            return new ColumnResolution(left.column(), left.rule(), true);
-        }
-        ColumnResolution right = resolveEncryptedColumn(expression.getRightExpression(), tableContext);
-        return right == null ? null : new ColumnResolution(right.column(), right.rule(), false);
     }
 
     private ColumnResolution resolveEncryptedColumn(Expression expression, SqlTableContext tableContext) {

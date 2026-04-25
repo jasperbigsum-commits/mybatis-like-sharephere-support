@@ -28,6 +28,7 @@ through real MyBatis execution tests.
 | `SELECT` explicit columns | Supported | Rewrites encrypted logical columns to `storageColumn AS logicalColumn`. |
 | `SELECT *` / `SELECT t.*` | Supported with caveats | Single-table queries may use bare `*`; multi-table queries must use explicit table wildcards such as `table.*` or `alias.*` so encrypted projections can stay ahead of the wildcard without being overwritten. |
 | Equality predicates `=` / `!=` | Supported | Uses assisted query columns when configured, otherwise falls back to `storageColumn`. |
+| Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm. |
 | `LIKE` | Supported | Requires `likeQueryColumn`. |
 | `IN (?, ?, ?)` | Supported | Uses assisted query column when available, otherwise `storageColumn`. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
@@ -49,6 +50,7 @@ Use these examples as low-cost templates during mapper review.
 | Goal | Recommended SQL shape | Why |
 | --- | --- | --- |
 | exact lookup by phone | `where phone = #{phone}` | rewritten to `assistedQueryColumn` when configured |
+| compare two encrypted fields | `where phone = backup_phone` | rewritten to assisted columns or separate-table reference columns |
 | lookup by multiple IDs / phones | `where phone in (...)` | each value can be transformed through the same helper path |
 | fuzzy lookup | `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm` |
 | return decrypted entity | `select id, phone from user_account` | logical projection can be mapped back to the entity property |

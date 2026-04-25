@@ -2,6 +2,8 @@ package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
+import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
+import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.schema.Column;
@@ -53,6 +55,17 @@ final class SqlEqualityConditionRewriter {
         return expression;
     }
 
+    Expression rewriteColumnComparison(BinaryExpression expression,
+                                       ColumnResolution left,
+                                       ColumnResolution right,
+                                       SqlRewriteContext context) {
+        validateComparableAssistedAlgorithm(left.rule(), right.rule());
+        expression.setLeftExpression(columnBuilder.apply(left.column(), comparisonColumn(left.rule())));
+        expression.setRightExpression(columnBuilder.apply(right.column(), comparisonColumn(right.rule())));
+        context.markChanged();
+        return expression;
+    }
+
     private Expression rewriteSeparateTable(BinaryExpression expression,
                                             ColumnResolution resolution,
                                             SqlRewriteContext context,
@@ -80,5 +93,21 @@ final class SqlEqualityConditionRewriter {
         return operandSupport.buildComposableQueryExpression(queryOperand, context,
                 valueTransformer.transformAssisted(rule, queryOperand.value()),
                 MaskingMode.HASH);
+    }
+
+    private String comparisonColumn(EncryptColumnRule rule) {
+        return rule.isStoredInSeparateTable()
+                ? rule.column()
+                : assistedQueryColumnProvider.apply(rule, "equality column comparison");
+    }
+
+    private void validateComparableAssistedAlgorithm(EncryptColumnRule left, EncryptColumnRule right) {
+        String leftAlgorithm = NameUtils.normalizeIdentifier(left.assistedQueryAlgorithm());
+        String rightAlgorithm = NameUtils.normalizeIdentifier(right.assistedQueryAlgorithm());
+        if (leftAlgorithm != null && leftAlgorithm.equals(rightAlgorithm)) {
+            return;
+        }
+        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_OPERATION,
+                "Encrypted column equality comparison requires the same assisted query algorithm.");
     }
 }

@@ -69,7 +69,7 @@ public class SensitiveResponseContextInterceptor implements AsyncHandlerIntercep
         if (scopes instanceof Deque<?>) {
             return (Deque<SensitiveDataContext.Scope>) scopes;
         }
-        Deque<SensitiveDataContext.Scope> stack = new ArrayDeque<SensitiveDataContext.Scope>();
+        Deque<SensitiveDataContext.Scope> stack = new ArrayDeque<>();
         request.setAttribute(SCOPES_ATTRIBUTE, stack);
         return stack;
     }

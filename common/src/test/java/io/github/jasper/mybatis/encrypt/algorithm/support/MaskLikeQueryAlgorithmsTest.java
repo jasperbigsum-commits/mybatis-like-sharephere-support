@@ -21,6 +21,7 @@ class MaskLikeQueryAlgorithmsTest {
         KeepFirstNLastMLikeQueryAlgorithm algorithm = new KeepFirstNLastMLikeQueryAlgorithm(3, 4);
 
         assertEquals("138****8000", algorithm.transform("13800138000"));
+        assertEquals("%138****8000%", algorithm.transform("%13800138000%"));
         assertEquals("abc", algorithm.transform("abc"));
         assertEquals("", algorithm.transform(""));
         assertNull(algorithm.transform(null));
@@ -49,6 +50,7 @@ class MaskLikeQueryAlgorithmsTest {
         MaskFirstNLastMLikeQueryAlgorithm algorithm = new MaskFirstNLastMLikeQueryAlgorithm(3, 4);
 
         assertEquals("***0013****", algorithm.transform("13800138000"));
+        assertEquals("%***0013****%", algorithm.transform("%13800138000%"));
         assertEquals("***", algorithm.transform("abc"));
         assertEquals("", algorithm.transform(""));
         assertNull(algorithm.transform(null));

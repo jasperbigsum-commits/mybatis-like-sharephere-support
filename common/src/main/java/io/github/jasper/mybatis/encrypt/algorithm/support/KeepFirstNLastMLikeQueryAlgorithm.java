@@ -38,9 +38,10 @@ public final class KeepFirstNLastMLikeQueryAlgorithm extends AbstractMaskLikeQue
 
     @Override
     public String transform(String plainText) {
-        if (null == plainText || plainText.isEmpty()) {
-            return plainText;
-        }
+        return transformLiteralSegments(plainText, this::maskSegment);
+    }
+
+    private String maskSegment(String plainText) {
         if (plainText.length() < firstN + lastM) {
             return plainText;
         }

@@ -13,7 +13,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
  * <p>机构名称识别和地名前缀识别都属于启发式判断，适合常见中文业务名称，
  * 不保证覆盖所有企业简称或非常规命名。</p>
  */
-public final class NameMaskLikeQueryAlgorithm implements LikeQueryAlgorithm {
+public final class NameMaskLikeQueryAlgorithm extends AbstractMaskLikeQueryAlgorithm {
 
     private static final char MASK_CHAR = '*';
 
@@ -30,10 +30,8 @@ public final class NameMaskLikeQueryAlgorithm implements LikeQueryAlgorithm {
 
     @Override
     public String transform(String plainText) {
-        if (null == plainText || plainText.isEmpty()) {
-            return plainText;
-        }
-        return looksLikeOrganization(plainText) ? maskOrganization(plainText) : maskPersonalName(plainText);
+        return transformLiteralSegments(plainText,
+                segment -> looksLikeOrganization(segment) ? maskOrganization(segment) : maskPersonalName(segment));
     }
 
     private String maskPersonalName(String plainText) {

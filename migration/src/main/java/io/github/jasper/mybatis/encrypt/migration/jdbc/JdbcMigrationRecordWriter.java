@@ -395,7 +395,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
     }
 
     private boolean matchesOptionalValue(Object actual, String expected) {
-        return expected == null ? true : valueEquals(actual, expected);
+        return expected == null || valueEquals(actual, expected);
     }
 
     private boolean cipherMatches(EntityMigrationColumnPlan columnPlan, Object plainValue, Object actualCipherValue) {

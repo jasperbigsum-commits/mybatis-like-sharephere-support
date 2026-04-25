@@ -39,9 +39,10 @@ public final class MaskFromXToYLikeQueryAlgorithm extends AbstractMaskLikeQueryA
 
     @Override
     public String transform(String plainText) {
-        if (null == plainText || plainText.isEmpty()) {
-            return plainText;
-        }
+        return transformLiteralSegments(plainText, this::maskSegment);
+    }
+
+    private String maskSegment(String plainText) {
         if (plainText.length() <= fromX) {
             return plainText;
         }

@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.annotation.SensitiveField;
 import io.github.jasper.mybatis.encrypt.annotation.SensitiveResponseTrigger;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
+import lombok.Data;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -83,6 +84,7 @@ class SensitiveMaskingAutoConfigurationTest {
         }
     }
 
+    @Data
     static class MaskedPhoneView {
 
         @SensitiveField(likeAlgorithm = "phoneMaskLike")

@@ -38,9 +38,10 @@ public final class MaskFirstNLastMLikeQueryAlgorithm extends AbstractMaskLikeQue
 
     @Override
     public String transform(String plainText) {
-        if (null == plainText || plainText.isEmpty()) {
-            return plainText;
-        }
+        return transformLiteralSegments(plainText, this::maskSegment);
+    }
+
+    private String maskSegment(String plainText) {
         char[] chars = plainText.toCharArray();
         for (int index = 0, length = Math.min(firstN, chars.length); index < length; index++) {
             chars[index] = replaceChar;

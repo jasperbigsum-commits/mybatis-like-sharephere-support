@@ -164,6 +164,26 @@ Example join projection:
 UserPhoneView selectUserPhoneView(@Param("id") Long id);
 ```
 
+### Skipping encryption for a specific method
+
+Use `@SkipSqlRewrite` on a mapper method whose SQL does not touch encrypted fields:
+
+```java
+@SkipSqlRewrite
+@Select("select id, name from user_account where id = #{id}")
+UserAccount selectById(@Param("id") Long id);
+```
+
+When to use:
+
+- the table has no encrypted fields and the rewrite pass is unnecessary
+- the SQL uses syntax not supported by JSqlParser
+- the query targets views, derived tables, or masked columns only
+
+`@SkipSqlRewrite` bypasses all encryption processing for the method, including
+SQL rewrite, separate-table write preparation, and result decryption. A method
+annotated with it must not read or write any encrypted fields.
+
 ## Recommended usage patterns
 
 ### Standard query endpoint

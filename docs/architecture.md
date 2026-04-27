@@ -50,6 +50,7 @@
   - `StatementHandler.prepare`：执行 SQL 改写和参数替换。
   - `Executor.update`：同步独立加密表。
   - `ResultSetHandler.handleResultSets`：对结果实体进行字段解密。
+  - `@SkipSqlRewrite`：标注在 Mapper 方法上可跳过该方法的 SQL 重写与结果解密，适用于不涉及加密字段的查询/更新。
 - `ResultDecryptor`：优先依据查询结果计划与元数据只处理命中的返回对象，避免对无关入参或未映射对象误解密。
 - `SeparateTableEncryptionManager`：处理独立加密表的回填和写后同步。
 

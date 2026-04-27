@@ -6,6 +6,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgori
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
+import io.github.jasper.mybatis.encrypt.annotation.SkipSqlRewrite;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
@@ -290,6 +291,105 @@ class DatabaseEncryptionInterceptorTest {
         assertNotSame(mappedStatement, executor.lastMappedStatement);
     }
 
+    /**
+     * 测试目的：验证标注 @SkipSqlRewrite 的 Mapper 方法在 Executor 阶段跳过 SQL 改写。
+     * 测试场景：使用标注了 @SkipSqlRewrite 的接口方法名作为 statement id，
+     * 断言 SQL 未被改写且独立表预处理未触发。
+     */
+    @Test
+    void shouldBypassSqlRewriteWhenAnnotatedWithSkipSqlRewrite() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingSeparateTableEncryptionManager manager = new RecordingSeparateTableEncryptionManager();
+        TestExecutor executor = new TestExecutor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(manager);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                DatabaseEncryptionInterceptorTest.class.getName() + "$SkipTestMapper.skipMethod",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id, phone from user_account where phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build())
+        );
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("query", MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class),
+                new Object[]{mappedStatement, Map.of("phone", "13800138000"), RowBounds.DEFAULT, null}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertSame(mappedStatement, executor.lastMappedStatement);
+        assertEquals(0, manager.prepareCalls);
+        assertEquals("select id, phone from user_account where phone = ?", executor.lastBoundSql.getSql());
+    }
+
+    /**
+     * 测试目的：验证标注 @SkipSqlRewrite 的 Mapper 方法在 ResultSet 阶段跳过结果解密。
+     * 测试场景：使用标注了 @SkipSqlRewrite 的接口方法名作为 statement id，
+     * 断言 resolvePlan 和 decrypt 均未调用。
+     */
+    @Test
+    void shouldBypassResultDecryptionWhenAnnotatedWithSkipSqlRewrite() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingResultDecryptor decryptor = recordingDecryptor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, decryptor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                DatabaseEncryptionInterceptorTest.class.getName() + "$SkipTestMapper.skipMethod",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id from user_account where id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build())
+        );
+        BoundSql boundSql = mappedStatement.getBoundSql(Map.of("id", 1L));
+        TestResultSetHandler handler = new TestResultSetHandler(mappedStatement, boundSql, List.of(Map.of("id", 1L)));
+
+        Invocation invocation = new Invocation(
+                handler,
+                resultSetHandlerMethod("handleResultSets", Statement.class),
+                new Object[]{null}
+        );
+
+        Object result = interceptor.intercept(invocation);
+
+        assertSame(handler.result, result);
+        assertEquals(0, decryptor.resolvePlanCalls);
+        assertEquals(0, decryptor.decryptWithPlanCalls);
+    }
+
+    /**
+     * 测试目的：验证未标注 @SkipSqlRewrite 的方法仍正常经过 SQL 改写。
+     * 测试场景：使用未标注的接口方法名作为 statement id，
+     * 断言 SQL 仍被改写且独立表预处理正常触发。
+     */
+    @Test
+    void shouldStillRewriteWhenNotAnnotatedWithSkipSqlRewrite() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingSeparateTableEncryptionManager manager = new RecordingSeparateTableEncryptionManager();
+        TestExecutor executor = new TestExecutor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(manager);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                DatabaseEncryptionInterceptorTest.class.getName() + "$SkipTestMapper.normalMethod",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id, phone from user_account where phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build())
+        );
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("query", MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class),
+                new Object[]{mappedStatement, Map.of("phone", "13800138000"), RowBounds.DEFAULT, null}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertNotSame(mappedStatement, executor.lastMappedStatement);
+        assertTrue(executor.lastBoundSql.getSql().contains("phone_cipher"));
+    }
+
     private DatabaseEncryptionInterceptor interceptor(SeparateTableEncryptionManager manager) {
         return interceptor(manager, null);
     }
@@ -571,6 +671,14 @@ class DatabaseEncryptionInterceptorTest {
         @Override
         public void setExecutorWrapper(Executor executor) {
         }
+    }
+
+    interface SkipTestMapper {
+
+        @SkipSqlRewrite
+        void skipMethod();
+
+        void normalMethod();
     }
 
     static class TestResultSetHandler implements ResultSetHandler {

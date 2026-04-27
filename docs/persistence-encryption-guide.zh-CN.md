@@ -215,6 +215,25 @@ UserPhoneView selectUserPhoneView(@Param("id") Long id);
 
 这里的关键不是 SQL 越复杂越好，而是最终投影列仍然能回溯到来源表字段。
 
+### 跳过特定方法的加密处理
+
+当 Mapper 方法操作的 SQL 不涉及加密字段时，可使用 `@SkipSqlRewrite` 跳过 SQL 重写与结果解密：
+
+```java
+@SkipSqlRewrite
+@Select("select id, name from user_account where id = #{id}")
+UserAccount selectById(@Param("id") Long id);
+```
+
+适用场景：
+
+- 表没有加密字段，不需要经过 SQL 重写引擎
+- SQL 包含 JSqlParser 无法解析的数据库方言语法
+- 查询视图、派生表或仅查询脱敏列的接口
+
+`@SkipSqlRewrite` 会使整个方法绕过加密处理链路（包括 SQL 改写、独立表写前准备和结果解密），
+标注该注解的方法应确保不涉及任何加密字段的读写。
+
 ## 推荐使用方式
 
 ### 标准查询接口

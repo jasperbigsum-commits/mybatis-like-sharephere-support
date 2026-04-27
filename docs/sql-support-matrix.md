@@ -42,6 +42,7 @@ through real MyBatis execution tests.
 | `UNION` / `UNION ALL` | Supported | Each branch is rewritten recursively. |
 | Same-table decryption | Supported | Query results are decrypted back into entity properties. |
 | Separate-table hydration | Supported | Separate-table ciphertext is synchronized on write and hydrated on read by entity id. |
+| `@SkipSqlRewrite` annotation | Supported | Method-level annotation that bypasses the entire SQL rewrite and result decryption pipeline for the annotated mapper method. |
 
 ## Common SQL Shapes
 

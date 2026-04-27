@@ -1,5 +1,6 @@
 package io.github.jasper.mybatis.encrypt.plugin;
 
+import io.github.jasper.mybatis.encrypt.annotation.SkipSqlRewrite;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.config.SqlDialectContextHolder;
 import io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan;
@@ -26,6 +27,7 @@ import org.apache.ibatis.session.RowBounds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Method;
 import java.sql.Statement;
 import java.util.Collection;
 import java.util.ArrayList;
@@ -131,6 +133,9 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (DefaultSeparateTableRowPersister.isManagedStatementId(mappedStatement.getId())) {
             return invocation.proceed();
         }
+        if (isSkipSqlRewrite(mappedStatement)) {
+            return invocation.proceed();
+        }
         try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolveDataSourceName(mappedStatement))) {
             Executor executor = (Executor) invocation.getTarget();
             Object parameterObject = args.length > 1 ? args[1] : null;
@@ -149,6 +154,9 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     private Object interceptResultSet(Invocation invocation) throws Throwable {
         MappedStatement mappedStatement = resolveResultSetMappedStatement(invocation.getTarget());
         BoundSql boundSql = resolveResultSetBoundSql(invocation.getTarget());
+        if (mappedStatement != null && isSkipSqlRewrite(mappedStatement)) {
+            return invocation.proceed();
+        }
         try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolveDataSourceName(mappedStatement))) {
             Object result = invocation.proceed();
             if (mappedStatement == null || shouldBypassResultDecryption(result)) {
@@ -437,6 +445,36 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
 
     private String resolveDataSourceName(MappedStatement mappedStatement) {
         return dataSourceNameResolver == null ? null : dataSourceNameResolver.resolve(mappedStatement);
+    }
+
+    /**
+     * 检查当前 Mapper 方法是否标注了 {@link SkipSqlRewrite} 注解。
+     *
+     * @param mappedStatement 当前 mapped statement
+     * @return 方法标注了 @SkipSqlRewrite 时返回 {@code true}
+     */
+    private boolean isSkipSqlRewrite(MappedStatement mappedStatement) {
+        String statementId = mappedStatement.getId();
+        if (statementId == null || statementId.isEmpty()) {
+            return false;
+        }
+        int separator = statementId.lastIndexOf('.');
+        if (separator <= 0 || separator >= statementId.length() - 1) {
+            return false;
+        }
+        String mapperClassName = statementId.substring(0, separator);
+        String methodName = statementId.substring(separator + 1);
+        try {
+            Class<?> mapperType = Class.forName(mapperClassName);
+            for (Method method : mapperType.getMethods()) {
+                if (methodName.equals(method.getName())
+                        && method.isAnnotationPresent(SkipSqlRewrite.class)) {
+                    return true;
+                }
+            }
+        } catch (ClassNotFoundException | LinkageError ignore) {
+        }
+        return false;
     }
 
     /**

@@ -2901,6 +2901,74 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    /**
+     * 测试目的：验证带别名的非加密表字段不会被错误地当作加密字段改写。
+     * 测试场景：LEFT JOIN 一张非加密表，该表字段名与加密表字段同名，
+     * 断言非加密表的投影列和 WHERE 条件不被改写，加密表字段仍正常改写。
+     */
+    @Test
+    void shouldNotRewriteNonEncryptedTableColumnWithSameNameAsEncryptedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT a.phone, b.phone AS backup_phone FROM user_account a " +
+                        "LEFT JOIN order_account b ON a.id = b.user_id WHERE a.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        // a.phone (from encrypted table user_account) should be rewritten to cipher column
+        assertTrue(result.sql().contains("a.`phone_cipher` AS phone") || result.sql().contains("a.`phone_cipher` phone"));
+        // b.phone (from non-encrypted table order_account) must NOT be rewritten
+        assertFalse(result.sql().contains("b.`phone_cipher`"));
+        assertTrue(result.sql().contains("b.phone"));
+        // WHERE condition on encrypted table's column should still be rewritten
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+    }
+
+    /**
+     * 测试目的：验证带别名的非加密表字段在条件中不会被错误地当作加密字段改写。
+     * 测试场景：WHERE 条件中引用非加密表字段，断言不触发改写。
+     */
+    @Test
+    void shouldNotRewriteNonEncryptedTableConditionWithSameColumnName() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT a.id FROM user_account a " +
+                        "LEFT JOIN order_account b ON a.id = b.user_id " +
+                        "WHERE a.phone = ? AND b.order_status = 'active'",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        // a.phone should be rewritten
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+        // b.order_status should remain untouched
+        assertTrue(result.sql().contains("b.order_status"));
+        assertTrue(result.sql().contains("'active'"));
+    }
+
     private DatabaseEncryptionProperties sampleProperties() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();

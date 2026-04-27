@@ -46,6 +46,7 @@ final class SqlTableContext {
             if (tableRule != null) {
                 return tableRule.findByColumn(column.getColumnName());
             }
+            return Optional.empty();
         }
         EncryptColumnRule candidate = null;
         for (EncryptTableRule tableRule : uniqueRules()) {
@@ -80,6 +81,7 @@ final class SqlTableContext {
             if (tableRule != null) {
                 return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName()));
             }
+            return Optional.empty();
         }
         EncryptColumnRule candidate = null;
         for (EncryptTableRule tableRule : uniqueRules()) {

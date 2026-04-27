@@ -25,6 +25,8 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
+
 /**
  * SQL 改写引擎。
  *
@@ -231,6 +233,9 @@ public class SqlRewriteEngine {
         if (tableContext.isEmpty()) {
             return;
         }
+        if (rewriteWindowPartitionExpressions(plainSelect, tableContext)) {
+            context.markChanged();
+        }
         if (rewriteGroupBy(plainSelect.getGroupBy(), tableContext)) {
             context.markChanged();
         }
@@ -238,6 +243,104 @@ public class SqlRewriteEngine {
         if (sqlSelectProjectionRewriter.rewrite(plainSelect, tableContext, projectionMode)) {
             context.markChanged();
         }
+    }
+
+    private boolean rewriteWindowPartitionExpressions(PlainSelect plainSelect, SqlTableContext tableContext) {
+        boolean changed = false;
+        List<SelectItem<?>> selectItems = plainSelect.getSelectItems();
+        if (selectItems != null) {
+            for (SelectItem<?> item : selectItems) {
+                if (rewriteWindowPartitionExpressions(item.getExpression(), tableContext)) {
+                    changed = true;
+                }
+            }
+        }
+        if (plainSelect.getWindowDefinitions() != null) {
+            for (WindowDefinition windowDefinition : plainSelect.getWindowDefinitions()) {
+                if (rewriteWindowPartitionExpressions(windowDefinition, tableContext)) {
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    private boolean rewriteWindowPartitionExpressions(Expression expression, SqlTableContext tableContext) {
+        if (expression == null) {
+            return false;
+        }
+        if (expression instanceof AnalyticExpression) {
+            AnalyticExpression analyticExpression = (AnalyticExpression) expression;
+            boolean changed = rewriteWindowPartitionList(analyticExpression.getPartitionExpressionList(), tableContext);
+            if (analyticExpression.getWindowDefinition() != null
+                    && rewriteWindowPartitionExpressions(analyticExpression.getWindowDefinition(), tableContext)) {
+                changed = true;
+            }
+            return changed;
+        }
+        if (expression instanceof Parenthesis) {
+            return rewriteWindowPartitionExpressions(((Parenthesis) expression).getExpression(), tableContext);
+        }
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
+            return rewriteWindowPartitionExpressions(binaryExpression.getLeftExpression(), tableContext)
+                    || rewriteWindowPartitionExpressions(binaryExpression.getRightExpression(), tableContext);
+        }
+        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
+            boolean changed = false;
+            for (Expression item : ((Function) expression).getParameters()) {
+                if (rewriteWindowPartitionExpressions(item, tableContext)) {
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
+            boolean changed = rewriteWindowPartitionExpressions(caseExpression.getSwitchExpression(), tableContext)
+                    || rewriteWindowPartitionExpressions(caseExpression.getElseExpression(), tableContext);
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    if (rewriteWindowPartitionExpressions(whenClause.getWhenExpression(), tableContext)
+                            || rewriteWindowPartitionExpressions(whenClause.getThenExpression(), tableContext)) {
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+        if (expression instanceof NotExpression) {
+            return rewriteWindowPartitionExpressions(((NotExpression) expression).getExpression(), tableContext);
+        }
+        return false;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private boolean rewriteWindowPartitionList(List partitionExpressions, SqlTableContext tableContext) {
+        if (partitionExpressions == null) {
+            return false;
+        }
+        boolean changed = false;
+        for (int index = 0; index < partitionExpressions.size(); index++) {
+            Object item = partitionExpressions.get(index);
+            if (!(item instanceof Expression)) {
+                continue;
+            }
+            Expression expression = (Expression) item;
+            Expression rewritten = rewriteWindowPartitionExpression(expression, tableContext);
+            if (rewritten != expression) {
+                partitionExpressions.set(index, rewritten);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private boolean rewriteWindowPartitionExpressions(WindowDefinition windowDefinition, SqlTableContext tableContext) {
+        if (windowDefinition == null) {
+            return false;
+        }
+        return rewriteWindowPartitionList(windowDefinition.getPartitionExpressionList(), tableContext);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -271,6 +374,18 @@ public class SqlRewriteEngine {
         String targetColumn = rule.isStoredInSeparateTable()
                 ? rule.column()
                 : requireAssistedQueryColumn(rule, "GROUP BY");
+        return buildColumn(resolution.column(), targetColumn);
+    }
+
+    private Expression rewriteWindowPartitionExpression(Expression expression, SqlTableContext tableContext) {
+        ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+        if (resolution == null) {
+            return expression;
+        }
+        EncryptColumnRule rule = resolution.rule();
+        String targetColumn = rule.isStoredInSeparateTable()
+                ? rule.column()
+                : requireAssistedQueryColumn(rule, "WINDOW PARTITION BY");
         return buildColumn(resolution.column(), targetColumn);
     }
 

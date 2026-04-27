@@ -78,7 +78,8 @@ final class SqlRewriteValidator {
         }
         for (SelectItem<?> item : selectItems) {
             Expression expression = item.getExpression();
-            if (expression instanceof AnalyticExpression && containsEncryptedReference(expression, tableContext)) {
+            if (expression instanceof AnalyticExpression
+                    && containsUnsupportedWindowReference((AnalyticExpression) expression, tableContext)) {
                 throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW,
                         "Window function is not supported on encrypted fields.");
             }
@@ -90,7 +91,7 @@ final class SqlRewriteValidator {
             return;
         }
         for (WindowDefinition windowDefinition : windowDefinitions) {
-            if (containsEncryptedReference(windowDefinition, tableContext)) {
+            if (containsUnsupportedWindowReference(windowDefinition, tableContext)) {
                 throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_WINDOW,
                         "Named window definition is not supported on encrypted fields.");
             }
@@ -238,6 +239,74 @@ final class SqlRewriteValidator {
             }
         }
         return false;
+    }
+
+    private boolean containsUnsupportedWindowReference(AnalyticExpression analyticExpression,
+                                                       SqlTableContext tableContext) {
+        if (analyticExpression == null) {
+            return false;
+        }
+        if (containsEncryptedReference(analyticExpression.getExpression(), tableContext)
+                || containsEncryptedReference(analyticExpression.getFilterExpression(), tableContext)
+                || containsEncryptedReference(analyticExpression.getOffset(), tableContext)
+                || containsEncryptedReference(analyticExpression.getDefaultValue(), tableContext)) {
+            return true;
+        }
+        if (analyticExpression.getPartitionExpressionList() != null) {
+            for (Object item : analyticExpression.getPartitionExpressionList()) {
+                if (item instanceof Expression
+                        && containsEncryptedReference((Expression) item, tableContext)
+                        && !isAllowedEncryptedWindowPartitionExpression((Expression) item, tableContext)) {
+                    return true;
+                }
+            }
+        }
+        if (analyticExpression.getOrderByElements() != null) {
+            for (OrderByElement element : analyticExpression.getOrderByElements()) {
+                if (containsEncryptedReference(element.getExpression(), tableContext)) {
+                    return true;
+                }
+            }
+        }
+        return analyticExpression.getWindowDefinition() != null
+                && containsUnsupportedWindowReference(analyticExpression.getWindowDefinition(), tableContext);
+    }
+
+    private boolean containsUnsupportedWindowReference(WindowDefinition windowDefinition,
+                                                       SqlTableContext tableContext) {
+        if (windowDefinition == null) {
+            return false;
+        }
+        if (windowDefinition.getPartitionExpressionList() != null) {
+            for (Object item : windowDefinition.getPartitionExpressionList()) {
+                if (item instanceof Expression
+                        && containsEncryptedReference((Expression) item, tableContext)
+                        && !isAllowedEncryptedWindowPartitionExpression((Expression) item, tableContext)) {
+                    return true;
+                }
+            }
+        }
+        if (windowDefinition.getOrderByElements() != null) {
+            for (OrderByElement element : windowDefinition.getOrderByElements()) {
+                if (containsEncryptedReference(element.getExpression(), tableContext)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isAllowedEncryptedWindowPartitionExpression(Expression expression, SqlTableContext tableContext) {
+        EncryptColumnRule rule = resolveEncryptedRule(expression, tableContext);
+        if (rule == null || !(expression instanceof Column)) {
+            return false;
+        }
+        if (!rule.isStoredInSeparateTable()) {
+            return false;
+        }
+        Column column = (Column) expression;
+        return io.github.jasper.mybatis.encrypt.util.NameUtils.normalizeIdentifier(column.getColumnName())
+                .equals(io.github.jasper.mybatis.encrypt.util.NameUtils.normalizeIdentifier(rule.column()));
     }
 
     private boolean containsUnsupportedAggregate(Expression expression, SqlTableContext tableContext) {

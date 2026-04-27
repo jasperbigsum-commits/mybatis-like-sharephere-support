@@ -2575,7 +2575,7 @@ class SqlRewriteEngineTest {
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
      */
     @Test
-    void shouldFailFastForWindowFunctionUsingEncryptedField() {
+    void shouldRewriteWindowPartitionByUsingEncryptedField() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
         SqlRewriteEngine engine = new SqlRewriteEngine(
@@ -2587,6 +2587,65 @@ class SqlRewriteEngineTest {
         BoundSql boundSql = new BoundSql(
                 configuration,
                 "SELECT ROW_NUMBER() OVER (PARTITION BY phone ORDER BY id) rn FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("PARTITION BY `phone_hash` ORDER BY id")
+                || result.sql().contains("PARTITION BY phone_hash ORDER BY id"));
+    }
+
+    /**
+     * 测试目的：验证窗口函数 PARTITION BY 允许使用可等值分桶的加密字段。
+     * 测试场景：模拟业务 SQL 中 row_number over(partition by cert_cde, loan_end_date order by loan_end_date)，
+     * 断言加密列 cert_cde 会改写为 assistedQueryColumn，而非加密列 loan_end_date 保持原样。
+     */
+    @Test
+    void shouldRewriteBusinessWindowPartitionByWithEncryptedAndPlainColumns() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleLoanWindowProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT row_number() OVER (PARTITION BY a.cert_cde, a.loan_end_date ORDER BY a.loan_end_date) rn "
+                        + "FROM loan_account a",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("PARTITION BY a.`cert_cde_hash`, a.loan_end_date ORDER BY a.loan_end_date")
+                || result.sql().contains("PARTITION BY a.cert_cde_hash, a.loan_end_date ORDER BY a.loan_end_date"));
+        assertFalse(result.sql().contains("ORDER BY a.`cert_cde_hash`"));
+    }
+
+    /**
+     * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
+     * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
+     */
+    @Test
+    void shouldFailFastForWindowOrderByUsingEncryptedField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT ROW_NUMBER() OVER (PARTITION BY id ORDER BY phone) rn FROM user_account",
                 List.of(),
                 Map.of()
         );
@@ -2923,6 +2982,23 @@ class SqlRewriteEngineTest {
     private DatabaseEncryptionProperties samplePropertiesWithoutSeparateTableAssistedQueryColumn() {
         DatabaseEncryptionProperties properties = sampleProperties();
         properties.getTables().get(0).getFields().get(1).setAssistedQueryColumn(null);
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties sampleLoanWindowProperties() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("loan_account");
+
+        DatabaseEncryptionProperties.FieldRuleProperties certRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        certRule.setProperty("certCde");
+        certRule.setColumn("cert_cde");
+        certRule.setStorageColumn("cert_cde_cipher");
+        certRule.setAssistedQueryColumn("cert_cde_hash");
+        tableRule.getFields().add(certRule);
+
+        properties.getTables().add(tableRule);
+        properties.setDefaultCipherKey("unit-test-key");
         return properties;
     }
 

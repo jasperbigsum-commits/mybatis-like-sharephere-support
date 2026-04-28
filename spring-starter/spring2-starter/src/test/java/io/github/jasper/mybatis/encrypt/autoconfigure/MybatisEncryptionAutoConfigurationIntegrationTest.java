@@ -100,7 +100,8 @@ class MybatisEncryptionAutoConfigurationIntegrationTest {
                     "id_card_cipher varchar(512)," +
                     "id_card_hash varchar(128)," +
                     "id_card_like varchar(255)," +
-                    "id_card_masked varchar(255))");
+                    "id_card_masked varchar(255)," +
+                    "id_card_backup varchar(128))");
         }
     }
 

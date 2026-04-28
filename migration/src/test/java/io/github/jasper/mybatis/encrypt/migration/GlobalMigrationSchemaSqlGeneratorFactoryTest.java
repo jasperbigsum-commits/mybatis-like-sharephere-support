@@ -138,7 +138,8 @@ class GlobalMigrationSchemaSqlGeneratorFactoryTest extends MigrationJdbcTestSupp
                 "create table `user_id_card_encrypt` (`id` varchar(64) primary key, "
                         + "`id_card_cipher` varchar(136), "
                         + "`id_card_hash` varchar(64), "
-                        + "`id_card_like` varchar(18))"
+                        + "`id_card_like` varchar(18), "
+                        + "`id_card_backup` varchar(18))"
         ), ddl);
     }
 }

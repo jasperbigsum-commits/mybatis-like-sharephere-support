@@ -184,6 +184,9 @@ final class MigrationRecordStateSupport {
         if (columnPlan.hasDistinctMaskedColumn()) {
             sql.append(", ").append(quote(columnPlan.getMaskedColumn()));
         }
+        if (columnPlan.shouldWriteBackup()) {
+            sql.append(", ").append(quote(columnPlan.getBackupColumn()));
+        }
         sql.append(" from ").append(quote(columnPlan.getStorageTable()))
                 .append(" where ").append(quote(columnPlan.getAssistedQueryColumn())).append(" = ?");
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
@@ -200,6 +203,9 @@ final class MigrationRecordStateSupport {
                 }
                 if (StringUtils.isNotBlank(columnPlan.getMaskedColumn())) {
                     row.put(columnPlan.getMaskedColumn(), resultSet.getObject(columnPlan.getMaskedColumn()));
+                }
+                if (columnPlan.shouldWriteBackup()) {
+                    row.put(columnPlan.getBackupColumn(), resultSet.getObject(columnPlan.getBackupColumn()));
                 }
                 return row;
             }

@@ -286,6 +286,10 @@ public final class MigrationSchemaSqlGenerator {
                     registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getMaskedColumn(),
                             likeType(sourceColumn), false, previousColumn);
                 }
+                if (columnPlan.shouldWriteBackup()) {
+                    registerRequirement(requirements, ownerMainTable, storageTable, columnPlan.getBackupColumn(),
+                            backupType(sourceColumn), false, previousColumn);
+                }
             } else {
                 String previousColumn = columnPlan.getSourceColumn();
                 previousColumn = registerRequirement(requirements, ownerMainTable, plan.getTableName(), columnPlan.getStorageColumn(),

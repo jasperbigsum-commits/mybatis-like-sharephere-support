@@ -101,6 +101,10 @@ public class JdbcMigrationRecordVerifier implements MigrationRecordVerifier {
                     assertMatches(columnPlan.getProperty(), "masked", expected.getMaskedValue(),
                             externalRow.get(columnPlan.getMaskedColumn()));
                 }
+                if (columnPlan.shouldWriteBackup()) {
+                    assertMatches(columnPlan.getProperty(), "external_backup", plainValue,
+                            externalRow.get(columnPlan.getBackupColumn()));
+                }
                 continue;
             }
             assertCipherMatches(columnPlan, plainValue,

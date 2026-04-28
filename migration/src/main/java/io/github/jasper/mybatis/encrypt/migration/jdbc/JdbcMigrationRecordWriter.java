@@ -91,7 +91,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 String referenceHash = derivedFieldValues.getHashValue();
                 if (!existsSeparateReference(connection, columnPlan, referenceHash)) {
                     Object storageId = referenceIdGenerator.nextReferenceId(columnPlan, record);
-                    insertSeparateRow(connection, columnPlan, storageId, derivedFieldValues);
+                    insertSeparateRow(connection, columnPlan, storageId, derivedFieldValues, plainValue);
                     changed = true;
                 }
                 putIfChanged(mainTableUpdates, columnPlan.getSourceColumn(), referenceHash, currentRow);
@@ -221,6 +221,10 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (separateRow == null) {
                 return false;
             }
+            if (columnPlan.shouldWriteBackup()
+                    && !valueEquals(separateRow.get(columnPlan.getBackupColumn()), plainValue)) {
+                return false;
+            }
             return cipherMatches(columnPlan, plainValue, separateRow.get(columnPlan.getStorageColumn()))
                     && valueEquals(separateRow.get(columnPlan.getAssistedQueryColumn()), derivedFieldValues.getHashValue())
                     && matchesOptionalValue(separateRow.get(columnPlan.getLikeQueryColumn()), derivedFieldValues.getLikeValue())
@@ -342,7 +346,8 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
     private void insertSeparateRow(Connection connection,
                                    EntityMigrationColumnPlan columnPlan,
                                    Object referenceId,
-                                   MigrationValueResolver.DerivedFieldValues values) throws SQLException {
+                                   MigrationValueResolver.DerivedFieldValues values,
+                                   Object backupValue) throws SQLException {
         List<String> columns = new ArrayList<>();
         List<Object> bindValues = new ArrayList<>();
         columns.add(columnPlan.getStorageIdColumn());
@@ -360,6 +365,10 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
         if (columnPlan.hasDistinctMaskedColumn()) {
             columns.add(columnPlan.getMaskedColumn());
             bindValues.add(values.getMaskedValue());
+        }
+        if (columnPlan.shouldWriteBackup() && backupValue != null) {
+            columns.add(columnPlan.getBackupColumn());
+            bindValues.add(backupValue);
         }
         StringBuilder sql = new StringBuilder("insert into ").append(quote(columnPlan.getStorageTable())).append(" (");
         for (int index = 0; index < columns.size(); index++) {

@@ -615,6 +615,7 @@ public final class QueryResultPlanFactory {
                 if (tableRule != null) {
                     return Optional.ofNullable(matchProjectedRule(tableRule, column.getColumnName(), projectedName));
                 }
+                return Optional.empty();
             }
             EncryptColumnRule candidate = null;
             for (EncryptTableRule tableRule : uniqueRules()) {

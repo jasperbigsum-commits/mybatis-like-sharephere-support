@@ -47,7 +47,8 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
                         "id varchar(64) primary key, " +
                         "id_card_cipher varchar(512), " +
                         "id_card_hash varchar(128), " +
-                        "id_card_like varchar(255))",
+                        "id_card_like varchar(255), " +
+                        "id_card_backup varchar(64))",
                 "insert into user_account (id, id_card) values (1, '320101199001011234')");
 
         MigrationTask task = JdbcMigrationTasks.create(
@@ -72,6 +73,14 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
             assertNotEquals("320101199001011234", resultSet.getString("id_card"));
             assertEquals("320101199001011234", resultSet.getString("id_card_backup"));
         }
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "select id_card_backup from user_id_card_encrypt where id_card_hash = '"
+                             + algorithmRegistry().assisted("sm3").transform("320101199001011234") + "'")) {
+            assertTrue(resultSet.next());
+            assertEquals("320101199001011234", resultSet.getString("id_card_backup"));
+        }
     }
 
     /**
@@ -90,7 +99,8 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
                         "id varchar(64) primary key, " +
                         "id_card_cipher varchar(512), " +
                         "id_card_hash varchar(128), " +
-                        "id_card_like varchar(255))",
+                        "id_card_like varchar(255), " +
+                        "id_card_backup varchar(64))",
                 "insert into user_account (id, id_card) values (1, '320101199001011234')");
 
         EntityMigrationPlan plan = new EntityMigrationPlanFactory(metadataRegistry(), properties())
@@ -278,7 +288,8 @@ class MigrationBackupBehaviorTest extends MigrationJdbcTestSupport {
                         "id varchar(64) primary key, " +
                         "id_card_cipher varchar(512), " +
                         "id_card_hash varchar(128), " +
-                        "id_card_like varchar(255))",
+                        "id_card_like varchar(255), " +
+                        "id_card_backup varchar(128))",
                 "insert into user_account (id, id_card, id_card_backup) values (1, '" + hashValue + "', '" + plaintext + "')");
 
         MigrationTask task = JdbcMigrationTasks.create(

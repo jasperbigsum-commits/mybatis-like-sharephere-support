@@ -282,6 +282,62 @@ class ResultDecryptorTest {
         assertEquals("*******8000", dto.rawPhone());
     }
 
+    /**
+     * 测试目的：验证 JOIN 非加密表且非加密表存在同名字段时，解密计划不会把非加密表的别名列绑定到加密规则。
+     * 测试场景：LEFT JOIN 一张非加密表，该表字段名与加密表字段同名但使用了别名，
+     * 断言加密表字段正常解密，非加密表别名列保持明文不做解密。
+     */
+    @Test
+    void shouldNotDecryptNonEncryptedTableAliasedColumnWithSameName() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        JoinResultDto dto = new JoinResultDto();
+        dto.setPhone(sm4.encrypt("13800138000"));
+        dto.setBackupPhone("plaintext-from-non-encrypted-table");
+        MappedStatement mappedStatement = joinResultAutoMappedStatement();
+
+        decrypt(decryptor, mappedStatement, List.of(dto));
+
+        assertEquals("13800138000", dto.getPhone());
+        assertEquals("plaintext-from-non-encrypted-table", dto.getBackupPhone());
+    }
+
+    /**
+     * 测试目的：验证 JOIN 非加密表且使用通配符展开时，非加密表的同名列不会被错误解密。
+     * 测试场景：SELECT 使用加密表通配符 a.* 展开，同时非加密表同名列使用别名，
+     * 断言加密字段正常解密，非加密别名列保持明文。
+     */
+    @Test
+    void shouldNotDecryptNonEncryptedTableAliasedColumnWhenEncryptedTableUsesWildcard() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        JoinResultDto dto = new JoinResultDto();
+        dto.setPhone(sm4.encrypt("13900139000"));
+        dto.setBackupPhone("wildcard-plaintext");
+        MappedStatement mappedStatement = joinResultWildcardMappedStatement();
+
+        decrypt(decryptor, mappedStatement, List.of(dto));
+
+        assertEquals("13900139000", dto.getPhone());
+        assertEquals("wildcard-plaintext", dto.getBackupPhone());
+    }
+
+    /**
+     * 测试目的：验证多表 JOIN 时，非加密表的无别名同名列不会通过唯一规则回退被错误解析。
+     * 测试场景：非加密表字段与加密表字段同名但不使用别名，
+     * 断言解密计划为空，不会将非加密表字段绑定到加密规则。
+     */
+    @Test
+    void shouldSkipNonEncryptedTableColumnWithoutAliasInMultiTableJoin() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        MappedStatement mappedStatement = joinResultWithoutAliasMappedStatement();
+
+        QueryResultPlan queryResultPlan = decryptor.resolvePlan(mappedStatement, mappedStatement.getBoundSql(null));
+
+        assertTrue(queryResultPlan.isEmpty());
+    }
+
     private void decrypt(ResultDecryptor decryptor, MappedStatement mappedStatement, Object resultObject) {
         BoundSql boundSql = mappedStatement.getBoundSql(null);
         QueryResultPlan queryResultPlan = decryptor.resolvePlan(mappedStatement, boundSql);
@@ -441,6 +497,48 @@ class ResultDecryptorTest {
                 .build();
     }
 
+    private MappedStatement joinResultAutoMappedStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.joinResultAutoMapped", JoinResultDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "SELECT a.phone, b.phone AS backup_phone FROM user_account a " +
+                        "LEFT JOIN order_account b ON a.id = b.user_id", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, "test.selectJoinResult",
+                sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement joinResultWildcardMappedStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.joinResultWildcard", JoinResultDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "SELECT a.*, b.phone AS backup_phone FROM user_account a " +
+                        "LEFT JOIN order_account b ON a.id = b.user_id", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, "test.selectJoinResultWildcard",
+                sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement joinResultWithoutAliasMappedStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.joinResultNoAlias", JoinResultNoAliasDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "SELECT b.phone FROM user_account a " +
+                        "LEFT JOIN order_account b ON a.id = b.user_id", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration, "test.selectJoinResultNoAlias",
+                sqlSource, SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
     private DatabaseEncryptionProperties configuredUserTableProperties() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
@@ -590,6 +688,41 @@ class ResultDecryptorTest {
 
         public void setPhoneCipher(String phoneCipher) {
             this.phoneCipher = phoneCipher;
+        }
+    }
+
+    static class JoinResultDto {
+
+        private String phone;
+        private String backupPhone;
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getBackupPhone() {
+            return backupPhone;
+        }
+
+        public void setBackupPhone(String backupPhone) {
+            this.backupPhone = backupPhone;
+        }
+    }
+
+    static class JoinResultNoAliasDto {
+
+        private String phone;
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
         }
     }
 

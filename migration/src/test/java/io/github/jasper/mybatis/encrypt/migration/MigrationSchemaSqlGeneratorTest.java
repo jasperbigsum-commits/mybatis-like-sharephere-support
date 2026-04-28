@@ -96,7 +96,8 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
                 "alter table `user_account` add column `id_card_backup` varchar(80) after `id_card`",
                 "alter table `user_id_card_encrypt` modify column `id_card_cipher` varchar(464)",
                 "alter table `user_id_card_encrypt` modify column `id_card_hash` varchar(64)",
-                "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80) after `id_card_hash`"
+                "alter table `user_id_card_encrypt` add column `id_card_like` varchar(80) after `id_card_hash`",
+                "alter table `user_id_card_encrypt` add column `id_card_backup` varchar(80) after `id_card_like`"
         ), ddl);
     }
 

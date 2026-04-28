@@ -22,7 +22,7 @@ through real MyBatis execution tests.
 
 | Category | Status | Notes |
 | --- | --- | --- |
-| `INSERT` | Supported | Rewrites logical encrypted columns to `storageColumn`, appends assisted/like helper columns, and drops separate-table logical columns from the main table insert. |
+| `INSERT` | Supported | Rewrites logical encrypted columns to `storageColumn`, appends assisted/like helper columns, and drops separate-table logical columns from the main table insert. Supports both single-row and multi-row (batch) VALUES. |
 | `UPDATE` | Supported | Rewrites same-table encrypted assignments to `storageColumn`; separate-table fields are removed from the main update and synchronized afterward. |
 | `DELETE` | Supported | Supports encrypted predicates in `WHERE`; separate-table records are deleted after the main delete. |
 | `SELECT` explicit columns | Supported | Rewrites encrypted logical columns to `storageColumn AS logicalColumn`. |

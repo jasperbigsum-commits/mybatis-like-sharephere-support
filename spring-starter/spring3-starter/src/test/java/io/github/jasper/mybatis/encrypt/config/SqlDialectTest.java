@@ -73,6 +73,25 @@ class SqlDialectTest {
      * 测试场景：构造 MySQL、达梦、Oracle、ClickHouse 等方言输入，断言表名和列名引用结果正确。
      */
     @Test
+    void shouldEscapeInternalQuoteCharacters() {
+        assertEquals("`na``me`", SqlDialect.MYSQL.quote("na`me"));
+        assertEquals("\"na\"\"me\"", SqlDialect.DM.quote("na\"me"));
+        assertEquals("`a``b``c`", SqlDialect.MYSQL.quote("a`b`c"));
+    }
+
+    @Test
+    void shouldStripAndReEscapeAlreadyQuotedIdentifier() {
+        assertEquals("`phone`", SqlDialect.MYSQL.quote("`phone`"));
+        assertEquals("`na``me`", SqlDialect.MYSQL.quote("`na`me`"));
+        assertEquals("\"na\"\"me\"", SqlDialect.ORACLE12.quote("\"na\"me\""));
+    }
+
+    @Test
+    void shouldHandleBlankIdentifier() {
+        assertEquals("", SqlDialect.MYSQL.quote(""));
+    }
+
+    @Test
     void shouldUseContextDatasourceDialectWhenReadingGlobalDialect() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         properties.setSqlDialect(SqlDialect.DM);

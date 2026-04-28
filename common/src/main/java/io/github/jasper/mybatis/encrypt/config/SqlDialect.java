@@ -45,10 +45,11 @@ public enum SqlDialect {
         if (StringUtils.isBlank(identifier)) {
             return identifier;
         }
-        // 避免对已引用的标识符重复添加引号
-        if (identifier.startsWith(openQuote) && identifier.endsWith(closeQuote)) {
-            return identifier;
+        String content = identifier;
+        if (content.startsWith(openQuote) && content.endsWith(closeQuote) && content.length() >= 2) {
+            content = content.substring(openQuote.length(), content.length() - closeQuote.length());
         }
-        return openQuote + identifier + closeQuote;
+        String escaped = content.replace(openQuote, openQuote + openQuote);
+        return openQuote + escaped + closeQuote;
     }
 }

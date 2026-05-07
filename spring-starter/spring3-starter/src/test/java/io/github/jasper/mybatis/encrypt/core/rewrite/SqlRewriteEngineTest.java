@@ -2969,6 +2969,121 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("'active'"));
     }
 
+    @Test
+    void shouldRewriteSeparateTableColumnComparisonInsideExistsJoinCondition() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesForSeparateTableJoinComparison();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT * FROM table_one t WHERE EXISTS (" +
+                        "SELECT 1 FROM table_two tw LEFT JOIN table_three a ON a.id_card = tw.cert_no)",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("a.`id_card` = tw.`cert_no`")
+                || result.sql().contains("tw.`cert_no` = a.`id_card`"));
+        assertFalse(result.sql().contains("a.id_card = tw.cert_no"));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableColumnComparisonInsideExistsWhereCondition() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesForSeparateTableJoinComparison();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT * FROM table_one t WHERE EXISTS (" +
+                        "SELECT 1 FROM table_two tw LEFT JOIN table_three a ON 1 = 1 " +
+                        "WHERE a.id_card = tw.cert_no)",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("a.`id_card` = tw.`cert_no`")
+                || result.sql().contains("tw.`cert_no` = a.`id_card`"));
+        assertFalse(result.sql().contains("a.id_card = tw.cert_no"));
+    }
+
+    @Test
+    void shouldRewriteCorrelatedSeparateTableColumnComparisonInsideExistsWhereCondition() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesForCorrelatedSeparateTableComparison();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT custr_nbr FROM cc_customer " +
+                        "WHERE (cjrq = ? AND NOT EXISTS (" +
+                        "SELECT 1 FROM hx_bank_cust_mngt " +
+                        "WHERE del_flag = 0 AND status = '0' AND type = 'credit_card' " +
+                        "AND id_card = cc_customer.custr_nbr)) " +
+                        "ORDER BY cred_limit DESC",
+                List.of(new ParameterMapping.Builder(configuration, "cjrq", String.class).build()),
+                Map.of("cjrq", "2026-05-07")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`id_card` = cc_customer.`custr_nbr`")
+                || result.sql().contains("cc_customer.`custr_nbr` = `id_card`"));
+        assertFalse(result.sql().contains("id_card = cc_customer.custr_nbr"));
+        assertTrue(result.sql().contains("ORDER BY cred_limit DESC"));
+    }
+
+    @Test
+    void shouldRewriteCorrelatedSeparateTableColumnComparisonInsideExistsWhereConditionWithOuterAlias() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesForCorrelatedSeparateTableComparison();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT c.custr_nbr FROM cc_customer c " +
+                        "WHERE (c.cjrq = ? AND NOT EXISTS (" +
+                        "SELECT 1 FROM hx_bank_cust_mngt " +
+                        "WHERE del_flag = 0 AND status = '0' AND type = 'credit_card' " +
+                        "AND id_card = c.custr_nbr)) " +
+                        "ORDER BY c.cred_limit DESC",
+                List.of(new ParameterMapping.Builder(configuration, "cjrq", String.class).build()),
+                Map.of("cjrq", "2026-05-07")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`id_card` = c.`custr_nbr`")
+                || result.sql().contains("c.`custr_nbr` = `id_card`"));
+        assertFalse(result.sql().contains("id_card = c.custr_nbr"));
+        assertTrue(result.sql().contains("ORDER BY c.cred_limit DESC"));
+    }
+
     private DatabaseEncryptionProperties sampleProperties() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
@@ -3012,6 +3127,70 @@ class SqlRewriteEngineTest {
 
         properties.setDefaultCipherKey("unit-test-key");
         return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesForSeparateTableJoinComparison() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        properties.getTables().add(separateTableJoinRule(
+                "table_two",
+                "certNo",
+                "cert_no",
+                "table_two_cert_encrypt",
+                "cert_no_cipher",
+                "cert_no_hash"
+        ));
+        properties.getTables().add(separateTableJoinRule(
+                "table_three",
+                "idCard",
+                "id_card",
+                "table_three_id_card_encrypt",
+                "id_card_cipher",
+                "id_card_hash"
+        ));
+        properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties samplePropertiesForCorrelatedSeparateTableComparison() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        properties.getTables().add(separateTableJoinRule(
+                "cc_customer",
+                "custrNbr",
+                "custr_nbr",
+                "cc_customer_encrypt",
+                "custr_nbr_cipher",
+                "custr_nbr_hash"
+        ));
+        properties.getTables().add(separateTableJoinRule(
+                "hx_bank_cust_mngt",
+                "idCard",
+                "id_card",
+                "hx_bank_cust_mngt_encrypt",
+                "id_card_cipher",
+                "id_card_hash"
+        ));
+        properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties.TableRuleProperties separateTableJoinRule(String table,
+                                                                                   String property,
+                                                                                   String column,
+                                                                                   String storageTable,
+                                                                                   String storageColumn,
+                                                                                   String assistedColumn) {
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable(table);
+        DatabaseEncryptionProperties.FieldRuleProperties fieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        fieldRule.setProperty(property);
+        fieldRule.setColumn(column);
+        fieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
+        fieldRule.setStorageTable(storageTable);
+        fieldRule.setStorageColumn(storageColumn);
+        fieldRule.setStorageIdColumn("id");
+        fieldRule.setAssistedQueryColumn(assistedColumn);
+        tableRule.getFields().add(fieldRule);
+        return tableRule;
     }
 
     private DatabaseEncryptionProperties sampleProperties(SqlDialect sqlDialect) {

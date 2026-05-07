@@ -28,12 +28,14 @@ through real MyBatis execution tests.
 | `SELECT` explicit columns | Supported | Rewrites encrypted logical columns to `storageColumn AS logicalColumn`. |
 | `SELECT *` / `SELECT t.*` | Supported with caveats | Single-table queries may use bare `*`; multi-table queries must use explicit table wildcards such as `table.*` or `alias.*` so encrypted projections can stay ahead of the wildcard without being overwritten. |
 | Equality predicates `=` / `!=` | Supported | Uses assisted query columns when configured, otherwise falls back to `storageColumn`. |
-| Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm. |
+| Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm, including aliased and parenthesized column references. |
+| `JOIN ... ON` predicates | Supported | Runs encrypted predicates through the same rewrite pipeline as `WHERE`, including nested `EXISTS` subqueries and separate-table encrypted-column equality. |
 | `LIKE` | Supported | Requires `likeQueryColumn`. |
 | `IN (?, ?, ?)` | Supported | Uses assisted query column when available, otherwise `storageColumn`. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
 | `NOT IN` | Supported | Uses the same rewrite path as `IN`, preserving `NOT`. |
 | `EXISTS (subquery)` | Supported | Recursively rewrites the nested select. |
+| Correlated subquery outer references | Supported | Qualified outer table names or aliases such as `outer_table.encrypted_col` are resolved in nested predicates, including separate-table encrypted-column equality. |
 | Nested / parenthesized conditions | Supported | `AND`, `OR`, `NOT (...)`, and nested parentheses are rewritten recursively. |
 | `CASE WHEN` in predicates | Supported | Rewrites encrypted references inside `WHEN`, `THEN`, and `ELSE` expressions. |
 | `HAVING` | Supported | Runs through the same predicate rewrite pipeline as `WHERE`. |

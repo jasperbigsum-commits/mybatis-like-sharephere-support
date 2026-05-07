@@ -107,7 +107,8 @@ final class SqlConditionRewriter {
         if (expression instanceof ExistsExpression) {
             ExistsExpression existsExpression = (ExistsExpression) expression;
             if (existsExpression.getRightExpression() instanceof Select) {
-                selectRewriteDispatcher.rewrite((Select) existsExpression.getRightExpression(), context, ProjectionMode.NORMAL);
+                selectRewriteDispatcher.rewrite((Select) existsExpression.getRightExpression(),
+                        context, ProjectionMode.NORMAL, tableContext);
             }
             return existsExpression;
         }
@@ -133,7 +134,7 @@ final class SqlConditionRewriter {
             return caseExpression;
         }
         if (expression instanceof Select) {
-            selectRewriteDispatcher.rewrite((Select) expression, context, ProjectionMode.NORMAL);
+            selectRewriteDispatcher.rewrite((Select) expression, context, ProjectionMode.NORMAL, tableContext);
             return expression;
         }
         if (expression instanceof AndExpression) {
@@ -231,7 +232,8 @@ final class SqlConditionRewriter {
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
             if (expression.getRightExpression() instanceof Select) {
-                selectRewriteDispatcher.rewrite((Select) expression.getRightExpression(), context, ProjectionMode.NORMAL);
+                selectRewriteDispatcher.rewrite((Select) expression.getRightExpression(),
+                        context, ProjectionMode.NORMAL, tableContext);
             }
             consumeItemsList(expression.getRightExpression(), context);
             return expression;
@@ -244,7 +246,8 @@ final class SqlConditionRewriter {
             }
             expression.setLeftExpression(columnBuilder.apply(resolution.column(),
                     assistedQueryColumnProvider.apply(rule, "IN query")));
-            selectRewriteDispatcher.rewrite((Select) expression.getRightExpression(), context, ProjectionMode.COMPARISON);
+            selectRewriteDispatcher.rewrite((Select) expression.getRightExpression(),
+                    context, ProjectionMode.COMPARISON, tableContext);
             context.markChanged();
             return expression;
         }
@@ -347,6 +350,9 @@ final class SqlConditionRewriter {
     }
 
     private ColumnResolution resolveEncryptedColumn(Expression expression, SqlTableContext tableContext) {
+        if (expression instanceof Parenthesis) {
+            return resolveEncryptedColumn(((Parenthesis) expression).getExpression(), tableContext);
+        }
         if (!(expression instanceof Column)) {
             return null;
         }
@@ -368,6 +374,9 @@ final class SqlConditionRewriter {
 
     @FunctionalInterface
     interface SelectRewriteDispatcher {
-        void rewrite(Select select, SqlRewriteContext context, ProjectionMode projectionMode);
+        void rewrite(Select select,
+                     SqlRewriteContext context,
+                     ProjectionMode projectionMode,
+                     SqlTableContext outerTableContext);
     }
 }

@@ -87,7 +87,7 @@ class SqlUpdateSetRewriterTest {
                 (rule, scenario) -> rule.assistedQueryColumn(),
                 (rule, scenario) -> rule.likeQueryColumn(),
                 this::quote,
-                (select, context, projectionMode) -> {
+                (select, context, projectionMode, outerTableContext) -> {
                 }
         );
         SqlWriteExpressionRewriter writeExpressionRewriter = new SqlWriteExpressionRewriter(transformer, conditionRewriter);

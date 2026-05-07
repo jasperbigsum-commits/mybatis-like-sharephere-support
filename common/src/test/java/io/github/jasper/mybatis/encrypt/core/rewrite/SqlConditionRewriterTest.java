@@ -383,7 +383,7 @@ class SqlConditionRewriterTest {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(sameTableRule(), sameTableBackupRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = backup_phone",
-                Collections.<ParameterMapping>emptyList(), Collections.emptyMap());
+                Collections.emptyList(), Collections.emptyMap());
 
         Expression rewritten = rewriter.rewrite(
                 parseWhere("SELECT id FROM user_account WHERE phone = backup_phone"),
@@ -413,6 +413,44 @@ class SqlConditionRewriterTest {
         assertEquals(0, context.parameterMappings().size());
     }
 
+    @Test
+    void shouldRewriteSeparateTableEncryptedColumnEqualityWithParenthesesToReferenceColumns() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule(), separateTableBackupRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = (backup_phone)",
+                Collections.emptyList(), Collections.emptyMap());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone = (backup_phone)"),
+                tableContext,
+                context
+        );
+
+        assertEquals("`phone` = `backup_phone`", rewritten.toString());
+        assertFalse(rewritten.toString().contains("EXISTS"));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableEncryptedColumnEqualityWithAliasAndParenthesesToReferenceColumns() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = new SqlTableContext();
+        EncryptTableRule tableRule = new EncryptTableRule("user_account");
+        tableRule.addColumnRule(separateTableRule());
+        tableRule.addColumnRule(separateTableBackupRule());
+        tableContext.register("user_account", "u", tableRule);
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account u WHERE u.phone = (u.backup_phone)",
+                Collections.emptyList(), Collections.emptyMap());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account u WHERE u.phone = (u.backup_phone)"),
+                tableContext,
+                context
+        );
+
+        assertEquals("u.`phone` = u.`backup_phone`", rewritten.toString());
+        assertFalse(rewritten.toString().contains("EXISTS"));
+    }
+
     private SqlConditionRewriter newRewriter(List<ProjectionMode> dispatchedModes) {
         EncryptionValueTransformer transformer = new EncryptionValueTransformer(new AlgorithmRegistry(
                 Collections.emptyMap(),
@@ -425,7 +463,7 @@ class SqlConditionRewriterTest {
                 (rule, scenario) -> rule.assistedQueryColumn(),
                 (rule, scenario) -> rule.likeQueryColumn(),
                 this::quote,
-                (select, context, projectionMode) -> dispatchedModes.add(projectionMode)
+                (select, context, projectionMode, outerTableContext) -> dispatchedModes.add(projectionMode)
         );
     }
 

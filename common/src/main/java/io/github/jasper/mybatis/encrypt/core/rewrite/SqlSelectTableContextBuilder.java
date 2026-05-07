@@ -30,7 +30,11 @@ final class SqlSelectTableContextBuilder {
     }
 
     SqlTableContext build(PlainSelect plainSelect, SqlRewriteContext context) {
-        SqlTableContext tableContext = new SqlTableContext();
+        return build(plainSelect, context, null);
+    }
+
+    SqlTableContext build(PlainSelect plainSelect, SqlRewriteContext context, SqlTableContext outerTableContext) {
+        SqlTableContext tableContext = new SqlTableContext(outerTableContext);
         registerFromItem(tableContext, plainSelect.getFromItem(), context);
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
@@ -60,7 +64,7 @@ final class SqlSelectTableContextBuilder {
         if (parenthesedSelect.getSelect() == null) {
             return;
         }
-        selectRewriteDispatcher.rewrite(parenthesedSelect.getSelect(), context, ProjectionMode.DERIVED);
+        selectRewriteDispatcher.rewrite(parenthesedSelect.getSelect(), context, ProjectionMode.DERIVED, null);
         if (parenthesedSelect.getAlias() == null
                 || !StringUtils.isNotBlank(parenthesedSelect.getAlias().getName())) {
             return;

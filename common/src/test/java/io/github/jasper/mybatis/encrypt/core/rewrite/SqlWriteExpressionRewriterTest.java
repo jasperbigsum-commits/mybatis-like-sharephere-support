@@ -122,7 +122,7 @@ class SqlWriteExpressionRewriterTest {
                 (rule, scenario) -> rule.assistedQueryColumn(),
                 (rule, scenario) -> rule.likeQueryColumn(),
                 identifier -> identifier,
-                (select, context, projectionMode) -> {
+                (select, context, projectionMode, outerTableContext) -> {
                 }
         );
         return new SqlWriteExpressionRewriter(transformer, conditionRewriter);

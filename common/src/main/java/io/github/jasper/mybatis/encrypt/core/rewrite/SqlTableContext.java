@@ -25,7 +25,16 @@ import io.github.jasper.mybatis.encrypt.util.StringUtils;
  */
 final class SqlTableContext {
 
+    private final SqlTableContext outerContext;
     private final Map<String, EncryptTableRule> ruleByAlias = new LinkedHashMap<>();
+
+    SqlTableContext() {
+        this(null);
+    }
+
+    SqlTableContext(SqlTableContext outerContext) {
+        this.outerContext = outerContext;
+    }
 
     void register(String tableName, String alias, EncryptTableRule rule) {
         ruleByAlias.put(NameUtils.normalizeIdentifier(tableName), rule);
@@ -46,7 +55,8 @@ final class SqlTableContext {
             if (tableRule != null) {
                 return tableRule.findByColumn(column.getColumnName());
             }
-            return Optional.empty();
+            // Correlated subqueries may reference outer tables by explicit table name or alias.
+            return outerContext == null ? Optional.empty() : outerContext.resolve(column);
         }
         EncryptColumnRule candidate = null;
         for (EncryptTableRule tableRule : uniqueRules()) {

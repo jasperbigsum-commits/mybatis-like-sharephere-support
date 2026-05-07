@@ -25,6 +25,8 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -194,7 +196,7 @@ public class SqlRewriteEngine {
     }
 
     private void rewriteSelect(Select select, SqlRewriteContext context) {
-        rewriteSelect(select, context, ProjectionMode.NORMAL);
+        rewriteSelect(select, context, ProjectionMode.NORMAL, null);
     }
 
     /**
@@ -205,17 +207,24 @@ public class SqlRewriteEngine {
      * 落在哪个投影模式，通常能更快定位问题是在投影阶段还是条件阶段。</p>
      */
     private void rewriteSelect(Select select, SqlRewriteContext context, ProjectionMode projectionMode) {
+        rewriteSelect(select, context, projectionMode, null);
+    }
+
+    private void rewriteSelect(Select select,
+                               SqlRewriteContext context,
+                               ProjectionMode projectionMode,
+                               SqlTableContext outerTableContext) {
         if (select instanceof SetOperationList) {
             SetOperationList setOperationList = (SetOperationList) select;
             for (Select child : setOperationList.getSelects()) {
-                rewriteSelect(child, context, projectionMode);
+                rewriteSelect(child, context, projectionMode, outerTableContext);
             }
             return;
         }
         if (select instanceof ParenthesedSelect) {
             ParenthesedSelect parenthesedSelect = (ParenthesedSelect) select;
             if (parenthesedSelect.getSelect() != null) {
-                rewriteSelect(parenthesedSelect.getSelect(), context, projectionMode);
+                rewriteSelect(parenthesedSelect.getSelect(), context, projectionMode, outerTableContext);
             }
             return;
         }
@@ -224,9 +233,10 @@ public class SqlRewriteEngine {
                     "Only plain select and set-operation select are supported for encrypted SQL rewrite.");
         }
         PlainSelect plainSelect = (PlainSelect) select;
-        SqlTableContext tableContext = sqlSelectTableContextBuilder.build(plainSelect, context);
+        SqlTableContext tableContext = sqlSelectTableContextBuilder.build(plainSelect, context, outerTableContext);
         // SQL 参数绑定顺序遵循语句中的占位符出现顺序；SELECT 列表中的参数需要先消费。
         sqlConditionRewriter.consumeSelectItemParameters(plainSelect.getSelectItems(), context);
+        rewriteJoinConditions(plainSelect, tableContext, context);
         plainSelect.setWhere(sqlConditionRewriter.rewrite(plainSelect.getWhere(), tableContext, context));
         plainSelect.setHaving(sqlConditionRewriter.rewrite(plainSelect.getHaving(), tableContext, context));
         plainSelect.setQualify(sqlConditionRewriter.rewrite(plainSelect.getQualify(), tableContext, context));
@@ -242,6 +252,24 @@ public class SqlRewriteEngine {
         sqlRewriteValidator.validateSelect(plainSelect, tableContext);
         if (sqlSelectProjectionRewriter.rewrite(plainSelect, tableContext, projectionMode)) {
             context.markChanged();
+        }
+    }
+
+    private void rewriteJoinConditions(PlainSelect plainSelect, SqlTableContext tableContext, SqlRewriteContext context) {
+        if (plainSelect.getJoins() == null) {
+            return;
+        }
+        for (Join join : plainSelect.getJoins()) {
+            Collection<Expression> onExpressions = join.getOnExpressions();
+            if (onExpressions == null || onExpressions.isEmpty()) {
+                continue;
+            }
+            List<Expression> rewrittenExpressions = new ArrayList<>(onExpressions.size());
+            for (Expression onExpression : onExpressions) {
+                // JOIN ON is part of the same query block, so it must follow the same encrypted-column rules as WHERE.
+                rewrittenExpressions.add(sqlConditionRewriter.rewrite(onExpression, tableContext, context));
+            }
+            join.setOnExpressions(rewrittenExpressions);
         }
     }
 

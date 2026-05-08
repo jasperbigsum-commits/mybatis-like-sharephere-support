@@ -62,17 +62,13 @@ final class DerivedTableRuleBuilder {
             if (expression instanceof AllTableColumns) {
                 AllTableColumns allTableColumns = (AllTableColumns) expression;
                 for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(allTableColumns.getTable())) {
-                    if (!rule.isStoredInSeparateTable()) {
-                        derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
-                    }
+                    derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
                 }
                 continue;
             }
             if (expression instanceof AllColumns) {
                 for (EncryptColumnRule rule : childContext.rulesForSelectExpansion(null)) {
-                    if (!rule.isStoredInSeparateTable()) {
-                        derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
-                    }
+                    derivedRule.addColumnRule(projectDerivedRule(rule.column(), rule));
                 }
                 continue;
             }
@@ -81,7 +77,7 @@ final class DerivedTableRuleBuilder {
             }
             Column column = (Column) expression;
             EncryptColumnRule sourceRule = childContext.resolveProjected(column).orElse(null);
-            if (sourceRule == null || sourceRule.isStoredInSeparateTable()) {
+            if (sourceRule == null) {
                 continue;
             }
             String aliasName = item.getAlias() != null && item.getAlias().getName() != null
@@ -116,6 +112,25 @@ final class DerivedTableRuleBuilder {
     }
 
     private EncryptColumnRule projectDerivedRule(String projectedColumn, EncryptColumnRule sourceRule) {
+        if (sourceRule.isStoredInSeparateTable()) {
+            // Explicit projections from separate-table fields already carry the main-table reference value.
+            return new EncryptColumnRule(
+                    projectedColumn,
+                    sourceRule.table(),
+                    projectedColumn,
+                    sourceRule.cipherAlgorithm(),
+                    sourceRule.assistedQueryColumn(),
+                    sourceRule.assistedQueryAlgorithm(),
+                    sourceRule.likeQueryColumn(),
+                    sourceRule.likeQueryAlgorithm(),
+                    sourceRule.maskedColumn(),
+                    sourceRule.maskedAlgorithm(),
+                    FieldStorageMode.SEPARATE_TABLE,
+                    sourceRule.storageTable(),
+                    sourceRule.storageColumn(),
+                    sourceRule.storageIdColumn()
+            );
+        }
         return new EncryptColumnRule(
                 projectedColumn,
                 sourceRule.table(),

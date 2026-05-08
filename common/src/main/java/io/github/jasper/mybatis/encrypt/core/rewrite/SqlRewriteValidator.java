@@ -123,16 +123,7 @@ final class SqlRewriteValidator {
     }
 
     private void validateOrderBy(List<OrderByElement> orderByElements, SqlTableContext tableContext) {
-        if (orderByElements == null) {
-            return;
-        }
-        for (OrderByElement element : orderByElements) {
-            EncryptColumnRule rule = resolveEncryptedRule(element.getExpression(), tableContext);
-            if (rule != null) {
-                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY,
-                        "ORDER BY is not supported on encrypted field: " + rule.property());
-            }
-        }
+        // ORDER BY is now handled by rewrite-time column substitution plus a warning in the engine.
     }
 
     private EncryptColumnRule resolveEncryptedRule(Expression expression, SqlTableContext tableContext) {
@@ -321,6 +312,9 @@ final class SqlRewriteValidator {
                 }
                 if (function.getParameters() != null) {
                     for (Expression item : function.getParameters()) {
+                        if (isAllowedAggregateOperand(function, item, tableContext)) {
+                            continue;
+                        }
                         if (containsEncryptedReference(item, tableContext)
                                 || containsUnsupportedAggregate(item, tableContext)) {
                             return true;
@@ -391,6 +385,35 @@ final class SqlRewriteValidator {
             return false;
         }
         return false;
+    }
+
+    private boolean isAllowedAggregateOperand(Function function,
+                                              Expression expression,
+                                              SqlTableContext tableContext) {
+        if (!isCountAggregate(function)) {
+            return false;
+        }
+        EncryptColumnRule rule = resolveEncryptedRule(unwrapParenthesis(expression), tableContext);
+        if (rule == null) {
+            return false;
+        }
+        if (!rule.isStoredInSeparateTable()) {
+            return rule.hasAssistedQueryColumn();
+        }
+        return unwrapParenthesis(expression) instanceof Column;
+    }
+
+    private Expression unwrapParenthesis(Expression expression) {
+        Expression current = expression;
+        while (current instanceof Parenthesis) {
+            current = ((Parenthesis) current).getExpression();
+        }
+        return current;
+    }
+
+    private boolean isCountAggregate(Function function) {
+        String name = function.getName();
+        return name != null && "COUNT".equals(name.toUpperCase(Locale.ROOT));
     }
 
     private boolean isAggregateFunction(Function function) {

@@ -28,16 +28,10 @@ class SqlRewriteValidatorTest {
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
      */
     @Test
-    void shouldRejectOrderByOnEncryptedField() throws Exception {
+    void shouldAllowOrderByOnEncryptedField() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT phone FROM user_account ORDER BY phone");
 
-        UnsupportedEncryptedOperationException exception = assertThrows(
-                UnsupportedEncryptedOperationException.class,
-                () -> validator.validateSelect(plainSelect, tableContext())
-        );
-
-        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY, exception.getErrorCode());
-        assertTrue(exception.getMessage().contains("ORDER BY"));
+        assertDoesNotThrow(() -> validator.validateSelect(plainSelect, tableContext()));
     }
 
     /**
@@ -72,6 +66,20 @@ class SqlRewriteValidatorTest {
 
         assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION, exception.getErrorCode());
         assertTrue(exception.getMessage().contains("Aggregate"));
+    }
+
+    @Test
+    void shouldAllowCountOnSeparateTableReferenceField() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT COUNT(id_card) FROM user_account");
+
+        assertDoesNotThrow(() -> validator.validateSelect(plainSelect, tableContextWithSeparateTableField()));
+    }
+
+    @Test
+    void shouldAllowCountDistinctOnSeparateTableReferenceField() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT COUNT(DISTINCT id_card) FROM user_account");
+
+        assertDoesNotThrow(() -> validator.validateSelect(plainSelect, tableContextWithSeparateTableField()));
     }
 
     /**

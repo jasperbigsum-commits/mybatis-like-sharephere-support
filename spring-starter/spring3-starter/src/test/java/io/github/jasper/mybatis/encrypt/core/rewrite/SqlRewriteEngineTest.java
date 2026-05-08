@@ -2483,10 +2483,58 @@ class SqlRewriteEngineTest {
                 Map.of()
         );
 
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("ORDER BY `phone_hash`")
+                || result.sql().contains("ORDER BY phone_hash"));
+    }
+
+    @Test
+    void shouldFailFastForOrderByEncryptedFieldWithoutAssistedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesWithoutPhoneAssistedQueryColumn();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM user_account ORDER BY phone",
+                List.of(),
+                Map.of()
+        );
+
         UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
                 () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
         assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY, exception.getErrorCode());
-        assertEquals("ORDER BY is not supported on encrypted field: phone", exception.getMessage());
+        assertTrue(exception.getMessage().contains("assistedQueryColumn"));
+    }
+
+    @Test
+    void shouldAllowOrderBySeparateTableReferenceField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM user_account ORDER BY id_card",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("ORDER BY `id_card`")
+                || result.sql().contains("ORDER BY id_card"));
     }
 
     /**
@@ -2706,6 +2754,76 @@ class SqlRewriteEngineTest {
         assertFalse(result.changed());
     }
 
+    @Test
+    void shouldRewriteCountAggregateOnSameTableEncryptedFieldToAssistedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT COUNT(phone) FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("COUNT(`phone_hash`)")
+                || result.sql().contains("COUNT(phone_hash)"));
+    }
+
+    @Test
+    void shouldRewriteCountDistinctAggregateOnSameTableEncryptedFieldToAssistedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT COUNT(DISTINCT phone) FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("COUNT(DISTINCT `phone_hash`)")
+                || result.sql().contains("COUNT(DISTINCT phone_hash)"));
+    }
+
+    @Test
+    void shouldAllowCountAggregateOnSeparateTableReferenceField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT COUNT(id_card) FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertFalse(result.changed());
+    }
+
     /**
      * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
@@ -2722,7 +2840,7 @@ class SqlRewriteEngineTest {
 
         BoundSql countSql = new BoundSql(
                 configuration,
-                "SELECT COUNT(phone) FROM user_account",
+                "SELECT MAX(phone) FROM user_account",
                 List.of(),
                 Map.of()
         );
@@ -3084,6 +3202,107 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("ORDER BY c.cred_limit DESC"));
     }
 
+    @Test
+    void shouldRewriteCommaJoinDerivedTableEqualityAndCountForSameTableEncryptedFields() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesForDerivedAggregateJoinComparison(false);
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "select count(a.id_card) as count, " +
+                        "sum(if(a.is_confirm = '1', 0, 1)) as not_confirm, " +
+                        "round(sum(t.loan_balance) * 0.0001, 2) as loan_balance " +
+                        "from crm_portrait_grade_record_main a, " +
+                        "(select cert_cde, sum(loan_balance) as loan_balance " +
+                        "from dwd_nmis_acc_bill where cjrq = ? group by cert_cde) t " +
+                        "where a.id_card = t.cert_cde " +
+                        "and (a.cus_manager_no IN (?,?,?,?) AND a.del_flag = ? AND a.status = ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "cjrq", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr1", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr2", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr3", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr4", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "delFlag", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "status", String.class).build()
+                ),
+                Map.of(
+                        "cjrq", "2026-05-07",
+                        "mgr1", "m1",
+                        "mgr2", "m2",
+                        "mgr3", "m3",
+                        "mgr4", "m4",
+                        "delFlag", "0",
+                        "status", "1"
+                )
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("count(a.`id_card_hash`)") || result.sql().contains("COUNT(a.`id_card_hash`)"));
+        assertTrue(result.sql().contains("group by `cert_cde_hash`") || result.sql().contains("GROUP BY `cert_cde_hash`")
+                || result.sql().contains("group by cert_cde_hash") || result.sql().contains("GROUP BY cert_cde_hash"));
+        assertTrue(result.sql().contains("a.`id_card_hash` = t.`__enc_assisted_cert_cde`")
+                || result.sql().contains("t.`__enc_assisted_cert_cde` = a.`id_card_hash`"));
+    }
+
+    @Test
+    void shouldRewriteCommaJoinDerivedTableEqualityAndCountForSeparateTableEncryptedFields() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = samplePropertiesForDerivedAggregateJoinComparison(true);
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "select count(a.id_card) as count, " +
+                        "sum(if(a.is_confirm = '1', 0, 1)) as not_confirm, " +
+                        "round(sum(t.loan_balance) * 0.0001, 2) as loan_balance " +
+                        "from crm_portrait_grade_record_main a, " +
+                        "(select cert_cde, sum(loan_balance) as loan_balance " +
+                        "from dwd_nmis_acc_bill where cjrq = ? group by cert_cde) t " +
+                        "where a.id_card = t.cert_cde " +
+                        "and (a.cus_manager_no IN (?,?,?,?) AND a.del_flag = ? AND a.status = ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "cjrq", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr1", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr2", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr3", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "mgr4", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "delFlag", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "status", String.class).build()
+                ),
+                Map.of(
+                        "cjrq", "2026-05-07",
+                        "mgr1", "m1",
+                        "mgr2", "m2",
+                        "mgr3", "m3",
+                        "mgr4", "m4",
+                        "delFlag", "0",
+                        "status", "1"
+                )
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("count(a.id_card)") || result.sql().contains("COUNT(a.id_card)")
+                || result.sql().contains("count(a.`id_card`)") || result.sql().contains("COUNT(a.`id_card`)"));
+        assertTrue(result.sql().contains("group by `cert_cde`") || result.sql().contains("GROUP BY `cert_cde`")
+                || result.sql().contains("group by cert_cde") || result.sql().contains("GROUP BY cert_cde"));
+        assertTrue(result.sql().contains("a.`id_card` = t.`cert_cde`")
+                || result.sql().contains("t.`cert_cde` = a.`id_card`"));
+    }
+
     private DatabaseEncryptionProperties sampleProperties() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
@@ -3173,6 +3392,34 @@ class SqlRewriteEngineTest {
         return properties;
     }
 
+    private DatabaseEncryptionProperties samplePropertiesForDerivedAggregateJoinComparison(boolean separateTable) {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        properties.getTables().add(encryptedFieldRule(
+                "crm_portrait_grade_record_main",
+                "idCard",
+                "id_card",
+                separateTable,
+                "crm_portrait_grade_record_main_id_card_encrypt",
+                "id_card_cipher",
+                "id_card_hash",
+                "id_card_like",
+                "idCardMaskLike"
+        ));
+        properties.getTables().add(encryptedFieldRule(
+                "dwd_nmis_acc_bill",
+                "certCde",
+                "cert_cde",
+                separateTable,
+                "dwd_nmis_acc_bill_cert_cde_encrypt",
+                "cert_cde_cipher",
+                "cert_cde_hash",
+                null,
+                null
+        ));
+        properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
     private DatabaseEncryptionProperties.TableRuleProperties separateTableJoinRule(String table,
                                                                                    String property,
                                                                                    String column,
@@ -3189,6 +3436,31 @@ class SqlRewriteEngineTest {
         fieldRule.setStorageColumn(storageColumn);
         fieldRule.setStorageIdColumn("id");
         fieldRule.setAssistedQueryColumn(assistedColumn);
+        tableRule.getFields().add(fieldRule);
+        return tableRule;
+    }
+
+    private DatabaseEncryptionProperties.TableRuleProperties encryptedFieldRule(String table,
+                                                                                String property,
+                                                                                String column,
+                                                                                boolean separateTable,
+                                                                                String storageTable,
+                                                                                String storageColumn,
+                                                                                String assistedColumn,
+                                                                                String likeColumn,
+                                                                                String maskedAlgorithm) {
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable(table);
+        DatabaseEncryptionProperties.FieldRuleProperties fieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        fieldRule.setProperty(property);
+        fieldRule.setColumn(column);
+        fieldRule.setStorageMode(separateTable ? FieldStorageMode.SEPARATE_TABLE : FieldStorageMode.SAME_TABLE);
+        fieldRule.setStorageTable(separateTable ? storageTable : null);
+        fieldRule.setStorageColumn(storageColumn);
+        fieldRule.setStorageIdColumn("id");
+        fieldRule.setAssistedQueryColumn(assistedColumn);
+        fieldRule.setLikeQueryColumn(likeColumn);
+        fieldRule.setMaskedAlgorithm(maskedAlgorithm);
         tableRule.getFields().add(fieldRule);
         return tableRule;
     }

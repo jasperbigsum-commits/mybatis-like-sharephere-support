@@ -240,6 +240,12 @@ public class SqlRewriteEngine {
         plainSelect.setWhere(sqlConditionRewriter.rewrite(plainSelect.getWhere(), tableContext, context));
         plainSelect.setHaving(sqlConditionRewriter.rewrite(plainSelect.getHaving(), tableContext, context));
         plainSelect.setQualify(sqlConditionRewriter.rewrite(plainSelect.getQualify(), tableContext, context));
+        if (rewriteAggregateExpressions(plainSelect, tableContext)) {
+            context.markChanged();
+        }
+        if (rewriteOrderByExpressions(plainSelect.getOrderByElements(), tableContext)) {
+            context.markChanged();
+        }
         if (tableContext.isEmpty()) {
             return;
         }
@@ -271,6 +277,170 @@ public class SqlRewriteEngine {
             }
             join.setOnExpressions(rewrittenExpressions);
         }
+    }
+
+    private boolean rewriteAggregateExpressions(PlainSelect plainSelect, SqlTableContext tableContext) {
+        boolean changed = false;
+        if (plainSelect.getSelectItems() != null) {
+            for (SelectItem<?> item : plainSelect.getSelectItems()) {
+                if (rewriteAggregateExpression(item.getExpression(), tableContext)) {
+                    changed = true;
+                }
+            }
+        }
+        if (rewriteAggregateExpression(plainSelect.getHaving(), tableContext)) {
+            changed = true;
+        }
+        if (rewriteAggregateExpression(plainSelect.getQualify(), tableContext)) {
+            changed = true;
+        }
+        return changed;
+    }
+
+    private boolean rewriteOrderByExpressions(List<OrderByElement> orderByElements, SqlTableContext tableContext) {
+        if (orderByElements == null) {
+            return false;
+        }
+        boolean changed = false;
+        for (OrderByElement element : orderByElements) {
+            Expression expression = element.getExpression();
+            ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+            if (resolution == null) {
+                continue;
+            }
+            warnEncryptedOrderBy(resolution.rule());
+            Expression rewritten = rewriteOrderByExpression(resolution);
+            if (rewritten != expression) {
+                element.setExpression(rewritten);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private Expression rewriteOrderByExpression(ColumnResolution resolution) {
+        EncryptColumnRule rule = resolution.rule();
+        if (!rule.hasAssistedQueryColumn()) {
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_ORDER_BY,
+                    "ORDER BY on encrypted field requires assistedQueryColumn. " + describeRule(rule));
+        }
+        if (rule.isStoredInSeparateTable()) {
+            return buildColumn(resolution.column(), rule.column());
+        }
+        return buildColumn(resolution.column(), rule.assistedQueryColumn());
+    }
+
+    private void warnEncryptedOrderBy(EncryptColumnRule rule) {
+        if (!log.isWarnEnabled()) {
+            return;
+        }
+        log.warn("ORDER BY on encrypted field [{}] is allowed for technical sorting only; results are ordered by "
+                        + "hash/reference values and may not match plaintext business order.",
+                rule.property());
+    }
+
+    private boolean rewriteAggregateExpression(Expression expression, SqlTableContext tableContext) {
+        if (expression == null) {
+            return false;
+        }
+        if (expression instanceof Function) {
+            return rewriteAggregateFunction((Function) expression, tableContext);
+        }
+        if (expression instanceof Parenthesis) {
+            return rewriteAggregateExpression(((Parenthesis) expression).getExpression(), tableContext);
+        }
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
+            boolean changed = rewriteAggregateExpression(binaryExpression.getLeftExpression(), tableContext);
+            if (rewriteAggregateExpression(binaryExpression.getRightExpression(), tableContext)) {
+                changed = true;
+            }
+            return changed;
+        }
+        if (expression instanceof ParenthesedExpressionList) {
+            boolean changed = false;
+            ParenthesedExpressionList<?> parenthesed = (ParenthesedExpressionList<?>) expression;
+            for (Expression item : parenthesed) {
+                if (rewriteAggregateExpression(item, tableContext)) {
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
+            boolean changed = rewriteAggregateExpression(caseExpression.getSwitchExpression(), tableContext);
+            if (rewriteAggregateExpression(caseExpression.getElseExpression(), tableContext)) {
+                changed = true;
+            }
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    if (rewriteAggregateExpression(whenClause.getWhenExpression(), tableContext)
+                            || rewriteAggregateExpression(whenClause.getThenExpression(), tableContext)) {
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+        if (expression instanceof NotExpression) {
+            return rewriteAggregateExpression(((NotExpression) expression).getExpression(), tableContext);
+        }
+        return false;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private boolean rewriteAggregateFunction(Function function, SqlTableContext tableContext) {
+        boolean changed = false;
+        if (isCountAggregate(function) && function.getParameters() != null) {
+            ExpressionList parameters = function.getParameters();
+            for (int index = 0; index < parameters.size(); index++) {
+                Object item = parameters.get(index);
+                if (!(item instanceof Expression)) {
+                    continue;
+                }
+                Expression expression = (Expression) item;
+                Expression rewritten = rewriteCountAggregateOperand(expression, tableContext);
+                if (rewritten != expression) {
+                    parameters.set(index, rewritten);
+                    changed = true;
+                }
+                if (rewriteAggregateExpression(rewritten, tableContext)) {
+                    changed = true;
+                }
+            }
+        } else if (function.getParameters() != null) {
+            for (Expression item : function.getParameters()) {
+                if (rewriteAggregateExpression(item, tableContext)) {
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    private Expression rewriteCountAggregateOperand(Expression expression, SqlTableContext tableContext) {
+        if (expression instanceof Parenthesis) {
+            Parenthesis parenthesis = (Parenthesis) expression;
+            Expression rewritten = rewriteCountAggregateOperand(parenthesis.getExpression(), tableContext);
+            if (rewritten != parenthesis.getExpression()) {
+                parenthesis.setExpression(rewritten);
+            }
+            return parenthesis;
+        }
+        ColumnResolution resolution = resolveEncryptedColumn(expression, tableContext);
+        if (resolution == null) {
+            return expression;
+        }
+        if (resolution.rule().isStoredInSeparateTable()) {
+            return expression;
+        }
+        return buildColumn(resolution.column(), requireAssistedQueryColumn(resolution.rule(), "COUNT aggregate"));
+    }
+
+    private boolean isCountAggregate(Function function) {
+        String name = function.getName();
+        return name != null && "COUNT".equals(name.toUpperCase(java.util.Locale.ROOT));
     }
 
     private boolean rewriteWindowPartitionExpressions(PlainSelect plainSelect, SqlTableContext tableContext) {

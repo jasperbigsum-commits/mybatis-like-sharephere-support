@@ -31,6 +31,8 @@ through real MyBatis execution tests.
 | Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm, including aliased and parenthesized column references. |
 | `JOIN ... ON` predicates | Supported | Runs encrypted predicates through the same rewrite pipeline as `WHERE`, including nested `EXISTS` subqueries and separate-table encrypted-column equality. |
 | `LIKE` | Supported | Requires `likeQueryColumn`. |
+| `COUNT(encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields rewrite to `assistedQueryColumn`; separate-table fields count the main-table reference column. |
+| `COUNT(DISTINCT encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields use `assistedQueryColumn`; separate-table fields use the main-table reference column. |
 | `IN (?, ?, ?)` | Supported | Uses assisted query column when available, otherwise `storageColumn`. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
 | `NOT IN` | Supported | Uses the same rewrite path as `IN`, preserving `NOT`. |
@@ -77,8 +79,9 @@ Avoid these if the field is encrypted:
 | `ORDER BY` encrypted fields | Rejected | Ordering on encrypted/hash values is semantically unsafe. |
 | `GROUP BY` encrypted fields | Rejected | Grouping on encrypted/hash values is semantically unsafe. |
 | Range predicates `>`, `>=`, `<`, `<=`, `BETWEEN` | Rejected | The current algorithms do not preserve order semantics. |
-| `DISTINCT` on encrypted fields | Rejected | Distinctness would be applied to ciphertext/helper values rather than business semantics. |
-| Aggregate functions on encrypted fields | Rejected | `COUNT(phone)`, `SUM(phone)`, `MAX(phone)` and similar expressions are not semantically reliable. |
+| `SELECT DISTINCT encrypted_column` | Rejected | Returning distinct ciphertext/helper values is not equivalent to returning distinct business plaintext. |
+| `ORDER BY encrypted_column` | Supported with assisted/hash column | Requires `assistedQueryColumn`; same-table fields sort by the assisted/hash column, separate-table fields sort by the main-table reference column, and a warning is logged because the order reflects technical values rather than plaintext semantics. |
+| Aggregate functions on encrypted fields except supported `COUNT` variants | Rejected | `SUM(phone)`, `MAX(phone)`, `AVG(phone)`, `GROUP_CONCAT(phone)` and similar expressions are not semantically reliable. |
 | Window functions referencing encrypted fields | Rejected | `PARTITION BY`, analytic `ORDER BY`, filter expressions, and named windows fail fast when encrypted fields are involved. |
 | Separate-table encrypted field in `IN` subquery projection | Rejected | The plugin currently only supports same-table encrypted field comparison subqueries. |
 | Bare `*` in multi-table / derived query that contains encrypted table rules | Rejected | The plugin cannot safely decide which table the wildcard should expand from; use explicit `table.*` or `alias.*` to prevent encrypted alias projections from being covered by later wildcard columns. |

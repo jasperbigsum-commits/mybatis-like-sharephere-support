@@ -155,6 +155,38 @@ class SqlConditionRewriterTest {
     }
 
     /**
+     * 测试目的：验证联表查询里同时存在非加密字段条件和加密字段空串不等条件时，只改写加密字段部分。
+     * 测试场景：模拟 `u.phone <> '' AND o.order_status = 'active'`，断言 `u.phone` 改写为 hash 比较，而 `o.order_status` 原样保留。
+     */
+    @Test
+    void shouldRewriteOnlyEncryptedPredicateWhenJoinedPlainAndEncryptedConditionsCoexist() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = new SqlTableContext();
+        EncryptTableRule tableRule = new EncryptTableRule("user_account");
+        tableRule.addColumnRule(sameTableRule());
+        tableContext.register("user_account", "u", tableRule);
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT u.id FROM user_account u JOIN order_account o ON u.id = o.user_id "
+                        + "WHERE u.phone <> '' AND o.order_status = 'active'"),
+                tableContext,
+                rewriteContext(
+                        "SELECT u.id FROM user_account u JOIN order_account o ON u.id = o.user_id "
+                                + "WHERE u.phone <> '' AND o.order_status = 'active'",
+                        Collections.<ParameterMapping>emptyList(),
+                        Collections.emptyMap()
+                )
+        );
+
+        String rewrittenSql = rewritten.toString();
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(rewrittenSql.contains("u.`phone_hash` <> '" + expectedHash + "'")
+                || rewrittenSql.contains("u.`phone_hash` != '" + expectedHash + "'"));
+        assertTrue(rewrittenSql.contains("o.order_status = 'active'"));
+        assertFalse(rewrittenSql.contains("u.phone <> ''"));
+    }
+
+    /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */

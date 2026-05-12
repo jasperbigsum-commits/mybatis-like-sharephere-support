@@ -441,8 +441,11 @@ class MybatisEncryptionIntegrationTest {
 
         String normalizedSql = singleLine(parameterCaptureInterceptor.lastPreparedSql).toLowerCase(Locale.ROOT);
         assertTrue(normalizedSql.contains("select ? as display_name"));
-        assertTrue(normalizedSql.contains("user_id_card_encrypt"));
-        assertTrue(normalizedSql.contains("id_card_hash"));
+        assertFalse(normalizedSql.contains("user_id_card_encrypt"));
+        assertTrue(normalizedSql.contains("where id_card = ?")
+                || normalizedSql.contains("where `id_card` = ?")
+                || normalizedSql.contains("where u.id_card = ?")
+                || normalizedSql.contains("where u.`id_card` = ?"));
         assertEquals(2, parameterCaptureInterceptor.lastResolvedParameters.size());
         assertEquals("visible-label", parameterCaptureInterceptor.lastResolvedParameters.get(0));
         assertEquals(expectedHash, parameterCaptureInterceptor.lastResolvedParameters.get(1));
@@ -482,8 +485,11 @@ class MybatisEncryptionIntegrationTest {
         String normalizedSql = singleLine(parameterCaptureInterceptor.lastPreparedSql).toLowerCase(Locale.ROOT);
         assertTrue(normalizedSql.contains("select ? as display_name"));
         assertTrue(normalizedSql.contains("? as marker"));
-        assertTrue(normalizedSql.contains("user_id_card_encrypt"));
-        assertTrue(normalizedSql.contains("id_card_hash"));
+        assertFalse(normalizedSql.contains("user_id_card_encrypt"));
+        assertTrue(normalizedSql.contains("where id_card = ?")
+                || normalizedSql.contains("where `id_card` = ?")
+                || normalizedSql.contains("where u.id_card = ?")
+                || normalizedSql.contains("where u.`id_card` = ?"));
         assertEquals(3, parameterCaptureInterceptor.lastResolvedParameters.size());
         assertEquals("visible-label-a", parameterCaptureInterceptor.lastResolvedParameters.get(0));
         assertEquals("visible-label-b", parameterCaptureInterceptor.lastResolvedParameters.get(1));

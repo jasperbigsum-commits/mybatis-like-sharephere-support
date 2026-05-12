@@ -27,7 +27,7 @@ through real MyBatis execution tests.
 | `DELETE` | Supported | Supports encrypted predicates in `WHERE`; separate-table records are deleted after the main delete. |
 | `SELECT` explicit columns | Supported | Rewrites encrypted logical columns to `storageColumn AS logicalColumn`. |
 | `SELECT *` / `SELECT t.*` | Supported with caveats | Single-table queries may use bare `*`; multi-table queries must use explicit table wildcards such as `table.*` or `alias.*` so encrypted projections can stay ahead of the wildcard without being overwritten. |
-| Equality predicates `=` / `!=` | Supported | Uses assisted query columns when configured, otherwise falls back to `storageColumn`. |
+| Equality predicates `=` / `!=` | Supported | Same-table fields use assisted query columns when configured, otherwise `storageColumn`; separate-table fields rewrite directly to the main-table reference/hash column. |
 | Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm, including aliased and parenthesized column references. |
 | `JOIN ... ON` predicates | Supported | Runs encrypted predicates through the same rewrite pipeline as `WHERE`, including nested `EXISTS` subqueries and separate-table encrypted-column equality. |
 | `LIKE` | Supported | Requires `likeQueryColumn`. |
@@ -35,7 +35,8 @@ through real MyBatis execution tests.
 | `COUNT(encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields rewrite to `assistedQueryColumn`; separate-table fields count the main-table reference column. |
 | `COUNT(DISTINCT encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields use `assistedQueryColumn`; separate-table fields use the main-table reference column. |
 | Top-level `MAX(encrypted_column)` / `FIRST(encrypted_column)` | Supported with warning | Same-table fields require `assistedQueryColumn` as an explicit opt-in and aggregate the ciphertext column so the result can be decrypted; separate-table fields aggregate the main-table reference value and are hydrated after read. Results reflect technical values, not plaintext ordering semantics. |
-| `IN (?, ?, ?)` | Supported | Uses assisted query column when available, otherwise `storageColumn`. |
+| `IN (?, ?, ?)` | Supported | Same-table fields use assisted query column when available, otherwise `storageColumn`; separate-table fields rewrite directly to the main-table reference/hash column. |
+| `IS NULL` / `IS NOT NULL` | Supported | Same-table fields check `storageColumn`; separate-table fields check the main-table reference/hash column directly. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
 | `NOT IN` | Supported | Uses the same rewrite path as `IN`, preserving `NOT`. |
 | `EXISTS (subquery)` | Supported | Recursively rewrites the nested select. |

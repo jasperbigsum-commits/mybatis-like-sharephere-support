@@ -328,6 +328,59 @@ class SqlConditionRewriterTest {
         assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
     }
 
+    @Test
+    void shouldRewriteSeparateTableLikeWithoutLikeColumnToMainReferenceHashPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRuleWithoutLikeColumn());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "%13800138000%"));
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone LIKE ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone` = ?"));
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertFalse(rewritten.toString().contains("LIKE"));
+        assertEquals(1, context.parameterMappings().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableIsNullToMainReferenceNullPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone IS NULL"),
+                tableContext,
+                rewriteContext("SELECT id FROM user_account WHERE phone IS NULL",
+                        Collections.<ParameterMapping>emptyList(), Collections.emptyMap())
+        );
+
+        assertEquals("`phone` IS NULL", rewritten.toString());
+        assertFalse(rewritten.toString().contains("EXISTS"));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableIsNotNullToMainReferenceNotNullPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone IS NOT NULL"),
+                tableContext,
+                rewriteContext("SELECT id FROM user_account WHERE phone IS NOT NULL",
+                        Collections.<ParameterMapping>emptyList(), Collections.emptyMap())
+        );
+
+        assertEquals("`phone` IS NOT NULL", rewritten.toString());
+        assertFalse(rewritten.toString().contains("EXISTS"));
+    }
+
     /**
      * 测试目的：验证 HAVING 子句会复用 WHERE 的同表等值改写规则，按辅助 hash 列完成筛选。
      * 测试场景：模拟按手机号分组后的统计查询在 HAVING 中继续按手机号精确过滤，断言改写后命中 phone_hash 且参数被转换为 hash。
@@ -465,7 +518,7 @@ class SqlConditionRewriterTest {
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
     @Test
-    void shouldRewriteSeparateTableEqualityToExistsSubquery() throws Exception {
+    void shouldRewriteSeparateTableEqualityToMainReferenceHashPredicate() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(separateTableRule());
         SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone = ?",
@@ -474,9 +527,29 @@ class SqlConditionRewriterTest {
 
         Expression rewritten = rewriter.rewrite(parseWhere("SELECT id FROM user_account WHERE phone = ?"), tableContext, context);
 
-        assertTrue(rewritten.toString().contains("EXISTS"));
-        assertTrue(rewritten.toString().contains("`user_phone_encrypt`"));
-        assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
+        assertTrue(rewritten.toString().contains("`phone` = ?"));
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertFalse(rewritten.toString().contains("`user_phone_encrypt`"));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableNotEqualsEmptyLiteralToMainReferenceHashPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone <> ''"),
+                tableContext,
+                rewriteContext("SELECT id FROM user_account WHERE phone <> ''",
+                        Collections.<ParameterMapping>emptyList(), Collections.emptyMap())
+        );
+
+        String rewrittenSql = rewritten.toString();
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(rewrittenSql.contains("`phone` <> '" + expectedHash + "'")
+                || rewrittenSql.contains("`phone` != '" + expectedHash + "'"));
+        assertFalse(rewrittenSql.contains("EXISTS"));
+        assertFalse(rewrittenSql.contains("phone <> ''"));
     }
 
     @Test
@@ -641,6 +714,23 @@ class SqlConditionRewriterTest {
                 "phone_hash",
                 "sm3",
                 "phone_like",
+                "like",
+                FieldStorageMode.SEPARATE_TABLE,
+                "user_phone_encrypt",
+                "phone_cipher",
+                "phone_hash"
+        );
+    }
+
+    private EncryptColumnRule separateTableRuleWithoutLikeColumn() {
+        return new EncryptColumnRule(
+                "phone",
+                "user_account",
+                "phone",
+                "sm4",
+                "phone_hash",
+                "sm3",
+                null,
                 "like",
                 FieldStorageMode.SEPARATE_TABLE,
                 "user_phone_encrypt",

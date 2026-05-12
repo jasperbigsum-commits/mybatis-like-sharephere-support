@@ -19,28 +19,24 @@ final class SqlEqualityConditionRewriter {
     private final BiFunction<Column, String, Column> columnBuilder;
     private final BiFunction<EncryptColumnRule, String, String> assistedQueryColumnProvider;
     private final SqlConditionOperandSupport operandSupport;
-    private final SqlSeparateTableExistsConditionBuilder separateTableExistsConditionBuilder;
 
     SqlEqualityConditionRewriter(EncryptionValueTransformer valueTransformer,
                                  BiFunction<Column, String, Column> columnBuilder,
                                  BiFunction<EncryptColumnRule, String, String> assistedQueryColumnProvider,
-                                 SqlConditionOperandSupport operandSupport,
-                                 SqlSeparateTableExistsConditionBuilder separateTableExistsConditionBuilder) {
+                                 SqlConditionOperandSupport operandSupport) {
         this.valueTransformer = valueTransformer;
         this.columnBuilder = columnBuilder;
         this.assistedQueryColumnProvider = assistedQueryColumnProvider;
         this.operandSupport = operandSupport;
-        this.separateTableExistsConditionBuilder = separateTableExistsConditionBuilder;
     }
 
     Expression rewrite(BinaryExpression expression,
                        ColumnResolution resolution,
                        SqlRewriteContext context) {
         EncryptColumnRule rule = resolution.rule();
-        if (rule.isStoredInSeparateTable()) {
-            return rewriteSeparateTable(expression, resolution, context, rule);
-        }
-        String targetColumn = assistedQueryColumnProvider.apply(rule, "equality query");
+        String targetColumn = rule.isStoredInSeparateTable()
+                ? rule.column()
+                : assistedQueryColumnProvider.apply(rule, "equality query");
         Expression operand = resolution.leftColumn() ? expression.getRightExpression() : expression.getLeftExpression();
         Expression rewrittenOperand = rewriteAssistedOperand(rule, operand, context,
                 "Encrypted equality condition must use prepared parameter, string literal, or CONCAT of them.");
@@ -64,23 +60,6 @@ final class SqlEqualityConditionRewriter {
         expression.setRightExpression(columnBuilder.apply(right.column(), comparisonColumn(right.rule())));
         context.markChanged();
         return expression;
-    }
-
-    private Expression rewriteSeparateTable(BinaryExpression expression,
-                                            ColumnResolution resolution,
-                                            SqlRewriteContext context,
-                                            EncryptColumnRule rule) {
-        Expression operand = resolution.leftColumn() ? expression.getRightExpression() : expression.getLeftExpression();
-        QueryOperand queryOperand = operandSupport.readComposableQueryOperand(operand, context,
-                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
-                "Separate-table encrypted query must use prepared parameter, string literal, or CONCAT of them.");
-        String targetColumn = assistedQueryColumnProvider.apply(rule, "equality query");
-        String transformed = valueTransformer.transformAssisted(rule, queryOperand.value());
-        context.markChanged();
-        Expression valueExpression = operandSupport.buildComposableQueryExpression(queryOperand, context,
-                transformed, MaskingMode.HASH);
-        return separateTableExistsConditionBuilder.buildExistsCondition(resolution.column(), rule,
-                separateTableExistsConditionBuilder.buildEqualityPredicate(targetColumn, valueExpression));
     }
 
     private Expression rewriteAssistedOperand(EncryptColumnRule rule,

@@ -63,8 +63,7 @@ final class SqlConditionRewriter {
                 valueTransformer,
                 columnBuilder,
                 assistedQueryColumnProvider,
-                operandSupport,
-                separateTableExistsConditionBuilder
+                operandSupport
         );
         this.sqlLikeConditionRewriter = new SqlLikeConditionRewriter(
                 valueTransformer,
@@ -278,8 +277,9 @@ final class SqlConditionRewriter {
         }
         EncryptColumnRule rule = resolution.rule();
         if (rule.isStoredInSeparateTable()) {
+            expression.setLeftExpression(columnBuilder.apply(resolution.column(), rule.column()));
             context.markChanged();
-            return separateTableExistsConditionBuilder.buildPresenceCondition(resolution.column(), rule, expression.isNot());
+            return expression;
         }
         expression.setLeftExpression(columnBuilder.apply(resolution.column(), rule.storageColumn()));
         context.markChanged();

@@ -40,7 +40,7 @@
 - `SqlRewriteEngine` 基于 JSqlParser 解析 `INSERT/UPDATE/DELETE/SELECT`。
 - 对主加密列保持原列名，仅替换参数值为密文。
 - 对 `assistedQueryColumn` / `likeQueryColumn` 自动补充插入列、更新列并改写 WHERE 条件。
-- 对独立加密表字段，查询条件改写为 `EXISTS` 子查询，主表逻辑列写入 `assistedQueryColumn` 对应的 hash 引用值。
+- 对独立加密表字段，等值、非等值、`IN`、`IS NULL`、`IS NOT NULL` 以及无 `likeQueryColumn` 时退化出的等值 `LIKE`，都优先改写为主表逻辑列上的 hash/ref 直接比较；只有真正需要模糊匹配的 `LIKE` 才保留 `EXISTS` 子查询语义，主表逻辑列写入 `assistedQueryColumn` 对应的 hash 引用值。
 - 对插件内部新生成的标识符，按配置的 `sqlDialect` 输出对应转义风格，当前支持 MySQL、OceanBase、达梦、Oracle12、ClickHouse。
 - 对排序、范围比较等不可安全支持的操作主动失败，避免出现“看似成功但结果错误”的情况。
 

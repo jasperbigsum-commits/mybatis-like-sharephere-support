@@ -1136,7 +1136,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("UNION"));
         assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
         assertTrue(result.sql().contains("u.`phone_like` LIKE ?") || result.sql().contains("u.phone_like LIKE ?"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`") || result.sql().contains("user_id_card_encrypt"));
         assertEquals(6, result.maskedParameters().size());
@@ -1510,11 +1510,38 @@ class SqlRewriteEngineTest {
         System.out.println("EQUALITY SQL => " + result.sql());
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("EXISTS"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("EXISTS"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableJoinedNotEqualsEmptyLiteralToMainReferenceHashPredicate() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id, o.id FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.id_card <> ''",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(result.changed());
+        assertFalse(result.sql().contains("EXISTS"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` <> '" + expectedHash + "'")
+                || result.sql().contains("u.id_card <> '" + expectedHash + "'")
+                || result.sql().contains("u.`id_card` != '" + expectedHash + "'")
+                || result.sql().contains("u.id_card != '" + expectedHash + "'"));
     }
 
     /**
@@ -1645,12 +1672,10 @@ class SqlRewriteEngineTest {
         );
 
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
-        System.out.println("IS NULL SQL => " + result.sql());
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("NOT EXISTS"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
+        assertFalse(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("u.`id_card` IS NULL") || result.sql().contains("u.id_card IS NULL"));
     }
 
     /**
@@ -1675,8 +1700,8 @@ class SqlRewriteEngineTest {
         );
         RewriteResult isNullResult = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), isNullSql);
         assertTrue(isNullResult.changed());
-        assertTrue(isNullResult.sql().contains("NOT EXISTS"));
-        assertTrue(isNullResult.sql().contains("`user_id_card_encrypt`"));
+        assertFalse(isNullResult.sql().contains("EXISTS"));
+        assertTrue(isNullResult.sql().contains("u.`id_card` IS NULL") || isNullResult.sql().contains("u.id_card IS NULL"));
 
         BoundSql isNotNullSql = new BoundSql(
                 configuration,
@@ -1686,8 +1711,8 @@ class SqlRewriteEngineTest {
         );
         RewriteResult isNotNullResult = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), isNotNullSql);
         assertTrue(isNotNullResult.changed());
-        assertTrue(isNotNullResult.sql().contains("EXISTS"));
-        assertFalse(isNotNullResult.sql().contains("NOT EXISTS"));
+        assertFalse(isNotNullResult.sql().contains("EXISTS"));
+        assertTrue(isNotNullResult.sql().contains("u.`id_card` IS NOT NULL") || isNotNullResult.sql().contains("u.id_card IS NOT NULL"));
     }
 
     /**
@@ -1718,11 +1743,10 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
         assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
+        assertTrue(result.sql().contains("`user_id_card_encrypt`") || result.sql().contains("user_id_card_encrypt"));
         assertEquals(4, result.maskedParameters().size());
     }
 
@@ -1750,11 +1774,9 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("EXISTS"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("EXISTS"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertEquals(1, result.maskedParameters().size());
     }
 
@@ -1814,10 +1836,8 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("NOT EXISTS"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
+        assertFalse(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("u.`id_card` IS NULL") || result.sql().contains("u.id_card IS NULL"));
     }
 
     /**
@@ -1844,13 +1864,10 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().contains("EXISTS"));
-        assertTrue(result.sql().contains("NOT EXISTS"));
+        assertTrue(result.sql().contains("u.`id_card` IS NULL") || result.sql().contains("u.id_card IS NULL"));
         assertTrue(result.sql().contains("OR"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertEquals(1, result.maskedParameters().size());
     }
 
@@ -1885,9 +1902,7 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("OR"));
         assertTrue(result.sql().contains("`user_id_card_encrypt`"));
         assertTrue(result.sql().contains("`id_card_like` LIKE ?") || result.sql().contains("id_card_like LIKE ?"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertEquals(3, result.maskedParameters().size());
     }
 
@@ -1917,10 +1932,8 @@ class SqlRewriteEngineTest {
 
         assertTrue(result.changed());
         assertTrue(result.sql().contains("WHERE EXISTS (SELECT 1 FROM user_account u"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = u.`id_card`") || result.sql().contains("`id_card_hash` = `id_card`")
-                || result.sql().contains("id_card_hash = u.id_card") || result.sql().contains("id_card_hash = id_card"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         assertEquals(1, result.maskedParameters().size());
     }
 
@@ -1954,8 +1967,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("? AS marker") || result.sql().contains("? marker"));
         assertTrue(result.sql().contains("u.name"));
         assertTrue(result.sql().contains("u.`phone_cipher` AS phone") || result.sql().contains("u.`phone_cipher` phone"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         result.applyTo(boundSql);
         assertEquals(2, boundSql.getParameterMappings().size());
         assertEquals("marker", boundSql.getParameterMappings().get(0).getProperty());
@@ -1993,8 +2006,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("? AS marker1") || result.sql().contains("? marker1"));
         assertTrue(result.sql().contains("? AS marker2") || result.sql().contains("? marker2"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("u.id_card = ?"));
         result.applyTo(boundSql);
         assertEquals(3, boundSql.getParameterMappings().size());
         assertEquals("marker1", boundSql.getParameterMappings().get(0).getProperty());
@@ -2178,8 +2191,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.sql().contains("`phone_masked` = ?") || result.sql().contains("phone_masked = ?"));
         assertTrue(result.sql().contains("`id_card` = ?") || result.sql().contains("id_card = ?"));
         assertTrue(result.sql().contains("WHERE `phone_hash` = ?") || result.sql().contains("WHERE phone_hash = ?"));
-        assertTrue(result.sql().contains("EXISTS"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("EXISTS"));
+        assertTrue(result.sql().contains("AND `id_card` = ?") || result.sql().contains("AND id_card = ?"));
         result.applyTo(boundSql);
         assertEquals(7, boundSql.getParameterMappings().size());
     }
@@ -2274,9 +2287,9 @@ class SqlRewriteEngineTest {
 
         assertTrue(result.changed());
         assertTrue(result.sql().contains("`phone_hash` = ?"));
-        assertTrue(result.sql().contains("EXISTS"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?") || result.sql().contains("id_card_hash = ?"));
+        assertFalse(result.sql().contains("EXISTS"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("`id_card` = ?") || result.sql().contains("id_card = ?"));
         assertEquals(2, result.maskedParameters().size());
     }
 
@@ -3111,8 +3124,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("u.\"phone_cipher\" AS phone") || result.sql().contains("u.\"phone_cipher\" phone"));
         assertTrue(result.sql().contains("u.\"phone_hash\" = ?") || result.sql().contains("\"phone_hash\" = ?"));
-        assertTrue(result.sql().contains("\"user_id_card_encrypt\""));
-        assertTrue(result.sql().contains("\"id_card_hash\" = ?"));
+        assertFalse(result.sql().contains("\"user_id_card_encrypt\""));
+        assertTrue(result.sql().contains("u.\"id_card\" = ?") || result.sql().contains("\"id_card\" = ?"));
         result.applyTo(boundSql);
         assertEquals(2, boundSql.getParameterMappings().size());
         assertTrue(boundSql.getParameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
@@ -3149,8 +3162,8 @@ class SqlRewriteEngineTest {
         assertTrue(result.changed());
         assertTrue(result.sql().contains("u.`phone_cipher` AS phone") || result.sql().contains("u.`phone_cipher` phone"));
         assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("`phone_hash` = ?"));
-        assertTrue(result.sql().contains("`user_id_card_encrypt`"));
-        assertTrue(result.sql().contains("`id_card_hash` = ?"));
+        assertFalse(result.sql().contains("`user_id_card_encrypt`"));
+        assertTrue(result.sql().contains("u.`id_card` = ?") || result.sql().contains("`id_card` = ?"));
         result.applyTo(boundSql);
         assertEquals(2, boundSql.getParameterMappings().size());
         assertTrue(boundSql.getParameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));

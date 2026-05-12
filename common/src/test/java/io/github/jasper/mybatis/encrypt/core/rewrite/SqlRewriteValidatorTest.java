@@ -39,8 +39,26 @@ class SqlRewriteValidatorTest {
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
      */
     @Test
-    void shouldRejectAggregateOnEncryptedField() throws Exception {
+    void shouldAllowMaxAggregateOnEncryptedFieldWithAssistedColumn() throws Exception {
         PlainSelect plainSelect = parsePlainSelect("SELECT MAX(phone) FROM user_account");
+
+        assertDoesNotThrow(() -> validator.validateSelect(plainSelect, tableContext()));
+    }
+
+    @Test
+    void shouldAllowFirstAggregateOnSeparateTableReferenceField() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT FIRST(id_card) FROM user_account");
+
+        assertDoesNotThrow(() -> validator.validateSelect(plainSelect, tableContextWithSeparateTableField()));
+    }
+
+    /**
+     * 测试目的：验证 HAVING 中若对加密字段执行聚合函数，仍会按聚合禁用规则快速失败。
+     * 测试场景：模拟统计 SQL 在 HAVING 中写入 SUM(phone) 这类依赖明文值的聚合判断，断言错误码保持为不支持加密聚合。
+     */
+    @Test
+    void shouldRejectAggregateOnEncryptedFieldInHaving() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT COUNT(*) FROM user_account HAVING SUM(phone) > 0");
 
         UnsupportedEncryptedOperationException exception = assertThrows(
                 UnsupportedEncryptedOperationException.class,
@@ -51,13 +69,9 @@ class SqlRewriteValidatorTest {
         assertTrue(exception.getMessage().contains("Aggregate"));
     }
 
-    /**
-     * 测试目的：验证 HAVING 中若对加密字段执行聚合函数，仍会按聚合禁用规则快速失败。
-     * 测试场景：模拟统计 SQL 在 HAVING 中写入 SUM(phone) 这类依赖明文值的聚合判断，断言错误码保持为不支持加密聚合。
-     */
     @Test
-    void shouldRejectAggregateOnEncryptedFieldInHaving() throws Exception {
-        PlainSelect plainSelect = parsePlainSelect("SELECT COUNT(*) FROM user_account HAVING SUM(phone) > 0");
+    void shouldRejectMaxAggregateOnEncryptedFieldInHaving() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT COUNT(*) FROM user_account HAVING MAX(phone) IS NOT NULL");
 
         UnsupportedEncryptedOperationException exception = assertThrows(
                 UnsupportedEncryptedOperationException.class,

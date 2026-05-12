@@ -392,7 +392,7 @@ public class SqlRewriteEngine {
     @SuppressWarnings({"rawtypes", "unchecked"})
     private boolean rewriteAggregateFunction(Function function, SqlTableContext tableContext) {
         boolean changed = false;
-        if (isCountAggregate(function) && function.getParameters() != null) {
+        if (isRewriteableTechnicalAggregate(function) && function.getParameters() != null) {
             ExpressionList parameters = function.getParameters();
             for (int index = 0; index < parameters.size(); index++) {
                 Object item = parameters.get(index);
@@ -400,7 +400,7 @@ public class SqlRewriteEngine {
                     continue;
                 }
                 Expression expression = (Expression) item;
-                Expression rewritten = rewriteCountAggregateOperand(expression, tableContext);
+                Expression rewritten = rewriteAggregateOperand(function, expression, tableContext);
                 if (rewritten != expression) {
                     parameters.set(index, rewritten);
                     changed = true;
@@ -419,10 +419,10 @@ public class SqlRewriteEngine {
         return changed;
     }
 
-    private Expression rewriteCountAggregateOperand(Expression expression, SqlTableContext tableContext) {
+    private Expression rewriteAggregateOperand(Function function, Expression expression, SqlTableContext tableContext) {
         if (expression instanceof Parenthesis) {
             Parenthesis parenthesis = (Parenthesis) expression;
-            Expression rewritten = rewriteCountAggregateOperand(parenthesis.getExpression(), tableContext);
+            Expression rewritten = rewriteAggregateOperand(function, parenthesis.getExpression(), tableContext);
             if (rewritten != parenthesis.getExpression()) {
                 parenthesis.setExpression(rewritten);
             }
@@ -432,8 +432,15 @@ public class SqlRewriteEngine {
         if (resolution == null) {
             return expression;
         }
+        if (isSupportedTechnicalAggregate(function)) {
+            warnEncryptedTechnicalAggregate(function, resolution.rule());
+        }
         if (resolution.rule().isStoredInSeparateTable()) {
             return expression;
+        }
+        if (isSupportedTechnicalAggregate(function)) {
+            requireAssistedQueryColumn(resolution.rule(), aggregateScenario(function));
+            return buildColumn(resolution.column(), resolution.rule().storageColumn());
         }
         return buildColumn(resolution.column(), requireAssistedQueryColumn(resolution.rule(), "COUNT aggregate"));
     }
@@ -441,6 +448,34 @@ public class SqlRewriteEngine {
     private boolean isCountAggregate(Function function) {
         String name = function.getName();
         return name != null && "COUNT".equals(name.toUpperCase(java.util.Locale.ROOT));
+    }
+
+    private boolean isRewriteableTechnicalAggregate(Function function) {
+        return isCountAggregate(function) || isSupportedTechnicalAggregate(function);
+    }
+
+    private boolean isSupportedTechnicalAggregate(Function function) {
+        String name = function.getName();
+        if (name == null) {
+            return false;
+        }
+        String upperName = name.toUpperCase(java.util.Locale.ROOT);
+        return "MAX".equals(upperName) || "FIRST".equals(upperName);
+    }
+
+    private String aggregateScenario(Function function) {
+        String name = function.getName();
+        return (name == null ? "aggregate" : name.toUpperCase(java.util.Locale.ROOT) + " aggregate");
+    }
+
+    private void warnEncryptedTechnicalAggregate(Function function, EncryptColumnRule rule) {
+        if (!log.isWarnEnabled()) {
+            return;
+        }
+        log.warn("{} on encrypted field [{}] is allowed for technical aggregation only; same-table fields use "
+                        + "ciphertext values and separate-table fields use reference values, so the result may not match "
+                        + "plaintext business semantics.",
+                function.getName(), rule.property());
     }
 
     private boolean rewriteWindowPartitionExpressions(PlainSelect plainSelect, SqlTableContext tableContext) {

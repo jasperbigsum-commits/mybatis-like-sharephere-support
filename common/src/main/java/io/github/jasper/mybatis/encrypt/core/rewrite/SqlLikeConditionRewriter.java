@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
+import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
@@ -46,6 +47,9 @@ final class SqlLikeConditionRewriter {
         if (rule.isStoredInSeparateTable() && canRewriteSeparateTableExactLike(expression, rule, assistedCandidate)) {
             context.markChanged();
             return buildDirectAssistedPredicate(resolution, rule, queryOperand, assistedCandidate.value(), context);
+        }
+        if (!rule.hasLikeQueryColumn()) {
+            return rewriteLikeWithoutLikeColumn(expression, resolution, rule, queryOperand, assistedCandidate, context);
         }
         Expression likeValueExpression = operandSupport.buildComposableQueryExpression(queryOperand, context,
                 valueTransformer.transformLike(rule, queryOperand.value()), MaskingMode.MASKED);
@@ -175,5 +179,29 @@ final class SqlLikeConditionRewriter {
         private boolean exact() {
             return exact;
         }
+    }
+
+    private Expression rewriteLikeWithoutLikeColumn(LikeExpression expression,
+                                                    ColumnResolution resolution,
+                                                    EncryptColumnRule rule,
+                                                    QueryOperand queryOperand,
+                                                    AssistedCandidate assistedCandidate,
+                                                    SqlRewriteContext context) {
+        String assistedValue = assistedCandidate == null ? String.valueOf(queryOperand.value()) : assistedCandidate.value();
+        if (expression.isNot()) {
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN,
+                    "Encrypted NOT LIKE query requires likeQueryColumn.");
+        }
+        Expression assistedExpression = operandSupport.buildComposableQueryExpression(queryOperand, context,
+                valueTransformer.transformAssisted(rule, assistedValue), MaskingMode.HASH);
+        context.markChanged();
+        if (rule.isStoredInSeparateTable()) {
+            return separateTableExistsConditionBuilder.buildEqualityPredicate(
+                    columnBuilder.apply(resolution.column(), rule.column()), assistedExpression);
+        }
+        return separateTableExistsConditionBuilder.buildEqualityPredicate(
+                columnBuilder.apply(resolution.column(),
+                        assistedQueryColumnProvider.apply(rule, "LIKE query fallback")),
+                assistedExpression);
     }
 }

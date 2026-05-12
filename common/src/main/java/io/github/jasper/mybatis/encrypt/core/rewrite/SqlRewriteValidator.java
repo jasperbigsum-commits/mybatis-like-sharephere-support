@@ -12,6 +12,7 @@ import net.sf.jsqlparser.expression.NotExpression;
 import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.expression.WindowDefinition;
+import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.Distinct;
@@ -59,14 +60,14 @@ final class SqlRewriteValidator {
                                               SqlTableContext tableContext) {
         if (selectItems != null) {
             for (SelectItem<?> item : selectItems) {
-                if (containsUnsupportedAggregate(item.getExpression(), tableContext)) {
+                if (containsUnsupportedAggregate(item.getExpression(), tableContext, true)) {
                     throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION,
                             "Aggregate function is not supported on encrypted fields.");
                 }
             }
         }
-        if (containsUnsupportedAggregate(having, tableContext)
-                || containsUnsupportedAggregate(qualify, tableContext)) {
+        if (containsUnsupportedAggregate(having, tableContext, false)
+                || containsUnsupportedAggregate(qualify, tableContext, false)) {
             throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_AGGREGATION,
                     "Aggregate function is not supported on encrypted fields.");
         }
@@ -300,7 +301,9 @@ final class SqlRewriteValidator {
                 .equals(io.github.jasper.mybatis.encrypt.util.NameUtils.normalizeIdentifier(rule.column()));
     }
 
-    private boolean containsUnsupportedAggregate(Expression expression, SqlTableContext tableContext) {
+    private boolean containsUnsupportedAggregate(Expression expression,
+                                                 SqlTableContext tableContext,
+                                                 boolean allowTechnicalAggregates) {
         if (expression == null) {
             return false;
         }
@@ -312,11 +315,11 @@ final class SqlRewriteValidator {
                 }
                 if (function.getParameters() != null) {
                     for (Expression item : function.getParameters()) {
-                        if (isAllowedAggregateOperand(function, item, tableContext)) {
+                        if (isAllowedAggregateOperand(function, item, tableContext, allowTechnicalAggregates)) {
                             continue;
                         }
                         if (containsEncryptedReference(item, tableContext)
-                                || containsUnsupportedAggregate(item, tableContext)) {
+                                || containsUnsupportedAggregate(item, tableContext, allowTechnicalAggregates)) {
                             return true;
                         }
                     }
@@ -325,7 +328,7 @@ final class SqlRewriteValidator {
             }
             if (function.getParameters() != null) {
                 for (Expression item : function.getParameters()) {
-                    if (containsUnsupportedAggregate(item, tableContext)) {
+                    if (containsUnsupportedAggregate(item, tableContext, allowTechnicalAggregates)) {
                         return true;
                     }
                 }
@@ -334,34 +337,44 @@ final class SqlRewriteValidator {
         }
         if (expression instanceof BinaryExpression) {
             BinaryExpression binaryExpression = (BinaryExpression) expression;
-            return containsUnsupportedAggregate(binaryExpression.getLeftExpression(), tableContext)
-                    || containsUnsupportedAggregate(binaryExpression.getRightExpression(), tableContext);
+            return containsUnsupportedAggregate(binaryExpression.getLeftExpression(), tableContext, allowTechnicalAggregates)
+                    || containsUnsupportedAggregate(binaryExpression.getRightExpression(), tableContext,
+                    allowTechnicalAggregates);
         }
         if (expression instanceof Parenthesis) {
-            return containsUnsupportedAggregate(((Parenthesis) expression).getExpression(), tableContext);
+            return containsUnsupportedAggregate(((Parenthesis) expression).getExpression(), tableContext,
+                    allowTechnicalAggregates);
         }
         if (expression instanceof ParenthesedExpressionList) {
             ParenthesedExpressionList<?> parenthesed = (ParenthesedExpressionList<?>) expression;
             for (Expression item : parenthesed) {
-                if (containsUnsupportedAggregate(item, tableContext)) {
+                if (containsUnsupportedAggregate(item, tableContext, allowTechnicalAggregates)) {
                     return true;
                 }
             }
             return false;
         }
         if (expression instanceof NotExpression) {
-            return containsUnsupportedAggregate(((NotExpression) expression).getExpression(), tableContext);
+            return containsUnsupportedAggregate(((NotExpression) expression).getExpression(), tableContext,
+                    allowTechnicalAggregates);
+        }
+        if (expression instanceof IsNullExpression) {
+            return containsUnsupportedAggregate(((IsNullExpression) expression).getLeftExpression(), tableContext,
+                    allowTechnicalAggregates);
         }
         if (expression instanceof CaseExpression) {
             CaseExpression caseExpression = (CaseExpression) expression;
-            if (containsUnsupportedAggregate(caseExpression.getSwitchExpression(), tableContext)
-                    || containsUnsupportedAggregate(caseExpression.getElseExpression(), tableContext)) {
+            if (containsUnsupportedAggregate(caseExpression.getSwitchExpression(), tableContext, allowTechnicalAggregates)
+                    || containsUnsupportedAggregate(caseExpression.getElseExpression(), tableContext,
+                    allowTechnicalAggregates)) {
                 return true;
             }
             if (caseExpression.getWhenClauses() != null) {
                 for (WhenClause whenClause : caseExpression.getWhenClauses()) {
-                    if (containsUnsupportedAggregate(whenClause.getWhenExpression(), tableContext)
-                            || containsUnsupportedAggregate(whenClause.getThenExpression(), tableContext)) {
+                    if (containsUnsupportedAggregate(whenClause.getWhenExpression(), tableContext,
+                            allowTechnicalAggregates)
+                            || containsUnsupportedAggregate(whenClause.getThenExpression(), tableContext,
+                            allowTechnicalAggregates)) {
                         return true;
                     }
                 }
@@ -370,17 +383,21 @@ final class SqlRewriteValidator {
         }
         if (expression instanceof AnalyticExpression) {
             AnalyticExpression analyticExpression = (AnalyticExpression) expression;
-            return containsUnsupportedAggregate(analyticExpression.getExpression(), tableContext)
-                    || containsUnsupportedAggregate(analyticExpression.getFilterExpression(), tableContext)
-                    || containsUnsupportedAggregate(analyticExpression.getOffset(), tableContext)
-                    || containsUnsupportedAggregate(analyticExpression.getDefaultValue(), tableContext);
+            return containsUnsupportedAggregate(analyticExpression.getExpression(), tableContext,
+                    allowTechnicalAggregates)
+                    || containsUnsupportedAggregate(analyticExpression.getFilterExpression(), tableContext,
+                    allowTechnicalAggregates)
+                    || containsUnsupportedAggregate(analyticExpression.getOffset(), tableContext,
+                    allowTechnicalAggregates)
+                    || containsUnsupportedAggregate(analyticExpression.getDefaultValue(), tableContext,
+                    allowTechnicalAggregates);
         }
         if (expression instanceof Select) {
             Select select = (Select) expression;
             if (select instanceof PlainSelect) {
                 PlainSelect plainSelect = (PlainSelect) select;
-                return containsUnsupportedAggregate(plainSelect.getHaving(), tableContext)
-                        || containsUnsupportedAggregate(plainSelect.getQualify(), tableContext);
+                return containsUnsupportedAggregate(plainSelect.getHaving(), tableContext, false)
+                        || containsUnsupportedAggregate(plainSelect.getQualify(), tableContext, false);
             }
             return false;
         }
@@ -389,8 +406,9 @@ final class SqlRewriteValidator {
 
     private boolean isAllowedAggregateOperand(Function function,
                                               Expression expression,
-                                              SqlTableContext tableContext) {
-        if (!isCountAggregate(function)) {
+                                              SqlTableContext tableContext,
+                                              boolean allowTechnicalAggregates) {
+        if (!isCountAggregate(function) && !(allowTechnicalAggregates && isSupportedTechnicalAggregate(function))) {
             return false;
         }
         EncryptColumnRule rule = resolveEncryptedRule(unwrapParenthesis(expression), tableContext);
@@ -416,6 +434,15 @@ final class SqlRewriteValidator {
         return name != null && "COUNT".equals(name.toUpperCase(Locale.ROOT));
     }
 
+    private boolean isSupportedTechnicalAggregate(Function function) {
+        String name = function.getName();
+        if (name == null) {
+            return false;
+        }
+        String upperName = name.toUpperCase(Locale.ROOT);
+        return "MAX".equals(upperName) || "FIRST".equals(upperName);
+    }
+
     private boolean isAggregateFunction(Function function) {
         String name = function.getName();
         if (name == null) {
@@ -427,6 +454,7 @@ final class SqlRewriteValidator {
                 || "AVG".equals(upperName)
                 || "MIN".equals(upperName)
                 || "MAX".equals(upperName)
+                || "FIRST".equals(upperName)
                 || "LISTAGG".equals(upperName)
                 || "STRING_AGG".equals(upperName)
                 || "GROUP_CONCAT".equals(upperName)

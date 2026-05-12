@@ -226,12 +226,13 @@ Main supported categories:
 - `SELECT`
 - equality lookup
 - `IN`
-- `LIKE`
+- `LIKE` (`likeQueryColumn` for fuzzy matching; exact assisted/hash fallback when only `assistedQueryColumn` exists)
+- top-level `MAX` / `FIRST` on encrypted fields with technical-value warning behavior
 
 Intentional fail-fast categories:
 
 - encrypted-field `ORDER BY`
 - range predicates
-- `GROUP BY`, `DISTINCT`, aggregates, and windows on encrypted fields
+- unsafe `GROUP BY`, `DISTINCT`, aggregates, and windows on encrypted fields
 
 See [SQL Support Matrix](sql-support-matrix.md) for the full matrix.

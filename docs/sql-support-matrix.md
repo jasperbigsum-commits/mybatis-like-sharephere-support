@@ -31,8 +31,10 @@ through real MyBatis execution tests.
 | Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm, including aliased and parenthesized column references. |
 | `JOIN ... ON` predicates | Supported | Runs encrypted predicates through the same rewrite pipeline as `WHERE`, including nested `EXISTS` subqueries and separate-table encrypted-column equality. |
 | `LIKE` | Supported | Requires `likeQueryColumn`. |
+| `LIKE` without `likeQueryColumn` | Supported as equality fallback | If `assistedQueryColumn` is configured, the condition is rewritten as assisted/hash equality. This is exact-match fallback only, not fuzzy matching. |
 | `COUNT(encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields rewrite to `assistedQueryColumn`; separate-table fields count the main-table reference column. |
 | `COUNT(DISTINCT encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields use `assistedQueryColumn`; separate-table fields use the main-table reference column. |
+| Top-level `MAX(encrypted_column)` / `FIRST(encrypted_column)` | Supported with warning | Same-table fields require `assistedQueryColumn` as an explicit opt-in and aggregate the ciphertext column so the result can be decrypted; separate-table fields aggregate the main-table reference value and are hydrated after read. Results reflect technical values, not plaintext ordering semantics. |
 | `IN (?, ?, ?)` | Supported | Uses assisted query column when available, otherwise `storageColumn`. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
 | `NOT IN` | Supported | Uses the same rewrite path as `IN`, preserving `NOT`. |
@@ -57,7 +59,7 @@ Use these examples as low-cost templates during mapper review.
 | exact lookup by phone | `where phone = #{phone}` | rewritten to `assistedQueryColumn` when configured |
 | compare two encrypted fields | `where phone = backup_phone` | rewritten to assisted columns or separate-table reference columns |
 | lookup by multiple IDs / phones | `where phone in (...)` | each value can be transformed through the same helper path |
-| fuzzy lookup | `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm` |
+| fuzzy lookup | `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm`; without `likeQueryColumn`, only assisted/hash exact fallback is available |
 | return decrypted entity | `select id, phone from user_account` | logical projection can be mapped back to the entity property |
 | return flat DTO | explicit aliases plus `@EncryptResultHint` | keeps projected source columns traceable |
 | return only masked display value | select `maskedColumn` directly | avoids unnecessary decrypt-then-mask work |
@@ -68,7 +70,7 @@ Avoid these if the field is encrypted:
 | --- | --- | --- |
 | sort by encrypted field | `order by phone` | sort by a non-sensitive business column |
 | range query | `where phone > ?` / `between` | redesign query or add a safe business index field |
-| aggregate encrypted value | `max(phone)` / `count(distinct phone)` | aggregate on non-sensitive semantics |
+| aggregate encrypted value | `sum(phone)` / `avg(phone)` / expression aggregates | aggregate on non-sensitive semantics |
 | derive encrypted expression | `substr(phone, 1, 3)` | query plaintext in trusted code path or use stored masked values |
 | bare wildcard in multi-table query | `select * from a join b ...` / `select phone, * from a join b ...` | use `a.*`, `b.*`, or explicit columns instead of bare `*` |
 
@@ -81,7 +83,7 @@ Avoid these if the field is encrypted:
 | Range predicates `>`, `>=`, `<`, `<=`, `BETWEEN` | Rejected | The current algorithms do not preserve order semantics. |
 | `SELECT DISTINCT encrypted_column` | Rejected | Returning distinct ciphertext/helper values is not equivalent to returning distinct business plaintext. |
 | `ORDER BY encrypted_column` | Supported with assisted/hash column | Requires `assistedQueryColumn`; same-table fields sort by the assisted/hash column, separate-table fields sort by the main-table reference column, and a warning is logged because the order reflects technical values rather than plaintext semantics. |
-| Aggregate functions on encrypted fields except supported `COUNT` variants | Rejected | `SUM(phone)`, `MAX(phone)`, `AVG(phone)`, `GROUP_CONCAT(phone)` and similar expressions are not semantically reliable. |
+| Aggregate functions on encrypted fields except supported `COUNT`, top-level `MAX`, and top-level `FIRST` variants | Rejected | `SUM(phone)`, `AVG(phone)`, `MIN(phone)`, `GROUP_CONCAT(phone)` and similar expressions are not semantically reliable. `MAX` and `FIRST` are only allowed in the outer select list with technical-value warning behavior. |
 | Window functions referencing encrypted fields | Rejected | `PARTITION BY`, analytic `ORDER BY`, filter expressions, and named windows fail fast when encrypted fields are involved. |
 | Separate-table encrypted field in `IN` subquery projection | Rejected | The plugin currently only supports same-table encrypted field comparison subqueries. |
 | Bare `*` in multi-table / derived query that contains encrypted table rules | Rejected | The plugin cannot safely decide which table the wildcard should expand from; use explicit `table.*` or `alias.*` to prevent encrypted alias projections from being covered by later wildcard columns. |

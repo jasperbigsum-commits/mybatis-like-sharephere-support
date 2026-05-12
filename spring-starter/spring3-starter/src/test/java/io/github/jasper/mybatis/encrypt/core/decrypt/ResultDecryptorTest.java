@@ -134,6 +134,19 @@ class ResultDecryptorTest {
         assertEquals("zoe", dto.getName());
     }
 
+    @Test
+    void shouldDecryptConfiguredDtoFromMaxAggregateProjectionAlias() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, configuredUserTableProperties());
+        PlainUserProjectionDto dto = new PlainUserProjectionDto();
+        dto.setPhone(sm4.encrypt("13500135002"));
+        MappedStatement mappedStatement = maxAggregateConfiguredDtoStatement();
+
+        decrypt(decryptor, mappedStatement, List.of(dto));
+
+        assertEquals("13500135002", dto.getPhone());
+    }
+
     /**
      * 测试目的：验证 Map 返回结果也能按 ResultMap 或 SQL 投影生成解密计划。
      * 测试场景：构造 Map 行数据和显式结果映射，断言密文字段按 key 写回为明文且普通字段不受影响。
@@ -401,6 +414,19 @@ class ResultDecryptorTest {
                 "select u.id, u.name, u.phone as phone from user_account u", List.of(), parameterObject);
         return new MappedStatement.Builder(configuration, "test.selectAutoMappedConfiguredDto", sqlSource,
                 SqlCommandType.SELECT)
+                .resultMaps(List.of(resultMap))
+                .build();
+    }
+
+    private MappedStatement maxAggregateConfiguredDtoStatement() {
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        ResultMap resultMap = new ResultMap.Builder(
+                configuration, "test.maxAggregateConfiguredDto", PlainUserProjectionDto.class, List.of()).build();
+        SqlSource sqlSource = parameterObject -> new BoundSql(configuration,
+                "select max(u.phone) as phone from user_account u", List.of(), parameterObject);
+        return new MappedStatement.Builder(configuration,
+                AutoDetectedMapper.class.getName() + ".selectPlainUserProjection", sqlSource, SqlCommandType.SELECT)
                 .resultMaps(List.of(resultMap))
                 .build();
     }

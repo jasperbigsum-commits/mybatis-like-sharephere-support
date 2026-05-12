@@ -178,6 +178,38 @@ class SqlRewriteEngineTest {
     }
 
     /**
+     * 测试目的：验证 where 中对加密字段使用空串不等过滤时，最终 SQL 会改写到辅助 hash 列并保留非等比较语义。
+     * 测试场景：构造 `WHERE phone <> ''` 查询，断言 rewrite 后不再引用逻辑明文字段，而是比较 phone_hash 与空串 hash。
+     */
+    @Test
+    void shouldRewriteNotEqualsEmptyLiteralToAssistedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id, phone FROM user_account WHERE phone <> ''",
+                List.<ParameterMapping>of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_cipher` AS phone") || result.sql().contains("`phone_cipher` phone"));
+        assertTrue(result.sql().contains("`phone_hash` <> '" + expectedHash + "'")
+                || result.sql().contains("`phone_hash` != '" + expectedHash + "'"));
+        assertFalse(result.sql().contains("phone <> ''"));
+        assertEquals(0, result.maskedParameters().size());
+    }
+
+    /**
      * 测试目的：验证 SQL 改写核心组件在当前语句结构下保持安全且确定的改写行为。
      * 测试场景：构造对应 SQL、加密规则和参数上下文，断言 AST 改写结果、参数绑定和安全边界。
      */
@@ -444,6 +476,38 @@ class SqlRewriteEngineTest {
                 || result.sql().contains("u.`phone_cipher` phone, u.*, o.id"));
         assertFalse(result.sql().contains("u.*, u.`phone_cipher` AS phone"));
         assertTrue(result.sql().contains("u.`phone_hash` = ?"));
+    }
+
+    /**
+     * 测试目的：验证联表查询中 where 对别名加密字段使用空串不等过滤时，最终 SQL 会改写到对应别名下的辅助 hash 列。
+     * 测试场景：构造 `user_account u join order_account o` 联表查询并使用 `u.phone <> ''`，断言投影和 where 都保持别名一致且不残留逻辑明文字段比较。
+     */
+    @Test
+    void shouldRewriteJoinAliasNotEqualsEmptyLiteralToAssistedColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id, u.phone, o.id FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone != ''",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_cipher` AS phone") || result.sql().contains("u.`phone_cipher` phone"));
+        assertTrue(result.sql().contains("u.`phone_hash` <> '" + expectedHash + "'")
+                || result.sql().contains("u.`phone_hash` != '" + expectedHash + "'"));
+        assertFalse(result.sql().contains("u.phone <> ''"));
+        assertEquals(0, result.maskedParameters().size());
     }
 
     /**
@@ -786,7 +850,7 @@ class SqlRewriteEngineTest {
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
      */
     @Test
-    void shouldFailLikeQueryWithoutLikeQueryColumn() {
+    void shouldDegradeLikeQueryToAssistedEqualityWithoutLikeQueryColumn() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = samplePropertiesWithoutPhoneLikeQueryColumn();
         SqlRewriteEngine engine = new SqlRewriteEngine(
@@ -802,16 +866,11 @@ class SqlRewriteEngineTest {
                 Map.of("phoneLike", "%1380%")
         );
 
-        UnsupportedEncryptedOperationException ex = assertThrows(
-                UnsupportedEncryptedOperationException.class,
-                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
-        );
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
-        assertEquals(EncryptionErrorCode.MISSING_LIKE_QUERY_COLUMN, ex.getErrorCode());
-        assertEquals(
-                "Encrypted LIKE query requires likeQueryColumn. property=phone, table=user_account, column=phone",
-                ex.getMessage()
-        );
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_hash` = ?") || result.sql().contains("phone_hash = ?"));
+        assertFalse(result.sql().contains("LIKE ?"));
     }
 
     /**
@@ -2824,6 +2883,52 @@ class SqlRewriteEngineTest {
         assertFalse(result.changed());
     }
 
+    @Test
+    void shouldRewriteMaxAggregateOnSameTableEncryptedFieldToCipherColumn() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT MAX(phone) AS phone FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("MAX(`phone_cipher`) AS phone")
+                || result.sql().contains("MAX(phone_cipher) AS phone"));
+    }
+
+    @Test
+    void shouldAllowFirstAggregateOnSeparateTableEncryptedReferenceField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT FIRST(id_card) AS id_card FROM user_account",
+                List.of(),
+                Map.of()
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertFalse(result.changed());
+    }
+
     /**
      * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
@@ -2840,7 +2945,7 @@ class SqlRewriteEngineTest {
 
         BoundSql countSql = new BoundSql(
                 configuration,
-                "SELECT MAX(phone) FROM user_account",
+                "SELECT MIN(phone) FROM user_account",
                 List.of(),
                 Map.of()
         );

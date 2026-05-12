@@ -7,6 +7,8 @@ import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -442,16 +444,16 @@ public final class QueryResultPlanFactory {
                     }
                     continue;
                 }
-                if (!(expression instanceof Column)) {
-                    continue;
-                }
                 String alias = item.getAlias() != null && StringUtils.isNotBlank(item.getAlias().getName())
                         ? item.getAlias().getName()
-                        : ((Column) expression).getColumnName();
-                if (alias.startsWith(HIDDEN_ASSISTED_PREFIX) || alias.startsWith(HIDDEN_LIKE_PREFIX)) {
+                        : projectedColumnLabel(expression);
+                if (alias != null && (alias.startsWith(HIDDEN_ASSISTED_PREFIX) || alias.startsWith(HIDDEN_LIKE_PREFIX))) {
                     continue;
                 }
-                Column column = (Column) expression;
+                Column column = projectedSourceColumn(expression);
+                if (column == null) {
+                    continue;
+                }
                 // 投影别名是 MyBatis 最终映射到属性的名称，优先级高于表达式里的物理列名。
                 EncryptColumnRule rule = tableContext.resolveProjected(column, alias).orElse(null);
                 if (rule == null) {
@@ -459,6 +461,37 @@ public final class QueryResultPlanFactory {
                 }
                 registerProjection(alias, rule);
             }
+        }
+
+        private String projectedColumnLabel(Expression expression) {
+            Column column = projectedSourceColumn(expression);
+            return column == null ? null : column.getColumnName();
+        }
+
+        private Column projectedSourceColumn(Expression expression) {
+            if (expression instanceof Column) {
+                return (Column) expression;
+            }
+            if (!(expression instanceof Function)) {
+                return null;
+            }
+            Function function = (Function) expression;
+            if (!isSupportedDecryptableAggregate(function) || function.isAllColumns()
+                    || function.getParameters() == null || function.getParameters().size() != 1) {
+                return null;
+            }
+            ExpressionList<?> parameters = function.getParameters();
+            Object item = parameters.get(0);
+            return item instanceof Column ? (Column) item : null;
+        }
+
+        private boolean isSupportedDecryptableAggregate(Function function) {
+            String name = function.getName();
+            if (name == null) {
+                return false;
+            }
+            String upperName = name.toUpperCase(Locale.ROOT);
+            return "MAX".equals(upperName) || "FIRST".equals(upperName);
         }
 
         private void registerProjection(String projectedColumn, EncryptColumnRule rule) {
@@ -535,10 +568,10 @@ public final class QueryResultPlanFactory {
                     }
                     continue;
                 }
-                if (!(expression instanceof Column)) {
+                Column column = projectedSourceColumn(expression);
+                if (column == null) {
                     continue;
                 }
-                Column column = (Column) expression;
                 String aliasName = item.getAlias() != null && StringUtils.isNotBlank(item.getAlias().getName())
                         ? item.getAlias().getName()
                         : column.getColumnName();

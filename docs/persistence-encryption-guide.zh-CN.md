@@ -308,13 +308,14 @@ UserAccount selectById(@Param("id") Long id);
 - `SELECT`
 - 等值查询
 - `IN`
-- `LIKE`
+- `LIKE`（配置 `likeQueryColumn` 时支持模糊查询；只有 `assistedQueryColumn` 时退化为精确 hash 等值查询）
+- 加密字段最外层 `MAX` / `FIRST`（按技术值执行并输出警告）
 
 当前明确 fail-fast：
 
 - `ORDER BY` 加密字段
 - 范围查询
-- `GROUP BY` / `DISTINCT` / 聚合 / 窗口函数中的加密字段
+- 不安全的 `GROUP BY` / `DISTINCT` / 聚合 / 窗口函数中的加密字段
 
 完整矩阵见 [SQL Support Matrix](sql-support-matrix.md)。
 

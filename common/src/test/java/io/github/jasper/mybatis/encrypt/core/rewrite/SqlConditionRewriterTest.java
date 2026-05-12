@@ -103,6 +103,58 @@ class SqlConditionRewriterTest {
     }
 
     /**
+     * 测试目的：验证 where 中对加密字段使用空串不等过滤时，也会按辅助 hash 列保持原有比较语义。
+     * 测试场景：模拟业务 SQL 用 `phone <> ''` 排除空手机号，断言改写后仍是非等比较，且不会残留明文空串列判断。
+     */
+    @Test
+    void shouldRewriteNotEqualsEmptyLiteralToAssistedLiteral() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone <> ''"),
+                tableContext,
+                rewriteContext("SELECT id FROM user_account WHERE phone <> ''",
+                        Collections.<ParameterMapping>emptyList(), Collections.emptyMap())
+        );
+
+        String rewrittenSql = rewritten.toString();
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(rewrittenSql.contains("`phone_hash` <> '" + expectedHash + "'")
+                || rewrittenSql.contains("`phone_hash` != '" + expectedHash + "'"));
+        assertFalse(rewrittenSql.contains("phone <> ''"));
+    }
+
+    /**
+     * 测试目的：验证联表查询下使用表别名引用加密字段做空串不等过滤时，仍会准确改写到对应别名下的辅助 hash 列。
+     * 测试场景：模拟 `user_account u join order_account o` 联表并在 where 中使用 `u.phone <> ''`，断言改写结果保留别名且不再残留逻辑明文字段。
+     */
+    @Test
+    void shouldRewriteJoinedAliasNotEqualsEmptyLiteralToAssistedLiteral() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = new SqlTableContext();
+        EncryptTableRule tableRule = new EncryptTableRule("user_account");
+        tableRule.addColumnRule(sameTableRule());
+        tableContext.register("user_account", "u", tableRule);
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT u.id FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone <> ''"),
+                tableContext,
+                rewriteContext(
+                        "SELECT u.id FROM user_account u JOIN order_account o ON u.id = o.user_id WHERE u.phone <> ''",
+                        Collections.<ParameterMapping>emptyList(),
+                        Collections.emptyMap()
+                )
+        );
+
+        String rewrittenSql = rewritten.toString();
+        String expectedHash = new Sm3AssistedQueryAlgorithm().transform("");
+        assertTrue(rewrittenSql.contains("u.`phone_hash` <> '" + expectedHash + "'")
+                || rewrittenSql.contains("u.`phone_hash` != '" + expectedHash + "'"));
+        assertFalse(rewrittenSql.contains("u.phone <> ''"));
+    }
+
+    /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。
      */
@@ -124,6 +176,23 @@ class SqlConditionRewriterTest {
                 new Sm3AssistedQueryAlgorithm().transform("13800138000"),
                 context.originalValue(1)
         );
+    }
+
+    @Test
+    void shouldDegradeLikeToAssistedEqualityWhenLikeColumnIsMissing() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
+        SqlTableContext tableContext = tableContext(sameTableRuleWithoutLikeColumn());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "%13800138000%"));
+
+        Expression rewritten = rewriter.rewrite(parseWhere("SELECT id FROM user_account WHERE phone LIKE ?"),
+                tableContext, context);
+
+        assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
+        assertFalse(rewritten.toString().contains("LIKE"));
+        assertEquals(1, context.parameterMappings().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
     }
 
     /**
@@ -506,6 +575,23 @@ class SqlConditionRewriterTest {
                 "phone_hash",
                 "sm3",
                 "phone_like",
+                "like",
+                FieldStorageMode.SAME_TABLE,
+                null,
+                "phone_cipher",
+                null
+        );
+    }
+
+    private EncryptColumnRule sameTableRuleWithoutLikeColumn() {
+        return new EncryptColumnRule(
+                "phone",
+                "user_account",
+                "phone",
+                "sm4",
+                "phone_hash",
+                "sm3",
+                null,
                 "like",
                 FieldStorageMode.SAME_TABLE,
                 null,

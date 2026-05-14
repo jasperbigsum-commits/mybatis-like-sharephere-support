@@ -8,6 +8,7 @@
 - 等值查询与 LIKE 查询辅助列
 - 查询结果自动解密
 - controller 边界响应脱敏
+- 基于 `SafeLog` 的日志脱敏扩展
 
 默认算法使用国密组合：
 
@@ -55,6 +56,26 @@
 - 想理解 `@SensitiveResponse`、`@SensitiveField`
 - 想区分数据库存储态脱敏、DTO 输出脱敏、自定义脱敏器和复用 `likeAlgorithm`
 - 需要注解属性说明、自定义脱敏器示例和策略选择表
+
+### 4. 日志脱敏扩展
+
+`logsafe` 是独立的日志安全扩展，不影响 SQL 改写、结果解密或 controller 脱敏。
+业务代码可以直接通过静态门面调用；Spring Boot starter 会把已注册算法和末端兜底能力接进来：
+
+- 主动脱敏入口：
+  - `SafeLog.of(obj)`：对对象日志做脱敏副本输出，不修改原对象
+  - `SafeLog.of(obj, hint)`：允许显式传入语义提示
+  - `SafeLog.kv(key, value)`：对 `password`、`token`、`phone`、`email`、`idCard`、`bankCard` 等常见日志键做兜底脱敏
+- 末端兜底 SPI：
+  - `LogsafeTextMasker`：用于第三方日志、异常消息、网关日志或异常上报 SDK
+  - Spring Boot 3 + Logback：检测到 Logback 时，会自动给现有 appender 挂载末端掩码 filter
+- 运行时上下文：
+  - `logsafe` MDC 上下文：对 Spring MVC 请求自动写入并清理 `traceId` / `requestId`
+  - `logsafe` 异步传播：通过 `TaskDecorator` 传播 MDC 到异步任务并在执行后恢复线程原状态
+
+该扩展复用现有 `@SensitiveField` 和已注册的 LIKE 脱敏算法，不改变原有 controller 边界响应脱敏行为。
+在非 Spring 场景下，`SafeLog` 仍会使用内置兜底规则做常见字段脱敏。
+Spring Boot 2 可以直接使用 `SafeLog` 和 `LogsafeTextMasker` 的通用 API；当前自动末端注入先支持 Spring Boot 3 的 Logback 场景，且可通过 `mybatis.encrypt.logsafe.terminal.enabled=false` 关闭。Log4j2、JUL、网关日志或异常上报 SDK 可在自定义适配器中显式调用 `LogsafeTextMasker`。
 
 ### 4. 存量迁移
 
@@ -109,6 +130,12 @@
   - 内置规则：`type + keepFirst + keepLast + maskChar`
   - 复用 LIKE 算法：`likeAlgorithm`
   - 自定义脱敏器 Bean：`masker + options`
+- 支持 `SafeLog` 日志脱敏扩展：
+  - 复用 `@SensitiveField`
+  - 复用已注册 LIKE 脱敏算法
+  - 对常见敏感日志键做字符串级兜底脱敏
+  - 提供 `LogsafeTextMasker` 作为输出端兜底 SPI
+  - 检测到 Logback 时自动注入 appender 末端 filter
 - 支持迁移模块、DDL 生成、checkpoint 恢复和确认策略
 
 ## 已知边界

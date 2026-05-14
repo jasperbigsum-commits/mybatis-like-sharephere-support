@@ -79,6 +79,100 @@ class DatabaseEncryptionInterceptorTest {
         assertEquals(4, executor.lastBoundSql.getParameterMappings().size());
     }
 
+    @Test
+    void shouldPreprocessWriteParametersBeforeResolvingBoundSql() throws Throwable {
+        Configuration configuration = new Configuration();
+        TestExecutor executor = new TestExecutor();
+        RecordingWriteParameterPreprocessor preprocessor = new RecordingWriteParameterPreprocessor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, null, preprocessor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.insertAuditedUser",
+                SqlCommandType.INSERT,
+                AuditedUser.class,
+                "insert into user_account (id, create_by, create_time, phone) values (?, ?, ?, ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "id", Long.class).build(),
+                        new ParameterMapping.Builder(configuration, "createBy", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "createTime", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "phone", String.class).build()
+                )
+        );
+        AuditedUser user = new AuditedUser();
+        user.setId(1L);
+        user.setPhone("13800138000");
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("update", MappedStatement.class, Object.class),
+                new Object[]{mappedStatement, user}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertEquals(1, preprocessor.calls);
+        assertEquals("jeecg-user", user.getCreateBy());
+        assertEquals("2026-05-12T10:00:00", user.getCreateTime());
+        assertTrue(executor.lastBoundSql.getSql().contains("create_by"));
+        assertEquals("jeecg-user", preprocessor.lastCreateBySeenDuringPreprocess);
+        assertEquals("2026-05-12T10:00:00", preprocessor.lastCreateTimeSeenDuringPreprocess);
+    }
+
+    @Test
+    void shouldNotPreprocessSelectQueries() throws Throwable {
+        Configuration configuration = new Configuration();
+        TestExecutor executor = new TestExecutor();
+        RecordingWriteParameterPreprocessor preprocessor = new RecordingWriteParameterPreprocessor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, null, preprocessor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.selectByPhone",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id from user_account where phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build())
+        );
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("query", MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class),
+                new Object[]{mappedStatement, Map.of("phone", "13800138000"), RowBounds.DEFAULT, null}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertEquals(0, preprocessor.calls);
+    }
+
+    @Test
+    void shouldNotPreprocessManagedSeparateTableStatements() throws Throwable {
+        Configuration configuration = new Configuration();
+        TestExecutor executor = new TestExecutor();
+        RecordingWriteParameterPreprocessor preprocessor = new RecordingWriteParameterPreprocessor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, null, preprocessor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "io.github.jasper.mybatis.encrypt.core.support.DefaultSeparateTableRowPersister.insert.user_id_card_encrypt.abc",
+                SqlCommandType.INSERT,
+                Map.class,
+                "insert into user_id_card_encrypt (id, id_card_cipher) values (?, ?)",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "id", Long.class).build(),
+                        new ParameterMapping.Builder(configuration, "idCardCipher", String.class).build()
+                )
+        );
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("update", MappedStatement.class, Object.class),
+                new Object[]{mappedStatement, Map.of("id", 1001L, "idCardCipher", "cipher-text")}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertEquals(0, preprocessor.calls);
+    }
+
     /**
      * 测试目的：验证 MyBatis 插件在 Executor 和 ResultSet 阶段的拦截顺序与职责边界。
      * 测试场景：模拟查询、更新和结果集处理调用，断言 SQL 改写、独立表预处理和结果解密只在正确阶段发生。
@@ -396,6 +490,12 @@ class DatabaseEncryptionInterceptorTest {
 
     private DatabaseEncryptionInterceptor interceptor(SeparateTableEncryptionManager manager,
                                                       ResultDecryptor customDecryptor) {
+        return interceptor(manager, customDecryptor, null);
+    }
+
+    private DatabaseEncryptionInterceptor interceptor(SeparateTableEncryptionManager manager,
+                                                      ResultDecryptor customDecryptor,
+                                                      WriteParameterPreprocessor writeParameterPreprocessor) {
         DatabaseEncryptionProperties properties = sampleProperties();
         EncryptMetadataRegistry metadataRegistry = new EncryptMetadataRegistry(
                 properties, new AnnotationEncryptMetadataLoader());
@@ -405,7 +505,7 @@ class DatabaseEncryptionInterceptorTest {
                 ? customDecryptor
                 : new ResultDecryptor(metadataRegistry, algorithmRegistry, manager);
         return new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties, manager,
-                metadataRegistry);
+                metadataRegistry, null, writeParameterPreprocessor);
     }
 
     private RecordingResultDecryptor recordingDecryptor() {
@@ -559,6 +659,29 @@ class DatabaseEncryptionInterceptorTest {
         }
     }
 
+    static class RecordingWriteParameterPreprocessor implements WriteParameterPreprocessor {
+
+        private int calls;
+        private String lastCreateBySeenDuringPreprocess;
+        private String lastCreateTimeSeenDuringPreprocess;
+
+        @Override
+        public void preprocess(MappedStatement mappedStatement, Object parameterObject) {
+            calls++;
+            if (parameterObject instanceof AuditedUser) {
+                AuditedUser user = (AuditedUser) parameterObject;
+                if (user.getCreateBy() == null) {
+                    user.setCreateBy("jeecg-user");
+                }
+                if (user.getCreateTime() == null) {
+                    user.setCreateTime("2026-05-12T10:00:00");
+                }
+                lastCreateBySeenDuringPreprocess = user.getCreateBy();
+                lastCreateTimeSeenDuringPreprocess = user.getCreateTime();
+            }
+        }
+    }
+
     static class RecordingResultDecryptor extends ResultDecryptor {
 
         private int resolvePlanCalls;
@@ -670,6 +793,46 @@ class DatabaseEncryptionInterceptorTest {
 
         @Override
         public void setExecutorWrapper(Executor executor) {
+        }
+    }
+
+    static class AuditedUser {
+
+        private Long id;
+        private String phone;
+        private String createBy;
+        private String createTime;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getCreateBy() {
+            return createBy;
+        }
+
+        public void setCreateBy(String createBy) {
+            this.createBy = createBy;
+        }
+
+        public String getCreateTime() {
+            return createTime;
+        }
+
+        public void setCreateTime(String createTime) {
+            this.createTime = createTime;
         }
     }
 

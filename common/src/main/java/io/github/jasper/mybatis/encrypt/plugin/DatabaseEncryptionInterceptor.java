@@ -5,20 +5,23 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.config.SqlDialectContextHolder;
 import io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
-import io.github.jasper.mybatis.encrypt.core.support.DataSourceNameResolver;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver;
 import io.github.jasper.mybatis.encrypt.core.rewrite.RewriteResult;
 import io.github.jasper.mybatis.encrypt.core.rewrite.SqlRewriteEngine;
+import io.github.jasper.mybatis.encrypt.core.support.DataSourceNameResolver;
 import io.github.jasper.mybatis.encrypt.core.support.DefaultSeparateTableRowPersister;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import org.apache.ibatis.cache.CacheKey;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.executor.resultset.ResultSetHandler;
 import org.apache.ibatis.mapping.*;
-import org.apache.ibatis.plugin.*;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Invocation;
+import org.apache.ibatis.plugin.Signature;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
 import org.apache.ibatis.reflection.property.PropertyTokenizer;
@@ -29,16 +32,18 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
 import java.sql.Statement;
-import java.util.Collection;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * MyBatis 插件入口。
+ * Main MyBatis plugin entry point for SQL rewrite and result decryption.
  *
- * <p>负责在 Executor 层完成写前准备与 SQL 改写，在 ResultSet 阶段完成结果回填与解密。</p>
+ * <p>The interceptor performs write-side preprocessing and SQL rewrite at the
+ * {@link Executor} layer, then applies separate-table hydration and decryption
+ * when {@link ResultSetHandler} returns query results.</p>
  */
 @Intercepts({
         @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
@@ -59,16 +64,62 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     private final SeparateTableEncryptionManager separateTableEncryptionManager;
     private final EncryptMetadataRegistry metadataRegistry;
     private final DataSourceNameResolver dataSourceNameResolver;
+    private final WriteParameterPreprocessor writeParameterPreprocessor;
 
     /**
-     * 创建 MyBatis 加密拦截器。
+     * Creates the interceptor with all supported collaborators.
      *
-     * @param sqlRewriteEngine SQL 改写引擎
-     * @param resultDecryptor 查询结果解密器
-     * @param properties 插件配置属性
-     * @param separateTableEncryptionManager 独立表加密管理器
-     * @param metadataRegistry 加密元数据注册中心
-     * @param dataSourceNameResolver 数据源名称解析器
+     * @param sqlRewriteEngine SQL rewrite engine
+     * @param resultDecryptor query result decryptor
+     * @param properties plugin properties
+     * @param separateTableEncryptionManager separate-table manager
+     * @param metadataRegistry encryption metadata registry
+     * @param dataSourceNameResolver data source name resolver
+     * @param writeParameterPreprocessor write-parameter preprocessor invoked before BoundSql creation
+     */
+    public DatabaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
+                                         ResultDecryptor resultDecryptor,
+                                         DatabaseEncryptionProperties properties,
+                                         SeparateTableEncryptionManager separateTableEncryptionManager,
+                                         EncryptMetadataRegistry metadataRegistry,
+                                         DataSourceNameResolver dataSourceNameResolver,
+                                         WriteParameterPreprocessor writeParameterPreprocessor) {
+        this.sqlRewriteEngine = sqlRewriteEngine;
+        this.resultDecryptor = resultDecryptor;
+        this.properties = properties;
+        this.separateTableEncryptionManager = separateTableEncryptionManager;
+        this.metadataRegistry = metadataRegistry;
+        this.dataSourceNameResolver = dataSourceNameResolver;
+        this.writeParameterPreprocessor = writeParameterPreprocessor;
+    }
+
+    /**
+     * Creates the interceptor without a data source resolver or write preprocessor.
+     *
+     * @param sqlRewriteEngine SQL rewrite engine
+     * @param resultDecryptor query result decryptor
+     * @param properties plugin properties
+     * @param separateTableEncryptionManager separate-table manager
+     * @param metadataRegistry encryption metadata registry
+     */
+    public DatabaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
+                                         ResultDecryptor resultDecryptor,
+                                         DatabaseEncryptionProperties properties,
+                                         SeparateTableEncryptionManager separateTableEncryptionManager,
+                                         EncryptMetadataRegistry metadataRegistry) {
+        this(sqlRewriteEngine, resultDecryptor, properties, separateTableEncryptionManager, metadataRegistry, null,
+                null);
+    }
+
+    /**
+     * Creates the interceptor without a write preprocessor.
+     *
+     * @param sqlRewriteEngine SQL rewrite engine
+     * @param resultDecryptor query result decryptor
+     * @param properties plugin properties
+     * @param separateTableEncryptionManager separate-table manager
+     * @param metadataRegistry encryption metadata registry
+     * @param dataSourceNameResolver data source name resolver
      */
     public DatabaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
                                          ResultDecryptor resultDecryptor,
@@ -76,29 +127,8 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
                                          SeparateTableEncryptionManager separateTableEncryptionManager,
                                          EncryptMetadataRegistry metadataRegistry,
                                          DataSourceNameResolver dataSourceNameResolver) {
-        this.sqlRewriteEngine = sqlRewriteEngine;
-        this.resultDecryptor = resultDecryptor;
-        this.properties = properties;
-        this.separateTableEncryptionManager = separateTableEncryptionManager;
-        this.metadataRegistry = metadataRegistry;
-        this.dataSourceNameResolver = dataSourceNameResolver;
-    }
-
-    /**
-     * 创建 MyBatis 加密拦截器。
-     *
-     * @param sqlRewriteEngine SQL 改写引擎
-     * @param resultDecryptor 查询结果解密器
-     * @param properties 插件配置属性
-     * @param separateTableEncryptionManager 独立表加密管理器
-     * @param metadataRegistry 加密元数据注册中心
-     */
-    public DatabaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,
-                                         ResultDecryptor resultDecryptor,
-                                         DatabaseEncryptionProperties properties,
-                                         SeparateTableEncryptionManager separateTableEncryptionManager,
-                                         EncryptMetadataRegistry metadataRegistry) {
-        this(sqlRewriteEngine, resultDecryptor, properties, separateTableEncryptionManager, metadataRegistry, null);
+        this(sqlRewriteEngine, resultDecryptor, properties, separateTableEncryptionManager, metadataRegistry,
+                dataSourceNameResolver, null);
     }
 
     @Override
@@ -114,15 +144,16 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 在 Executor 层统一处理写前准备和 SQL 改写。
+     * Handles write-side preprocessing and SQL rewrite at the executor layer.
      *
-     * <p>这里直接使用 MyBatis 公开方法参数中的 {@link MappedStatement}，避免再依赖
-     * {@code StatementHandler} 内部实现细节。对于六参 query 形态，优先复用调用链
-     * 已经创建好的 {@link BoundSql}，保持缓存键与执行 SQL 一致。</p>
+     * <p>The implementation uses public MyBatis method arguments instead of
+     * depending on {@code StatementHandler} internals. For the six-argument
+     * {@code query(...)} form it reuses the supplied {@link BoundSql} so the
+     * cache key and execution SQL stay aligned.</p>
      *
-     * @param invocation Executor 调用上下文
-     * @return 原始调用结果
-     * @throws Throwable 底层执行异常
+     * @param invocation executor invocation
+     * @return invocation result
+     * @throws Throwable executor failure
      */
     private Object interceptExecutor(Invocation invocation) throws Throwable {
         Object[] args = invocation.getArgs();
@@ -139,6 +170,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolveDataSourceName(mappedStatement))) {
             Executor executor = (Executor) invocation.getTarget();
             Object parameterObject = args.length > 1 ? args[1] : null;
+            preprocessWriteParameters(mappedStatement, parameterObject);
             BoundSql boundSql = resolveBoundSql(mappedStatement, parameterObject, args);
             MappedStatement rewrittenStatement = rewriteMappedStatement(executor, mappedStatement, boundSql);
             if (rewrittenStatement != mappedStatement) {
@@ -178,15 +210,17 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 解析当前执行链应使用的 BoundSql。
+     * Resolves the BoundSql to use for the current invocation.
      *
-     * <p>普通四参 query 和 update 由 {@link MappedStatement#getBoundSql(Object)} 动态生成；
-     * 六参 query 则必须复用调用方传入的 BoundSql，否则会打破上游已经构建好的缓存键与参数顺序。</p>
+     * <p>Regular four-argument queries and updates obtain {@link BoundSql} from
+     * {@link MappedStatement#getBoundSql(Object)}. The six-argument query form
+     * must reuse the caller-provided {@link BoundSql} to preserve cache-key and
+     * parameter-order consistency.</p>
      *
-     * @param mappedStatement 当前 mapped statement
-     * @param parameterObject 运行时参数对象
-     * @param args Executor 方法参数
-     * @return 本次执行应使用的 BoundSql
+     * @param mappedStatement current mapped statement
+     * @param parameterObject runtime parameter object
+     * @param args executor method arguments
+     * @return bound SQL for the invocation
      */
     private BoundSql resolveBoundSql(MappedStatement mappedStatement, Object parameterObject, Object[] args) {
         if (args.length == 6 && args[5] instanceof BoundSql) {
@@ -195,12 +229,34 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         return mappedStatement.getBoundSql(parameterObject);
     }
 
+    /**
+     * Runs write-parameter preprocessing before BoundSql is materialized.
+     *
+     * <p>This hook only applies to external business {@code INSERT}/{@code UPDATE}
+     * calls. It exists to integrate with interceptors such as JEECG that mutate
+     * audit fields in-place during {@code Executor.update(...)} processing.
+     * Managed internal statements are filtered out earlier and do not execute this path.</p>
+     *
+     * @param mappedStatement current mapped statement
+     * @param parameterObject runtime parameter object
+     */
+    private void preprocessWriteParameters(MappedStatement mappedStatement, Object parameterObject) {
+        if (writeParameterPreprocessor == null || mappedStatement == null || parameterObject == null) {
+            return;
+        }
+        SqlCommandType commandType = mappedStatement.getSqlCommandType();
+        if (commandType != SqlCommandType.INSERT && commandType != SqlCommandType.UPDATE) {
+            return;
+        }
+        writeParameterPreprocessor.preprocess(mappedStatement, parameterObject);
+    }
+
     private MappedStatement resolveResultSetMappedStatement(Object target) {
         if (target == null) {
             return null;
         }
-        // SystemMetaObject.forObject(...) 每次都会为当前 target 创建独立 MetaObject 包装，
-        // 这里没有跨 invocation 共享状态；排查串值问题时应优先检查业务 getter/setter 副作用。
+        // Each SystemMetaObject.forObject(...) call wraps only the current target.
+        // There is no cross-invocation shared state here.
         MetaObject metaObject = SystemMetaObject.forObject(target);
         if (metaObject.hasGetter("mappedStatement")) {
             Object mappedStatement = metaObject.getValue("mappedStatement");
@@ -221,8 +277,8 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         if (target == null) {
             return null;
         }
-        // ResultSetHandler 在不同 MyBatis 版本中可能直接持有 boundSql，也可能挂在 delegate 下；
-        // 两条路径都只读取本次 invocation 的对象图，不能缓存到字段上。
+        // MyBatis versions may expose boundSql directly or through delegate.
+        // Both lookups read only the current invocation object graph and are not cached.
         MetaObject metaObject = SystemMetaObject.forObject(target);
         if (metaObject.hasGetter("boundSql")) {
             Object boundSql = metaObject.getValue("boundSql");
@@ -240,19 +296,20 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 根据改写结果决定是否生成新的 MappedStatement。
+     * Rewrites the mapped statement when SQL text or bound parameters changed.
      *
-     * <p>只有在 SQL 本身被改写，或者独立表写前准备已经向 BoundSql 注入了额外参数时，
-     * 才需要包装一个新的 SqlSource，把当前 BoundSql 固定下来交给后续执行链。</p>
+     * <p>A new {@link MappedStatement} is created only when SQL rewrite changed
+     * the statement text or separate-table preparation injected additional
+     * parameters into {@link BoundSql}.</p>
      *
-     * @param mappedStatement 原始 mapped statement
-     * @param boundSql 当前 BoundSql
-     * @return 可直接继续执行的 mapped statement
+     * @param mappedStatement original mapped statement
+     * @param boundSql current bound SQL
+     * @return mapped statement to continue execution with
      */
     private MappedStatement rewriteMappedStatement(Executor executor, MappedStatement mappedStatement, BoundSql boundSql) {
         prepareSeparateTableReferences(executor, mappedStatement, boundSql);
         String originalSql = boundSql.getSql();
-        List<ParameterMapping> originalParameterMappings = new ArrayList<>(boundSql.getParameterMappings());
+        List<ParameterMapping> originalParameterMappings = new ArrayList<ParameterMapping>(boundSql.getParameterMappings());
         RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
         if (!rewriteResult.changed()
                 && !boundSql.hasAdditionalParameter(ParameterValueResolver.PREPARED_REFERENCE_PARAMETER)) {
@@ -266,13 +323,13 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 输出结构化的 SQL 改写 debug 日志。
+     * Emits structured debug logging for SQL rewrite details.
      *
-     * @param mappedStatement 当前 mapped statement
-     * @param originalSql 改写前 SQL
-     * @param originalParameterMappings 改写前参数映射
-     * @param boundSql 改写后的 BoundSql
-     * @param rewriteResult 改写结果
+     * @param mappedStatement current mapped statement
+     * @param originalSql SQL before rewrite
+     * @param originalParameterMappings parameter mappings before rewrite
+     * @param boundSql rewritten bound SQL
+     * @param rewriteResult rewrite result
      */
     private void logRewriteDetail(MappedStatement mappedStatement,
                                   String originalSql,
@@ -317,10 +374,10 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 在 INSERT / UPDATE 执行前准备独立表引用 id。
+     * Prepares separate-table reference identifiers before write execution.
      *
-     * @param mappedStatement 当前 mapped statement
-     * @param boundSql 当前 BoundSql
+     * @param mappedStatement current mapped statement
+     * @param boundSql current bound SQL
      */
     private void prepareSeparateTableReferences(Executor executor, MappedStatement mappedStatement, BoundSql boundSql) {
         if (separateTableEncryptionManager == null) {
@@ -333,11 +390,11 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 判断本次执行是否需要进入独立表写前准备流程。
+     * Determines whether separate-table write preparation is required.
      *
-     * @param mappedStatement 当前 mapped statement
-     * @param boundSql 当前 BoundSql
-     * @return 需要准备独立表引用时返回 {@code true}
+     * @param mappedStatement current mapped statement
+     * @param boundSql current bound SQL
+     * @return {@code true} when separate-table references should be prepared
      */
     private boolean shouldPrepareSeparateTableReferences(MappedStatement mappedStatement, BoundSql boundSql) {
         if (mappedStatement == null || metadataRegistry == null) {
@@ -356,11 +413,11 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 递归判断运行时参数中是否包含独立表加密字段。
+     * Recursively checks whether runtime parameters contain separate-table fields.
      *
-     * @param candidate 当前待检查参数节点
-     * @param boundSql 当前 BoundSql
-     * @return 命中独立表加密字段时返回 {@code true}
+     * @param candidate current parameter node
+     * @param boundSql current bound SQL
+     * @return {@code true} when a separate-table encrypted field participates in the statement
      */
     private boolean hasSeparateTableRule(Object candidate, BoundSql boundSql) {
         if (candidate == null) {
@@ -398,7 +455,7 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
                 continue;
             }
             Object value = metaObject.getValue(rule.property());
-            // 只在属性确实参与本次 SQL 绑定时准备独立表引用，避免对象上有值但 SQL 未更新该字段时误写独立表。
+            // Prepare references only when the property participates in the current SQL binding.
             if (value != null && isMappedProperty(boundSql, rule.property())) {
                 return true;
             }
@@ -407,11 +464,11 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 判断某个逻辑属性是否真实参与了本次 SQL 参数绑定。
+     * Checks whether a logical property participates in the current SQL binding.
      *
-     * @param boundSql 当前 BoundSql
-     * @param property 逻辑属性名
-     * @return 当前 SQL 包含该属性绑定时返回 {@code true}
+     * @param boundSql current bound SQL
+     * @param property logical property name
+     * @return {@code true} when the current SQL binds the property
      */
     private boolean isMappedProperty(BoundSql boundSql, String property) {
         for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
@@ -427,13 +484,13 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 提取参数路径中的叶子属性名。
+     * Extracts the leaf property name from a MyBatis parameter path.
      *
-     * <p>例如 {@code list[0].idCard} 会被归一成 {@code idCard}，便于把集合参数映射
-     * 与实体字段规则做匹配。</p>
+     * <p>For example, {@code list[0].idCard} becomes {@code idCard}, which lets
+     * collection parameter bindings match entity field rules.</p>
      *
-     * @param property MyBatis 参数路径
-     * @return 叶子属性名
+     * @param property MyBatis parameter path
+     * @return leaf property name
      */
     private String lastPropertyName(String property) {
         String name = new PropertyTokenizer(property).getName();
@@ -448,10 +505,10 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 检查当前 Mapper 方法是否标注了 {@link SkipSqlRewrite} 注解。
+     * Checks whether the mapper method is annotated with {@link SkipSqlRewrite}.
      *
-     * @param mappedStatement 当前 mapped statement
-     * @return 方法标注了 @SkipSqlRewrite 时返回 {@code true}
+     * @param mappedStatement current mapped statement
+     * @return {@code true} when the mapper method declares {@code @SkipSqlRewrite}
      */
     private boolean isSkipSqlRewrite(MappedStatement mappedStatement) {
         String statementId = mappedStatement.getId();
@@ -478,14 +535,15 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     /**
-     * 复制一个仅替换 SqlSource 的 MappedStatement。
+     * Copies a mapped statement while replacing only its {@link SqlSource}.
      *
-     * <p>这里保留原 statement 的缓存、超时、键生成器、结果映射等元数据，
-     * 避免 SQL 改写引入执行语义变化。</p>
+     * <p>The copied statement preserves caches, timeout settings, key generators,
+     * result mappings, and related metadata so SQL rewrite does not accidentally
+     * change execution semantics.</p>
      *
-     * @param original 原始 mapped statement
-     * @param sqlSource 固定返回当前 BoundSql 的 SqlSource
-     * @return 包装后的 mapped statement
+     * @param original original mapped statement
+     * @param sqlSource SQL source that returns the current bound SQL
+     * @return wrapped mapped statement
      */
     private MappedStatement copyMappedStatement(MappedStatement original, SqlSource sqlSource) {
         MappedStatement.Builder builder = new MappedStatement.Builder(
@@ -516,20 +574,12 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
         return builder.build();
     }
 
-    @Override
-    public Object plugin(Object target) {
-        return Plugin.wrap(target, this);
-    }
-
-    @Override
-    public void setProperties(java.util.Properties properties) {
-    }
-
     /**
-     * 固定返回同一个 BoundSql 的 SqlSource。
+     * {@link SqlSource} implementation that always returns the same {@link BoundSql}.
      *
-     * <p>Executor 层已经完成 SQL 改写和参数映射重建，后续链路应直接消费当前对象，
-     * 不再重新根据原始 SqlSource 生成新的 BoundSql。</p>
+     * <p>Once rewrite has already rebuilt SQL text and parameter mappings at the
+     * executor layer, downstream execution should consume that exact object instead
+     * of materializing a fresh {@link BoundSql} from the original source.</p>
      */
     private static final class StaticBoundSqlSqlSource implements SqlSource {
 

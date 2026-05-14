@@ -332,6 +332,33 @@ class SqlRewriteEngineTest {
      * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。
      */
     @Test
+    void shouldInferAliasForBareWildcardInAliasedSingleTableSelect() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT * FROM user_account u WHERE u.phone = ?",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertEquals(1, occurrences(result.sql(), "`phone_cipher`"));
+        assertTrue(result.sql().contains("SELECT u.`phone_cipher` AS phone, u.* FROM user_account u")
+                || result.sql().contains("SELECT u.`phone_cipher` phone, u.* FROM user_account u"));
+        assertFalse(result.sql().contains(", * FROM"));
+        assertTrue(result.sql().contains("u.`phone_hash` = ?"));
+    }
+
+    @Test
     void shouldRewriteExplicitPlainColumnAndWildcardWithTableAlias() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -412,7 +439,7 @@ class SqlRewriteEngineTest {
         RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
 
         assertTrue(result.changed());
-        assertTrue(result.sql().startsWith("SELECT * FROM user_account"));
+        assertTrue(result.sql().startsWith("SELECT t.* FROM user_account t"));
         assertFalse(result.sql().contains(", *"));
         assertFalse(result.sql().contains("user_account.*"));
         assertTrue(result.sql().contains("`phone_hash` = ?"));

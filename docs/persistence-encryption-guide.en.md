@@ -101,6 +101,25 @@ Runtime behavior:
 - the external table stores ciphertext, helper columns, and masked values
 - reads hydrate the external data first, then decrypt back into the business property
 
+If the application already has MyBatis interceptors that mutate parameter objects in place during
+`Executor.update(...)`:
+
+- provide a `WriteParameterPreprocessor` bean so those write-time mutations run before the main
+  business `INSERT` / `UPDATE` `BoundSql` is materialized;
+- audit and tenant fields such as `createBy`, `createTime`, `updateBy`, `updateTime`,
+  `sysOrgCode`, and `tenantId` then participate in dynamic main-table SQL generation even in
+  separate-table mode;
+- this pattern also works for user-defined interceptors and does not require MyBatis plugin
+  reordering.
+
+If the application also uses JEECG:
+
+- the starter exposes JEECG's `MybatisInterceptor` and
+  `MybatisSensitiveUpdateInterceptor` through the same `WriteParameterPreprocessor` SPI using a
+  built-in reflective adapter;
+- this compatibility does not replace JEECG's original beans and does not require an extra bridge
+  dependency.
+
 Typical scenarios:
 
 - the main table cannot absorb many derived columns

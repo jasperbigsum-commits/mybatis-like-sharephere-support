@@ -64,6 +64,7 @@ final class SqlSelectProjectionRewriter {
         List<SelectItem<?>> rewritten = new ArrayList<>();
         Table implicitWildcardTable = resolveImplicitWildcardTable(plainSelect);
         Table wildcardExpansionTable = resolveWildcardExpansionTable(plainSelect);
+        boolean aliasedSingleTableWildcard = isAliasedSingleTableSelect(plainSelect);
         boolean hasBareWildcard = containsBareWildcard(plainSelect);
         boolean unsupportedBareWildcard = hasBareWildcard && implicitWildcardTable == null;
         // projectedKeys 记录当前 SELECT 已经暴露给外层/结果集的逻辑列名；
@@ -94,9 +95,8 @@ final class SqlSelectProjectionRewriter {
                     changed = true;
                 }
                 boolean mixedWildcardProjection = plainSelect.getSelectItems().size() > 1;
-                if (implicitWildcardTable != null && (appended || mixedWildcardProjection)) {
-                    // 只在通配符与其他投影并存时把裸 * 收窄成 table.*。
-                    // 单独 SELECT * 且 storageColumn == column 时保持原样，避免引入额外方言差异。
+                if (implicitWildcardTable != null && (appended || mixedWildcardProjection || aliasedSingleTableWildcard)) {
+                    // Keep bare wildcard table-qualified when aliases or injected projections make the source explicit.
                     rewritten.add(new SelectItem<>(new AllTableColumns(implicitWildcardTable)));
                     changed = true;
                 } else {
@@ -343,6 +343,15 @@ final class SqlSelectProjectionRewriter {
                 ? fromTable.getAlias().getName()
                 : fromTable.getName();
         return StringUtils.isBlank(visibleName) ? null : new Table(visibleName);
+    }
+
+    private boolean isAliasedSingleTableSelect(PlainSelect plainSelect) {
+        if (!(plainSelect.getFromItem() instanceof Table)
+                || plainSelect.getJoins() != null && !plainSelect.getJoins().isEmpty()) {
+            return false;
+        }
+        Table fromTable = (Table) plainSelect.getFromItem();
+        return fromTable.getAlias() != null && StringUtils.isNotBlank(fromTable.getAlias().getName());
     }
 
     private Table resolveWildcardExpansionTable(PlainSelect plainSelect) {

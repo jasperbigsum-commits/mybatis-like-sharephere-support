@@ -12,7 +12,9 @@
   <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
   <modules>
     <module>common</module>
+    <module>logsafe</module>
     <module>migration</module>
+    <module>spring-starter/spring-support</module>
     <module>bom</module>
     <module>spring-starter</module>
     <module>spring-starter/spring2-starter</module>
@@ -22,7 +24,6 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>8</maven.compiler.release>
     <mybatis.version>3.5.19</mybatis.version>
-    <slf4j.version>2.0.17</slf4j.version>
   </properties>
 
   <dependencyManagement>
@@ -38,16 +39,21 @@
         <version>${project.version}</version>
       </dependency>
       <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-logsafe</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-spring-support</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
         <groupId>org.mybatis</groupId>
         <artifactId>mybatis</artifactId>
         <version>${mybatis.version}</version>
         <scope>provided</scope>
         <optional>true</optional>
-      </dependency>
-      <dependency>
-        <groupId>org.slf4j</groupId>
-        <artifactId>slf4j-api</artifactId>
-        <version>${slf4j.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

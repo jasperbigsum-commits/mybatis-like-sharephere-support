@@ -11,6 +11,12 @@ public class AutoConfiguredUserRecord {
 
     private Long id;
     private String name;
+    private String createBy;
+    private java.util.Date createTime;
+    private String updateBy;
+    private java.util.Date updateTime;
+    private String sysOrgCode;
+    private Integer tenantId;
 
     @EncryptField(
             column = "phone",

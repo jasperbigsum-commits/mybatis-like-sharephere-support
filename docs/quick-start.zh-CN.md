@@ -127,7 +127,9 @@ create table user_account (
     phone_cipher varchar(512),
     phone_hash varchar(128),
     phone_like varchar(255),
-    phone_masked varchar(255)
+    phone_masked varchar(255),
+    create_by varchar(50),
+    create_time varchar(100)
 );
 ```
 

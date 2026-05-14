@@ -26,6 +26,8 @@ import io.github.jasper.mybatis.encrypt.migration.MigrationSchemaSqlGenerator;
 import io.github.jasper.mybatis.encrypt.migration.MigrationStateStore;
 import io.github.jasper.mybatis.encrypt.migration.MigrationTaskFactory;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
+import io.github.jasper.mybatis.encrypt.plugin.CompositeWriteParameterPreprocessor;
+import io.github.jasper.mybatis.encrypt.plugin.WriteParameterPreprocessor;
 import org.apache.ibatis.plugin.Interceptor;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -37,10 +39,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandi
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import javax.sql.DataSource;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -245,6 +250,43 @@ public class MybatisEncryptionAutoConfiguration {
     }
 
     /**
+     * Combines all discovered write-parameter preprocessors into one delegate.
+     *
+     * @param preprocessors optional preprocessor beans
+     * @return composite write-parameter preprocessor
+     */
+    @Bean
+    @Primary
+    @ConditionalOnMissingBean(name = "compositeWriteParameterPreprocessor")
+    public WriteParameterPreprocessor compositeWriteParameterPreprocessor(
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            List<WriteParameterPreprocessor> preprocessors) {
+        List<WriteParameterPreprocessor> delegates = new ArrayList<>();
+        if (preprocessors != null) {
+            for (WriteParameterPreprocessor preprocessor : preprocessors) {
+                if (!(preprocessor instanceof CompositeWriteParameterPreprocessor)) {
+                    delegates.add(preprocessor);
+                }
+            }
+        }
+        return new CompositeWriteParameterPreprocessor(delegates);
+    }
+
+    /**
+     * Registers the built-in JEECG-compatible write preprocessor when JEECG interceptor classes are
+     * present on the classpath.
+     *
+     * @param beanFactory Spring bean factory
+     * @return JEECG-compatible write preprocessor
+     */
+    @Bean
+    @ConditionalOnClass(name = "org.jeecg.config.mybatis.MybatisInterceptor")
+    @ConditionalOnMissingBean(name = "jeecgWriteParameterPreprocessor")
+    public WriteParameterPreprocessor jeecgWriteParameterPreprocessor(BeanFactory beanFactory) {
+        return new JeecgWriteParameterPreprocessor(beanFactory);
+    }
+
+    /**
      * 创建 MyBatis 加密拦截器。
      *
      * @param sqlRewriteEngine SQL 改写引擎
@@ -263,9 +305,12 @@ public class MybatisEncryptionAutoConfiguration {
                                                                        @org.springframework.beans.factory.annotation.Autowired(required = false)
                                                                        SeparateTableEncryptionManager separateTableEncryptionManager,
                                                                        @org.springframework.beans.factory.annotation.Autowired(required = false)
-                                                                       DataSourceNameResolver dataSourceNameResolver) {
+                                                                       DataSourceNameResolver dataSourceNameResolver,
+                                                                       @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                                                       WriteParameterPreprocessor writeParameterPreprocessor) {
         return new DatabaseEncryptionInterceptor(sqlRewriteEngine, resultDecryptor, properties,
-                separateTableEncryptionManager, metadataRegistry, dataSourceNameResolver);
+                separateTableEncryptionManager, metadataRegistry, dataSourceNameResolver,
+                writeParameterPreprocessor);
     }
 
     /**

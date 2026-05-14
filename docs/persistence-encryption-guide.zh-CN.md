@@ -147,6 +147,20 @@ private String idCard;
 - 独立表保存密文、辅助列、脱敏列
 - 查询结果会先回填独立表字段，再对业务对象解密
 
+如果项目里已经有会在 `Executor.update(...)` 阶段原地修改参数对象的 MyBatis 拦截器：
+
+- 推荐显式提供一个 `WriteParameterPreprocessor` Bean，把这部分“写前补值”逻辑前置到主业务
+  `INSERT/UPDATE` 的 `BoundSql` 生成之前；
+- 这样 `createBy/createTime/updateBy/updateTime/sysOrgCode/tenantId` 之类的字段会参与主表动态 SQL
+  生成，独立表模式下也不会丢失主表审计列；
+- 这种方式同样适用于用户自定义拦截器，不要求调整 MyBatis 插件顺序。
+
+如果项目同时接入了 JEECG：
+
+- starter 会自动把 JEECG 的 `MybatisInterceptor` / `MybatisSensitiveUpdateInterceptor`
+  通过内置适配暴露成 `WriteParameterPreprocessor`；
+- 该兼容不会替换 JEECG 原 Bean，也不会要求业务额外声明 bridge 依赖。
+
 适合的典型场景：
 
 - 主表不能扩太多密文派生列

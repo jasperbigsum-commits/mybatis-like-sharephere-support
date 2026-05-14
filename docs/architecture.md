@@ -47,12 +47,24 @@
 ### 4. MyBatis 插件层
 
 - `DatabaseEncryptionInterceptor`
-  - `StatementHandler.prepare`：执行 SQL 改写和参数替换。
-  - `Executor.update`：同步独立加密表。
+  - `Executor.update`：先执行可选的写前参数预处理，再完成独立表引用准备、SQL 改写与独立加密表同步。
   - `ResultSetHandler.handleResultSets`：对结果实体进行字段解密。
   - `@SkipSqlRewrite`：标注在 Mapper 方法上可跳过该方法的 SQL 重写与结果解密，适用于不涉及加密字段的查询/更新。
 - `ResultDecryptor`：优先依据查询结果计划与元数据只处理命中的返回对象，避免对无关入参或未映射对象误解密。
 - `SeparateTableEncryptionManager`：处理独立加密表的回填和写后同步。
+
+写前参数预处理补充：
+
+- `WriteParameterPreprocessor`：在主业务 `INSERT/UPDATE` 的 `BoundSql` 生成前原地调整参数对象。
+- Spring starter 会自动聚合所有 `WriteParameterPreprocessor` Bean。
+- 在检测到 JEECG 的 `org.jeecg.config.mybatis.MybatisInterceptor` /
+  `MybatisSensitiveUpdateInterceptor` Bean 时，starter 会以内置反射适配方式预执行其原有
+  `Executor.update(...)` 参数填充逻辑。
+- 如果业务侧已经有其他自定义 MyBatis 拦截器会在 `Executor.update(...)` 阶段原地修改参数对象，
+  仍然可以显式提供对应的 `WriteParameterPreprocessor`，让这些变更在主表 `BoundSql`
+  定型前生效。
+- 这些兼容都只影响主业务写入参数预处理，不重排 MyBatis 插件顺序，也不会对库内部 managed
+  statement 再次触发这层预处理。
 
 边界补充：
 
@@ -91,6 +103,19 @@
   - 注册默认算法
   - 注册规则中心
   - 注册 `DatabaseEncryptionInterceptor` 并交由 MyBatis 自动装配链路接入
+- `LogsafeAutoConfiguration`
+  - 注册 `LogsafeMasker`
+  - 注册 `SafeLog`
+  - 将 Spring 容器中的 `LogsafeMasker` 安装到 `SafeLog` 静态门面，业务代码可直接调用 `SafeLog.of(...)`
+  - 注册 `LogsafeTextMasker` 作为日志输出端文本兜底 SPI，可由自定义日志框架适配器或异常上报适配器显式调用
+  - 复用 `AlgorithmRegistry` 与 `@SensitiveField` 元数据做日志脱敏副本输出
+  - 当前先只在 `spring3-starter` 自动装配，不改变 controller 边界响应脱敏链路
+- `LogsafeLogbackAutoConfiguration`
+  - 检测到 Logback 时注册 `LogsafeLogbackAppenderInstaller`
+  - 在 Spring 单例初始化完成后遍历当前 Logback appenders，挂载命名末端 filter
+  - filter 在 layout/encoder 输出前调用 `LogsafeTextMasker` 处理格式化消息、结构化 key/value 和异常消息
+  - 只修改当前日志事件的输出态，不修改业务对象、原始异常对象或用户 appender 配置文件
+  - 可通过 `mybatis.encrypt.logsafe.terminal.enabled=false` 关闭自动末端注入
 - `SensitiveResponseAutoConfiguration`
   - 注册 `SensitiveDataMasker`
   - 注册 `SensitiveResponseContextInterceptor`
@@ -105,11 +130,12 @@
 
 1. 应用启动时读取 `application.yml` 和实体注解，注册加密规则。
 2. SQL 执行前，插件解析 SQL 并定位命中的表与字段。
-3. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
-4. 查询条件遇到等值或 LIKE 时，改写到对应辅助列，并对参数做算法转换。
-5. 查询结果返回后，按实体字段规则解密成业务可读值。
-6. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
-7. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
+3. 对主业务 `INSERT/UPDATE`，若存在写前参数预处理器，先原地补齐审计字段、租户字段或敏感更新保护后的参数值。
+4. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
+5. 查询条件遇到等值或 LIKE 时，改写到对应辅助列，并对参数做算法转换。
+6. 查询结果返回后，按实体字段规则解密成业务可读值。
+7. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
+8. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
 
 ## 风险控制
 

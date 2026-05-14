@@ -12,12 +12,25 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
  */
 public class TraceContextInterceptor implements AsyncHandlerInterceptor {
 
+    /**
+     * Request attribute key that stores the resolved trace context for the current request.
+     */
     public static final String TRACE_CONTEXT_ATTRIBUTE = TraceContextInterceptor.class.getName() + ".TRACE_CONTEXT";
+
+    /**
+     * Request attribute key that stores the MDC snapshot captured before request handling.
+     */
     public static final String MDC_SNAPSHOT_ATTRIBUTE = TraceContextInterceptor.class.getName() + ".MDC_SNAPSHOT";
 
     private final TraceIdResolver traceIdResolver;
     private final MdcContributor mdcContributor;
 
+    /**
+     * Creates an interceptor with the supplied trace resolver and MDC contributor.
+     *
+     * @param traceIdResolver trace identifier resolver
+     * @param mdcContributor MDC contributor
+     */
     public TraceContextInterceptor(TraceIdResolver traceIdResolver, MdcContributor mdcContributor) {
         this.traceIdResolver = traceIdResolver;
         this.mdcContributor = mdcContributor;

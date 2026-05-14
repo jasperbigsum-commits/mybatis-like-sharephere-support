@@ -32,6 +32,11 @@ public final class LogsafeLogbackEventFilter extends Filter<ILoggingEvent> {
 
     private final LogsafeTextMasker textMasker;
 
+    /**
+     * Creates a Logback event filter that masks rendered text, key/value pairs, and throwable messages.
+     *
+     * @param textMasker masker applied before terminal appenders render events
+     */
     public LogsafeLogbackEventFilter(LogsafeTextMasker textMasker) {
         this.textMasker = Objects.requireNonNull(textMasker, "textMasker");
     }

@@ -29,6 +29,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @EnableConfigurationProperties(LogsafeProperties.class)
 public class LogsafeContextAutoConfiguration {
 
+    /**
+     * Creates the resolver that reads trace identifiers from configured request headers.
+     *
+     * @param properties logsafe configuration properties
+     * @return trace-id resolver bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public TraceIdResolver traceIdResolver(LogsafeProperties properties) {
@@ -37,6 +43,12 @@ public class LogsafeContextAutoConfiguration {
                 properties.getContext().getHeader().getRequestId());
     }
 
+    /**
+     * Creates the MDC contributor that writes enabled trace-context keys.
+     *
+     * @param properties logsafe configuration properties
+     * @return MDC contributor bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public MdcContributor mdcContributor(LogsafeProperties properties) {
@@ -46,6 +58,13 @@ public class LogsafeContextAutoConfiguration {
                 properties.getContext().getKeys().isClientIpEnabled());
     }
 
+    /**
+     * Creates the request interceptor that opens and restores MDC context.
+     *
+     * @param traceIdResolver trace identifier resolver
+     * @param mdcContributor MDC contributor
+     * @return trace-context interceptor bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public TraceContextInterceptor traceContextInterceptor(TraceIdResolver traceIdResolver,
@@ -53,6 +72,12 @@ public class LogsafeContextAutoConfiguration {
         return new TraceContextInterceptor(traceIdResolver, mdcContributor);
     }
 
+    /**
+     * Registers the trace-context interceptor with Spring MVC.
+     *
+     * @param interceptor trace-context interceptor
+     * @return MVC configurer bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public TraceContextWebMvcConfigurer traceContextWebMvcConfigurer(TraceContextInterceptor interceptor) {

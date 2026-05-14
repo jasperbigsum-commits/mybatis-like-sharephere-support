@@ -21,6 +21,11 @@ public final class LogsafeMasker {
 
     private final AlgorithmRegistry algorithmRegistry;
 
+    /**
+     * Creates a log-safe object masker backed by the configured masking algorithms.
+     *
+     * @param algorithmRegistry registry used to resolve masking algorithms referenced by annotations
+     */
     public LogsafeMasker(AlgorithmRegistry algorithmRegistry) {
         this.algorithmRegistry = algorithmRegistry;
     }

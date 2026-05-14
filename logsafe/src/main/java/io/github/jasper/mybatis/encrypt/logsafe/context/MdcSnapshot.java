@@ -41,6 +41,11 @@ public final class MdcSnapshot {
         MDC.setContextMap(contextMap);
     }
 
+    /**
+     * Returns the immutable captured MDC map.
+     *
+     * @return captured MDC context map
+     */
     public Map<String, String> getContextMap() {
         return contextMap;
     }

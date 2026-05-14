@@ -296,6 +296,7 @@ public class MybatisEncryptionAutoConfiguration {
      * @param separateTableEncryptionManager 独立表加密管理器集合
      * @param dataSourceNameResolver 数据名称处理器
      * @return MyBatis 加密拦截器
+     * @param writeParameterPreprocessor write parameter preprocessor
      */
     @Bean
     public DatabaseEncryptionInterceptor databaseEncryptionInterceptor(SqlRewriteEngine sqlRewriteEngine,

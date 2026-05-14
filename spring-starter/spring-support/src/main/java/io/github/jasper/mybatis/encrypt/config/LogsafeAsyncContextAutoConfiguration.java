@@ -21,12 +21,23 @@ import org.springframework.core.task.TaskDecorator;
 @EnableConfigurationProperties(LogsafeProperties.class)
 public class LogsafeAsyncContextAutoConfiguration {
 
+    /**
+     * Creates the Spring task decorator that captures and restores MDC around async tasks.
+     *
+     * @return MDC task decorator bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public MdcTaskDecorator mdcTaskDecorator() {
         return new MdcTaskDecorator();
     }
 
+    /**
+     * Exposes the logsafe MDC decorator as Spring's general {@link TaskDecorator} when none exists.
+     *
+     * @param mdcTaskDecorator logsafe MDC task decorator
+     * @return task decorator bean
+     */
     @Bean
     @ConditionalOnMissingBean(TaskDecorator.class)
     public TaskDecorator logsafeTaskDecorator(MdcTaskDecorator mdcTaskDecorator) {

@@ -10,6 +10,11 @@ public class TraceContextWebMvcConfigurer implements WebMvcConfigurer {
 
     private final TraceContextInterceptor interceptor;
 
+    /**
+     * Creates a configurer that registers the supplied trace-context interceptor.
+     *
+     * @param interceptor trace-context interceptor
+     */
     public TraceContextWebMvcConfigurer(TraceContextInterceptor interceptor) {
         this.interceptor = interceptor;
     }

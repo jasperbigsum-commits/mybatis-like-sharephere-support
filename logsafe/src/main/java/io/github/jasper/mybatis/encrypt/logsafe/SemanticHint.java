@@ -44,14 +44,29 @@ public final class SemanticHint {
         return new SemanticHint(fieldName, path, domainHint);
     }
 
+    /**
+     * Returns the source field name hint.
+     *
+     * @return field name hint, or {@code null}
+     */
     public String fieldName() {
         return fieldName;
     }
 
+    /**
+     * Returns the source object path hint.
+     *
+     * @return path hint, or {@code null}
+     */
     public String path() {
         return path;
     }
 
+    /**
+     * Returns the coarse semantic domain hint.
+     *
+     * @return domain hint, or {@code null}
+     */
     public String domainHint() {
         return domainHint;
     }

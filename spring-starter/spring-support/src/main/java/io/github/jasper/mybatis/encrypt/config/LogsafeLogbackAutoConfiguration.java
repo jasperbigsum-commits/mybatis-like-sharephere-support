@@ -28,12 +28,24 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(LogsafeProperties.class)
 public class LogsafeLogbackAutoConfiguration {
 
+    /**
+     * Creates the Logback appender installer for terminal log masking.
+     *
+     * @param textMasker text masker used by the Logback filter
+     * @return Logback installer bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public LogsafeLogbackAppenderInstaller logsafeLogbackAppenderInstaller(LogsafeTextMasker textMasker) {
         return new LogsafeLogbackAppenderInstaller(textMasker);
     }
 
+    /**
+     * Installs the Logback masking filter after all singleton beans are available.
+     *
+     * @param installer Logback installer bean
+     * @return lifecycle callback that performs installation
+     */
     @Bean
     @ConditionalOnMissingBean(name = "logsafeLogbackInstallerLifecycle")
     public SmartInitializingSingleton logsafeLogbackInstallerLifecycle(

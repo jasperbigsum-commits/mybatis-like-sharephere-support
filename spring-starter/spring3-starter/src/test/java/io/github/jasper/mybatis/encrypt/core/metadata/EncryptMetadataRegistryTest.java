@@ -135,6 +135,47 @@ class EncryptMetadataRegistryTest {
                 .isPresent());
     }
 
+    @Test
+    void shouldRegisterSuperclassEncryptFieldRuleUnderSubclassTable() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        EncryptTableRule entityRule = registry.findByEntity(InheritedUserEntity.class).orElseThrow();
+        EncryptColumnRule entityColumnRule = entityRule.findByProperty("phone").orElseThrow();
+        EncryptColumnRule tableColumnRule = registry.findByTable("inherited_user_account")
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertEquals("inherited_user_account", entityRule.getTableName());
+        assertEquals("inherited_user_account", entityColumnRule.table());
+        assertEquals("inherited_user_account", tableColumnRule.table());
+        assertEquals("phone_cipher", tableColumnRule.storageColumn());
+    }
+
+    @Test
+    void shouldRegisterSharedSuperclassEncryptFieldForMultipleSubclassTables() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        registry.findByEntity(InheritedUserEntity.class).orElseThrow();
+        registry.findByEntity(InheritedArchiveEntity.class).orElseThrow();
+
+        EncryptColumnRule userRule = registry.findByTable("inherited_user_account")
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+        EncryptColumnRule archiveRule = registry.findByTable("inherited_user_archive")
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertEquals("inherited_user_account", userRule.table());
+        assertEquals("inherited_user_archive", archiveRule.table());
+        assertEquals("phone_cipher", userRule.storageColumn());
+        assertEquals("phone_cipher", archiveRule.storageColumn());
+    }
+
     /**
      * 测试目的：验证非法加密元数据配置会在加载阶段被明确拒绝。
      * 测试场景：构造缺失表名、缺失辅助列或算法冲突的规则，断言配置异常和错误码符合预期。
@@ -267,5 +308,25 @@ class EncryptMetadataRegistryTest {
                 maskedAlgorithm = "normalizedLike"
         )
         private String phone;
+    }
+
+    static class BaseEncryptedEntity {
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash"
+        )
+        private String phone;
+    }
+
+    @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("inherited_user_account")
+    static class InheritedUserEntity extends BaseEncryptedEntity {
+        private Long id;
+    }
+
+    @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("inherited_user_archive")
+    static class InheritedArchiveEntity extends BaseEncryptedEntity {
+        private Long id;
     }
 }

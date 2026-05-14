@@ -27,18 +27,36 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(LogsafeProperties.class)
 public class LogsafeAutoConfiguration {
 
+    /**
+     * Creates the core masker used by the programmatic logsafe API.
+     *
+     * @param algorithmRegistry encryption algorithm registry reused by the masker
+     * @return logsafe masker bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public LogsafeMasker logsafeMasker(AlgorithmRegistry algorithmRegistry) {
         return new LogsafeMasker(algorithmRegistry);
     }
 
+    /**
+     * Creates the facade for structured safe-log value wrapping.
+     *
+     * @param logsafeMasker core masking component
+     * @return safe-log facade bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public SafeLog safeLog(LogsafeMasker logsafeMasker) {
         return new SafeLog(logsafeMasker);
     }
 
+    /**
+     * Creates the text masker used by terminal logging adapters.
+     *
+     * @param logsafeMasker core masking component
+     * @return text masker bean
+     */
     @Bean
     @ConditionalOnMissingBean
     public LogsafeTextMasker logsafeTextMasker(LogsafeMasker logsafeMasker) {

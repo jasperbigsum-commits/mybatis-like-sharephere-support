@@ -12,6 +12,13 @@ public class DefaultMdcContributor implements MdcContributor {
     private final boolean userIdEnabled;
     private final boolean clientIpEnabled;
 
+    /**
+     * Creates a contributor with optional request-side MDC keys.
+     *
+     * @param tenantIdEnabled whether to write {@code tenantId}
+     * @param userIdEnabled whether to write {@code userId}
+     * @param clientIpEnabled whether to write {@code clientIp}
+     */
     public DefaultMdcContributor(boolean tenantIdEnabled, boolean userIdEnabled, boolean clientIpEnabled) {
         this.tenantIdEnabled = tenantIdEnabled;
         this.userIdEnabled = userIdEnabled;

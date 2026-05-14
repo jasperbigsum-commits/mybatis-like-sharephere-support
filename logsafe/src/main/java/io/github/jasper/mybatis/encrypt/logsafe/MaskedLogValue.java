@@ -7,10 +7,20 @@ public final class MaskedLogValue {
 
     private final String text;
 
+    /**
+     * Creates a log-safe value wrapper.
+     *
+     * @param text pre-masked text to render
+     */
     public MaskedLogValue(String text) {
         this.text = text;
     }
 
+    /**
+     * Returns the pre-masked text.
+     *
+     * @return log-safe text
+     */
     public String text() {
         return text;
     }

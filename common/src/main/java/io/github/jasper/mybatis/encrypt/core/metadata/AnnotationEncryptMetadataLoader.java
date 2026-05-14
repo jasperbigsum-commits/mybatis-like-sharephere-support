@@ -2,6 +2,11 @@ package io.github.jasper.mybatis.encrypt.core.metadata;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
@@ -29,7 +34,7 @@ public class AnnotationEncryptMetadataLoader {
         String tableName = resolveTableName(type);
         EncryptTableRule rule = new EncryptTableRule(tableName);
         boolean found = false;
-        for (Field field : type.getDeclaredFields()) {
+        for (Field field : fieldsInHierarchy(type)) {
             EncryptField encryptField = field.getAnnotation(EncryptField.class);
             if (encryptField == null) {
                 continue;
@@ -55,6 +60,23 @@ public class AnnotationEncryptMetadataLoader {
             ));
         }
         return found ? rule : null;
+    }
+
+    private List<Field> fieldsInHierarchy(Class<?> type) {
+        List<Class<?>> hierarchy = new ArrayList<>();
+        Class<?> current = type;
+        while (current != null && current != Object.class) {
+            hierarchy.add(current);
+            current = current.getSuperclass();
+        }
+        Collections.reverse(hierarchy);
+        Map<String, Field> fieldsByName = new LinkedHashMap<>();
+        for (Class<?> candidate : hierarchy) {
+            for (Field field : candidate.getDeclaredFields()) {
+                fieldsByName.put(field.getName(), field);
+            }
+        }
+        return new ArrayList<>(fieldsByName.values());
     }
 
     private String resolveTableName(Class<?> type) {

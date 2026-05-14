@@ -18,10 +18,18 @@ import java.util.Objects;
  */
 public final class LogsafeLogbackAppenderInstaller {
 
+    /**
+     * Stable Logback filter name used to prevent duplicate installation.
+     */
     public static final String FILTER_NAME = "mybatis-encrypt-logsafe-terminal-filter";
 
     private final LogsafeTextMasker textMasker;
 
+    /**
+     * Creates an installer using the supplied terminal text masker.
+     *
+     * @param textMasker masker applied to rendered log messages
+     */
     public LogsafeLogbackAppenderInstaller(LogsafeTextMasker textMasker) {
         this.textMasker = Objects.requireNonNull(textMasker, "textMasker");
     }

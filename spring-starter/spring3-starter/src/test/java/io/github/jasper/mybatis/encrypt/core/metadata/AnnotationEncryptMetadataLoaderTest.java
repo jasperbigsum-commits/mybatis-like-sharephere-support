@@ -124,6 +124,33 @@ class AnnotationEncryptMetadataLoaderTest {
         assertEquals("user_archive", archivePhoneRule.table());
     }
 
+    @Test
+    void shouldLoadEncryptFieldFromSuperclassUsingSubclassTable() {
+        EncryptTableRule tableRule = loader.load(InheritedUserEntity.class);
+        EncryptColumnRule rule = tableRule.findByProperty("phone").orElseThrow();
+
+        assertEquals("inherited_user_account", tableRule.getTableName());
+        assertEquals("inherited_user_account", rule.table());
+        assertEquals("phone", rule.column());
+        assertEquals("phone_cipher", rule.storageColumn());
+        assertEquals("phone_hash", rule.assistedQueryColumn());
+    }
+
+    @Test
+    void shouldBindInheritedEncryptFieldToEachSubclassTableIndependently() {
+        EncryptColumnRule userRule = loader.load(InheritedUserEntity.class)
+                .findByProperty("phone")
+                .orElseThrow();
+        EncryptColumnRule archiveRule = loader.load(InheritedArchiveEntity.class)
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertEquals("inherited_user_account", userRule.table());
+        assertEquals("inherited_user_archive", archiveRule.table());
+        assertEquals("phone_cipher", userRule.storageColumn());
+        assertEquals("phone_cipher", archiveRule.storageColumn());
+    }
+
     static class MixedAnnotationEntity {
 
         @EncryptField
@@ -216,5 +243,25 @@ class AnnotationEncryptMetadataLoaderTest {
                 storageColumn = "archive_phone_cipher"
         )
         private String archivePhone;
+    }
+
+    static class BaseEncryptedEntity {
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash"
+        )
+        private String phone;
+    }
+
+    @Table(name = "inherited_user_account")
+    static class InheritedUserEntity extends BaseEncryptedEntity {
+        private Long id;
+    }
+
+    @Table(name = "inherited_user_archive")
+    static class InheritedArchiveEntity extends BaseEncryptedEntity {
+        private Long id;
     }
 }

@@ -14,6 +14,12 @@ public class DefaultTraceIdResolver implements TraceIdResolver {
     private final String traceIdHeaderName;
     private final String requestIdHeaderName;
 
+    /**
+     * Creates a resolver using the supplied trace and request id header names.
+     *
+     * @param traceIdHeaderName header name used to read the trace id
+     * @param requestIdHeaderName header name used to read the request id
+     */
     public DefaultTraceIdResolver(String traceIdHeaderName, String requestIdHeaderName) {
         this.traceIdHeaderName = traceIdHeaderName;
         this.requestIdHeaderName = requestIdHeaderName;

@@ -73,6 +73,19 @@ class SqlSelectProjectionRewriterTest {
                 || plainSelect.toString().contains("u.phone_cipher phone, u.*"));
     }
 
+    @Test
+    void shouldInferAliasForBareWildcardInAliasedDerivedTableSelect() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT * FROM (SELECT id, phone_cipher FROM user_account) u");
+        SqlTableContext tableContext = new SqlTableContext();
+        tableContext.registerDerived("u", userAccountRule());
+
+        boolean changed = rewriter.rewrite(plainSelect, tableContext, ProjectionMode.NORMAL);
+
+        assertTrue(changed);
+        assertTrue(plainSelect.toString().contains("u.phone_cipher AS phone, u.*")
+                || plainSelect.toString().contains("u.phone_cipher phone, u.*"));
+    }
+
     /**
      * 测试目的：验证 SELECT 投影改写能正确暴露密文列别名并避免重复投影。
      * 测试场景：构造通配符、多表、派生表和 UNION 查询，断言投影列、隐藏辅助列和别名处理符合预期。

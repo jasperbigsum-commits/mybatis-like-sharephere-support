@@ -33,7 +33,8 @@ import java.util.List;
  * SQL 改写引擎。
  *
  * <p>负责解析 MyBatis SQL，并在执行前改写加密字段、辅助查询字段和 LIKE 辅助字段；
- * 对不支持的范围查询、排序和存在歧义的查询场景会快速失败。</p>
+ * 对不支持的查询语义、排序和存在歧义的查询场景会快速失败；少数被显式放宽的技术值
+ * 查询语义会记录 warning，提醒结果不代表明文业务语义。</p>
  */
 public class SqlRewriteEngine {
 
@@ -73,7 +74,8 @@ public class SqlRewriteEngine {
                 this::requireAssistedQueryColumn,
                 this::requireLikeQueryColumn,
                 this::quote,
-                this::rewriteSelect
+                this::rewriteSelect,
+                this::warnEncryptedRangeComparison
         );
         this.sqlWriteExpressionRewriter = new SqlWriteExpressionRewriter(valueTransformer, sqlConditionRewriter);
         this.sqlSelectProjectionRewriter = new SqlSelectProjectionRewriter(
@@ -336,6 +338,16 @@ public class SqlRewriteEngine {
         }
         log.warn("ORDER BY on encrypted field [{}] is allowed for technical sorting only; results are ordered by "
                         + "hash/reference values and may not match plaintext business order.",
+                rule.property());
+    }
+
+    private void warnEncryptedRangeComparison(EncryptColumnRule rule) {
+        if (!log.isWarnEnabled()) {
+            return;
+        }
+        log.warn("Single-sided range comparison on encrypted field [{}] is allowed for technical cursor semantics only; "
+                        + "same-table fields use assisted/hash values and separate-table fields use reference values, "
+                        + "so the result does not represent plaintext business ordering.",
                 rule.property());
     }
 

@@ -32,6 +32,7 @@ import net.sf.jsqlparser.statement.select.SelectItem;
 
 import java.util.List;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 /**
  * 查询条件改写器。
@@ -46,6 +47,7 @@ final class SqlConditionRewriter {
     private final SqlLikeConditionRewriter sqlLikeConditionRewriter;
     private final BiFunction<Column, String, Column> columnBuilder;
     private final BiFunction<EncryptColumnRule, String, String> assistedQueryColumnProvider;
+    private final Consumer<EncryptColumnRule> rangeWarningConsumer;
 
     SqlConditionRewriter(EncryptionValueTransformer valueTransformer,
                          BiFunction<Column, String, Column> columnBuilder,
@@ -53,10 +55,23 @@ final class SqlConditionRewriter {
                          BiFunction<EncryptColumnRule, String, String> likeQueryColumnProvider,
                          java.util.function.Function<String, String> identifierQuoter,
                          SelectRewriteDispatcher selectRewriteDispatcher) {
+        this(valueTransformer, columnBuilder, assistedQueryColumnProvider, likeQueryColumnProvider,
+                identifierQuoter, selectRewriteDispatcher, rule -> {
+                });
+    }
+
+    SqlConditionRewriter(EncryptionValueTransformer valueTransformer,
+                         BiFunction<Column, String, Column> columnBuilder,
+                         BiFunction<EncryptColumnRule, String, String> assistedQueryColumnProvider,
+                         BiFunction<EncryptColumnRule, String, String> likeQueryColumnProvider,
+                         java.util.function.Function<String, String> identifierQuoter,
+                         SelectRewriteDispatcher selectRewriteDispatcher,
+                         Consumer<EncryptColumnRule> rangeWarningConsumer) {
         this.valueTransformer = valueTransformer;
         this.columnBuilder = columnBuilder;
         this.assistedQueryColumnProvider = assistedQueryColumnProvider;
         this.selectRewriteDispatcher = selectRewriteDispatcher;
+        this.rangeWarningConsumer = rangeWarningConsumer;
         this.operandSupport = new SqlConditionOperandSupport();
         this.separateTableExistsConditionBuilder = new SqlSeparateTableExistsConditionBuilder(columnBuilder, identifierQuoter);
         this.sqlEqualityConditionRewriter = new SqlEqualityConditionRewriter(
@@ -174,12 +189,7 @@ final class SqlConditionRewriter {
         }
         if (expression instanceof GreaterThan || expression instanceof GreaterThanEquals
                 || expression instanceof MinorThan || expression instanceof MinorThanEquals) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            validateNonRangeEncryptedColumn(binaryExpression.getLeftExpression(), tableContext,
-                    EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE,
-                    "Range comparison is not supported on encrypted fields.");
-            consumeExpression(binaryExpression.getRightExpression(), context);
-            return expression;
+            return rewriteRangeComparison((BinaryExpression) expression, tableContext, context);
         }
         if (expression instanceof BinaryExpression) {
             BinaryExpression binaryExpression = (BinaryExpression) expression;
@@ -224,6 +234,41 @@ final class SqlConditionRewriter {
             return expression;
         }
         return sqlLikeConditionRewriter.rewrite(expression, resolution, context);
+    }
+
+    private Expression rewriteRangeComparison(BinaryExpression expression,
+                                              SqlTableContext tableContext,
+                                              SqlRewriteContext context) {
+        ColumnResolution left = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
+        ColumnResolution right = resolveEncryptedColumn(expression.getRightExpression(), tableContext);
+        if (left != null && right != null) {
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_OPERATION,
+                    "Range comparison between two encrypted columns is not supported.");
+        }
+        ColumnResolution resolution = left != null ? new ColumnResolution(left.column(), left.rule(), true)
+                : right == null ? null : new ColumnResolution(right.column(), right.rule(), false);
+        if (resolution == null) {
+            expression.setLeftExpression(rewrite(expression.getLeftExpression(), tableContext, context));
+            expression.setRightExpression(rewrite(expression.getRightExpression(), tableContext, context));
+            return expression;
+        }
+        rangeWarningConsumer.accept(resolution.rule());
+        EncryptColumnRule rule = resolution.rule();
+        String targetColumn = rule.isStoredInSeparateTable()
+                ? rule.column()
+                : assistedQueryColumnProvider.apply(rule, "range query");
+        Expression operand = resolution.leftColumn() ? expression.getRightExpression() : expression.getLeftExpression();
+        Expression rewrittenOperand = rewriteAssistedOperand(rule, operand, context,
+                "Encrypted range condition must use prepared parameter, string literal, or CONCAT of them.");
+        if (resolution.leftColumn()) {
+            expression.setLeftExpression(columnBuilder.apply(resolution.column(), targetColumn));
+            expression.setRightExpression(rewrittenOperand);
+        } else {
+            expression.setLeftExpression(rewrittenOperand);
+            expression.setRightExpression(columnBuilder.apply(resolution.column(), targetColumn));
+        }
+        context.markChanged();
+        return expression;
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

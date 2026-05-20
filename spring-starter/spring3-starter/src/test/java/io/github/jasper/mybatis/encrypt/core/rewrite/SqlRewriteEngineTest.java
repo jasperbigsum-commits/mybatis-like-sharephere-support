@@ -2675,7 +2675,7 @@ class SqlRewriteEngineTest {
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
      */
     @Test
-    void shouldFailFastForEncryptedRangePredicate() {
+    void shouldRewriteEncryptedRangePredicateToTechnicalColumn() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
         SqlRewriteEngine engine = new SqlRewriteEngine(
@@ -2691,10 +2691,12 @@ class SqlRewriteEngineTest {
                 Map.of("phone", "13800138000")
         );
 
-        UnsupportedEncryptedOperationException exception = assertThrows(UnsupportedEncryptedOperationException.class,
-                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql));
-        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE, exception.getErrorCode());
-        assertEquals("Range comparison is not supported on encrypted fields.", exception.getMessage());
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("`phone_hash` > ?"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"),
+                result.maskedParameters().values().iterator().next().value());
     }
 
     /**

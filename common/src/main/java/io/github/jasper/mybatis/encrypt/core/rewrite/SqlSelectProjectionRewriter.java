@@ -11,6 +11,8 @@ import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.AllTableColumns;
+import net.sf.jsqlparser.statement.select.FromItem;
+import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.SelectItem;
 
@@ -335,36 +337,61 @@ final class SqlSelectProjectionRewriter {
     }
 
     private Table resolveImplicitWildcardTable(PlainSelect plainSelect) {
-        if (!(plainSelect.getFromItem() instanceof Table) || plainSelect.getJoins() != null && !plainSelect.getJoins().isEmpty()) {
+        if (hasJoins(plainSelect)) {
             return null;
         }
-        Table fromTable = (Table) plainSelect.getFromItem();
-        String visibleName = fromTable.getAlias() != null && StringUtils.isNotBlank(fromTable.getAlias().getName())
-                ? fromTable.getAlias().getName()
-                : fromTable.getName();
+        String visibleName = resolveSingleSourceVisibleName(plainSelect.getFromItem());
         return StringUtils.isBlank(visibleName) ? null : new Table(visibleName);
     }
 
     private boolean isAliasedSingleTableSelect(PlainSelect plainSelect) {
-        if (!(plainSelect.getFromItem() instanceof Table)
-                || plainSelect.getJoins() != null && !plainSelect.getJoins().isEmpty()) {
+        if (hasJoins(plainSelect)) {
             return false;
         }
-        Table fromTable = (Table) plainSelect.getFromItem();
-        return fromTable.getAlias() != null && StringUtils.isNotBlank(fromTable.getAlias().getName());
+        return resolveSingleSourceAlias(plainSelect.getFromItem()) != null;
     }
 
     private Table resolveWildcardExpansionTable(PlainSelect plainSelect) {
-        if (!(plainSelect.getFromItem() instanceof Table) || plainSelect.getJoins() != null && !plainSelect.getJoins().isEmpty()) {
+        if (hasJoins(plainSelect)) {
             return null;
         }
-        Table fromTable = (Table) plainSelect.getFromItem();
-        if (fromTable.getAlias() == null || StringUtils.isBlank(fromTable.getAlias().getName())) {
+        String alias = resolveSingleSourceAlias(plainSelect.getFromItem());
+        if (StringUtils.isBlank(alias)) {
             return null;
         }
-        // 单表别名 + 裸 * 场景下，自动补的逻辑列也要带同一个别名，
+        // 单源别名 + 裸 * 场景下，自动补的逻辑列也要带同一个别名，
         // 否则 `u.phone, *` 会变成 `u.phone_cipher AS phone, phone_cipher AS phone, u.*`。
-        return new Table(fromTable.getAlias().getName());
+        return new Table(alias);
+    }
+
+    private boolean hasJoins(PlainSelect plainSelect) {
+        return plainSelect.getJoins() != null && !plainSelect.getJoins().isEmpty();
+    }
+
+    private String resolveSingleSourceVisibleName(FromItem fromItem) {
+        if (fromItem instanceof Table) {
+            Table fromTable = (Table) fromItem;
+            String alias = resolveSingleSourceAlias(fromItem);
+            return StringUtils.isNotBlank(alias) ? alias : fromTable.getName();
+        }
+        // Derived tables must be qualified by their alias; without one, bare * remains unsupported.
+        return resolveSingleSourceAlias(fromItem);
+    }
+
+    private String resolveSingleSourceAlias(FromItem fromItem) {
+        if (fromItem instanceof Table) {
+            Table fromTable = (Table) fromItem;
+            return fromTable.getAlias() != null && StringUtils.isNotBlank(fromTable.getAlias().getName())
+                    ? fromTable.getAlias().getName()
+                    : null;
+        }
+        if (fromItem instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            return parenthesedSelect.getAlias() != null && StringUtils.isNotBlank(parenthesedSelect.getAlias().getName())
+                    ? parenthesedSelect.getAlias().getName()
+                    : null;
+        }
+        return null;
     }
 
     private boolean containsBareWildcard(PlainSelect plainSelect) {

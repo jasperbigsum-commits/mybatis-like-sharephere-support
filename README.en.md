@@ -182,3 +182,8 @@ mvn -Dmaven.repo.local=.m2repo -pl spring-starter/spring3-starter -am test
 ```
 
 More maintenance guidance is available in [Development And Verification](docs/development.md).
+## Explicit JDBC Facade
+
+If a code path uses `JdbcTemplate` or raw JDBC directly, `EncryptedJdbcExecutor` is available as
+an explicit Spring bean. It takes the configured `dataSourceName`, reuses the existing SQL rewrite
+and result decryption pipeline, and does not change the normal MyBatis interceptor flow.

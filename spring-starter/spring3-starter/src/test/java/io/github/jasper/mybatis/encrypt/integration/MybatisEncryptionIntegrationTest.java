@@ -8,6 +8,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -116,6 +117,41 @@ class MybatisEncryptionIntegrationTest {
 
         assertTrue(Files.exists(H2_DB_FILE));
         assertSameTableStorage(1L, "13800138000");
+    }
+
+    @Test
+    void shouldFilterSameTableCursorQueryByTechnicalHashRange() throws Exception {
+        List<UserRecord> users = List.of(
+                user(301L, "Aster", "13100131001", null),
+                user(302L, "Beryl", "13100131002", null),
+                user(303L, "Cedar", "13100131003", null)
+        );
+        Sm3AssistedQueryAlgorithm algorithm = new Sm3AssistedQueryAlgorithm();
+        List<UserRecord> hashOrdered = new ArrayList<>(users);
+        hashOrdered.sort(Comparator.comparing(user -> algorithm.transform(user.getPhone())));
+        String cursor = hashOrdered.get(1).getPhone();
+        String cursorHash = algorithm.transform(cursor);
+
+        List<Long> expectedIds = users.stream()
+                .filter(user -> algorithm.transform(user.getPhone()).compareTo(cursorHash) > 0)
+                .sorted(Comparator.comparing(UserRecord::getId))
+                .map(UserRecord::getId)
+                .toList();
+
+        assertFalse(expectedIds.isEmpty());
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            for (UserRecord user : users) {
+                assertEquals(1, mapper.insertUser(user));
+            }
+        }
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            List<UserRecord> loaded = mapper.selectAfterPhoneCursor(cursor);
+            assertEquals(expectedIds, loaded.stream().map(UserRecord::getId).toList());
+        }
     }
 
     /**
@@ -636,6 +672,37 @@ class MybatisEncryptionIntegrationTest {
             assertEquals("13000130001", loaded.getPhone());
             assertEquals("320101199001010131", loaded.getIdCard());
         }
+    }
+
+    /**
+     * 测试目的：验证当前测试覆盖的加密业务行为符合预期。
+     * 测试场景：构造对应输入数据和配置，断言执行结果、异常分支和边界行为正确。
+     */
+    @Test
+    void shouldReadBareWildcardFromAliasedDerivedTable() throws Exception {
+        UserRecord user = user(33L, "Lara", "13000130033", "320101199001010133");
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        parameterCaptureInterceptor.reset();
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            UserRecord loaded = mapper.selectBareWildcardFromDerivedTable(33L);
+            assertNotNull(loaded);
+            assertEquals(33L, loaded.getId());
+            assertEquals("Lara", loaded.getName());
+            assertEquals("13000130033", loaded.getPhone());
+            assertEquals("320101199001010133", loaded.getIdCard());
+        }
+
+        StatementCapture mainSelect = parameterCaptureInterceptor.findPreparedStatementContaining("from (select");
+        assertNotNull(mainSelect);
+        String normalizedSql = singleLine(mainSelect.sql).toLowerCase(Locale.ROOT);
+        assertTrue(normalizedSql.startsWith("select u."));
+        assertTrue(normalizedSql.contains("u.*"));
     }
 
     /**
@@ -1801,6 +1868,14 @@ class MybatisEncryptionIntegrationTest {
         @Select("""
                 select id, name, phone, id_card
                 from user_account
+                where phone > #{cursor}
+                order by id
+                """)
+        List<UserRecord> selectAfterPhoneCursor(@Param("cursor") String cursor);
+
+        @Select("""
+                select id, name, phone, id_card
+                from user_account
                 where phone like #{phoneLike}
                 """)
         UserRecord selectByPhoneLike(@Param("phoneLike") String phoneLike);
@@ -1886,6 +1961,16 @@ class MybatisEncryptionIntegrationTest {
                 limit 1
                 """)
         UserRecord selectLatestByComplexProjection(@Param("userId") Long userId, @Param("regexp") String regexp);
+
+        @Select("""
+                select *
+                from (
+                    select id, name, phone, id_card
+                    from user_account
+                ) u
+                where u.id = #{id}
+                """)
+        UserRecord selectBareWildcardFromDerivedTable(@Param("id") Long id);
 
         @Select("""
                 select o.id as order_id,

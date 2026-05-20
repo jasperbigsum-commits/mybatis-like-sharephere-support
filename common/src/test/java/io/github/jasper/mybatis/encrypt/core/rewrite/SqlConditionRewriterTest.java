@@ -6,6 +6,8 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgori
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
+import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.schema.Column;
@@ -20,11 +22,14 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("unit")
@@ -51,6 +56,72 @@ class SqlConditionRewriterTest {
                 new Sm3AssistedQueryAlgorithm().transform("13800138000"),
                 context.maskedParameters().values().iterator().next().value()
         );
+    }
+
+    @Test
+    void shouldRewriteGreaterThanToAssistedColumnAndReplaceParameter() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone > ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13800138000"));
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone > ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone_hash` > ?"));
+        assertTrue(context.parameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
+    }
+
+    @Test
+    void shouldRewriteSeparateTableMinorThanEqualsToMainReferenceHashPredicate() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone <= ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "13800138000"));
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone <= ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("`phone` <= ?"));
+        assertFalse(rewritten.toString().contains("EXISTS"));
+        assertTrue(context.parameterMappings().get(0).getProperty().startsWith("__encrypt_generated_"));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), context.originalValue(0));
+    }
+
+    @Test
+    void shouldKeepRejectingBetweenOnEncryptedField() {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+        LinkedHashMap<String, Object> parameterObject = new LinkedHashMap<String, Object>();
+        parameterObject.put("start", "13800138000");
+        parameterObject.put("end", "13800139000");
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> rewriter.rewrite(
+                        parseWhere("SELECT id FROM user_account WHERE phone BETWEEN ? AND ?"),
+                        tableContext,
+                        rewriteContext(
+                                "SELECT id FROM user_account WHERE phone BETWEEN ? AND ?",
+                                Arrays.asList(
+                                        new ParameterMapping.Builder(new Configuration(), "start", String.class).build(),
+                                        new ParameterMapping.Builder(new Configuration(), "end", String.class).build()
+                                ),
+                                parameterObject
+                        )
+                )
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_RANGE, exception.getErrorCode());
     }
 
     /**

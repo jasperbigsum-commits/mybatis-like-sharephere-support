@@ -5,3 +5,4 @@ io.github.jasper.mybatis.encrypt.config.LogsafeContextAutoConfiguration
 io.github.jasper.mybatis.encrypt.config.LogsafeAsyncContextAutoConfiguration
 io.github.jasper.mybatis.encrypt.config.SensitiveMaskingAutoConfiguration
 io.github.jasper.mybatis.encrypt.config.SensitiveResponseAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.EncryptedJdbcAutoConfiguration

@@ -16,7 +16,7 @@
 1. 不侵入业务层 Mapper/Service 代码，对 MyBatis 或 MyBatis-Plus 生成的 SQL 做透明增强。
 2. 支持字段加密、结果解密、等值查询、LIKE 查询、插入、更新、删除。
 3. 提供类似 ShardingSphere 的规则配置方式，同时支持实体注解声明。
-4. 对风险操作保持保守策略：对未声明规则的字段不做推断，对不支持的排序和范围查询直接报错。
+4. 对风险操作保持保守策略：对未声明规则的字段不做推断，对不支持的排序和范围查询直接报错；仅对显式放宽的技术值比较输出 warning。
 
 ## 核心架构
 
@@ -42,7 +42,7 @@
 - 对 `assistedQueryColumn` / `likeQueryColumn` 自动补充插入列、更新列并改写 WHERE 条件。
 - 对独立加密表字段，等值、非等值、`IN`、`IS NULL`、`IS NOT NULL` 以及无 `likeQueryColumn` 时退化出的等值 `LIKE`，都优先改写为主表逻辑列上的 hash/ref 直接比较；只有真正需要模糊匹配的 `LIKE` 才保留 `EXISTS` 子查询语义，主表逻辑列写入 `assistedQueryColumn` 对应的 hash 引用值。
 - 对插件内部新生成的标识符，按配置的 `sqlDialect` 输出对应转义风格，当前支持 MySQL、OceanBase、达梦、Oracle12、ClickHouse。
-- 对排序、范围比较等不可安全支持的操作主动失败，避免出现“看似成功但结果错误”的情况。
+- 对排序、`BETWEEN` 等不可安全支持的操作主动失败；对显式放宽的单边范围比较输出 warning，避免把技术值结果误读成明文业务语义。
 
 ### 4. MyBatis 插件层
 
@@ -132,7 +132,7 @@
 2. SQL 执行前，插件解析 SQL 并定位命中的表与字段。
 3. 对主业务 `INSERT/UPDATE`，若存在写前参数预处理器，先原地补齐审计字段、租户字段或敏感更新保护后的参数值。
 4. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
-5. 查询条件遇到等值或 LIKE 时，改写到对应辅助列，并对参数做算法转换。
+5. 查询条件遇到等值、LIKE 或显式放宽的单边范围比较时，改写到对应辅助列，并对参数做算法转换。
 6. 查询结果返回后，按实体字段规则解密成业务可读值。
 7. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
 8. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
@@ -140,7 +140,7 @@
 ## 风险控制
 
 1. 未找到字段规则时不做隐式处理。
-2. 对加密字段的 `ORDER BY`、`BETWEEN`、`>`、`<` 等语义不可靠操作直接抛错。
+2. 对加密字段的 `ORDER BY`、`BETWEEN` 等语义不可靠操作直接抛错；对 `>`、`>=`、`<`、`<=` 仅在存在稳定 assisted/reference 列时按技术值比较放行，并输出 warning。
 3. 插件调试日志仅输出脱敏值，不输出明文和真实密文。
 4. 辅助等值查询列如果本身为哈希值，允许在日志中输出哈希值以帮助定位问题，但仍不输出明文和真实密文。
 5. 运行时和迁移模块都提供结构化异常体系，可通过 `EncryptionException` / `MigrationException` 的 `getErrorCode()` 做稳定分类。
@@ -179,3 +179,18 @@
 - Spring Boot 2 / 3 自动装配场景下拦截器单次注册与执行链路正确性
 
 能力边界的细化说明见 [sql-support-matrix.md](sql-support-matrix.md)。
+### 7. Explicit JDBC Facade
+
+- `EncryptedJdbcExecutor`
+  - exposes a Spring bean for callers that bypass MyBatis and use `JdbcTemplate` or raw JDBC
+  - resolves the target datasource by the encryption configuration `dataSourceName`
+  - reuses the existing `SqlRewriteEngine` for SQL rewrite and `ResultDecryptor` for result
+    hydration / decryption
+  - keeps the normal MyBatis interceptor pipeline unchanged; this is an opt-in entry point, not a
+    replacement for mapper execution
+
+Edge boundaries:
+
+- it is intended for explicit application calls, not for transparent framework interception
+- unsupported encrypted SQL still fails fast through the same rewrite rules
+- its purpose is to close the gap for direct JDBC access paths without duplicating encryption logic

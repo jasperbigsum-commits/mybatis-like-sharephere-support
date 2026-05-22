@@ -62,7 +62,7 @@ class SqlConditionRewriterTest {
     void shouldRewriteGreaterThanToAssistedColumnAndReplaceParameter() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<>());
         SqlTableContext tableContext = tableContext(sameTableRule());
-        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone > ?",
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE · > ?",
                 Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
                 Collections.<String, Object>singletonMap("phone", "13800138000"));
 

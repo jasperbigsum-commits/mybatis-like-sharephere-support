@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import net.sf.jsqlparser.expression.Expression;
@@ -19,11 +20,13 @@ final class SqlWriteExpressionRewriter {
 
     private final EncryptionValueTransformer valueTransformer;
     private final SqlConditionRewriter conditionRewriter;
+    private final EncryptJsonRuntimeSupport encryptJsonRuntimeSupport;
 
     SqlWriteExpressionRewriter(EncryptionValueTransformer valueTransformer,
                                SqlConditionRewriter conditionRewriter) {
         this.valueTransformer = valueTransformer;
         this.conditionRewriter = conditionRewriter;
+        this.encryptJsonRuntimeSupport = new EncryptJsonRuntimeSupport();
     }
 
     WriteValue rewriteEncrypted(Expression expression, EncryptColumnRule rule, SqlRewriteContext context) {
@@ -72,6 +75,33 @@ final class SqlWriteExpressionRewriter {
             return context.insertSynthetic(value, maskingMode);
         }
         return new StringValue(value);
+    }
+
+    WriteValue rewriteEncryptJson(Expression expression,
+                                  EncryptJsonFieldRule rule,
+                                  SqlRewriteContext context,
+                                  io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry algorithmRegistry) {
+        Object jsonValue = readOperandValue(expression, context);
+        String json = jsonValue == null ? null : String.valueOf(jsonValue);
+        EncryptJsonWriteResult result = encryptJsonRuntimeSupport.rewriteJsonForWrite(json, rule, algorithmRegistry);
+        context.appendPreparedJsonPathWrites(result.pathWrites());
+        if (expression instanceof JdbcParameter) {
+            context.replaceLastConsumed(result.rewrittenJson(), MaskingMode.HASH);
+            return new WriteValue(expression, jsonValue, true);
+        }
+        if (expression instanceof StringValue) {
+            StringValue stringValue = (StringValue) expression;
+            stringValue.setValue(result.rewrittenJson());
+            return new WriteValue(stringValue, jsonValue, false);
+        }
+        if (expression instanceof LongValue) {
+            return new WriteValue(new StringValue(result.rewrittenJson()), jsonValue, false);
+        }
+        if (expression instanceof NullValue) {
+            return new WriteValue(expression, null, false);
+        }
+        throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_WRITE_OPERAND,
+                "EncryptJsonField write only supports prepared parameters or string literals.");
     }
 
     private Object readOperandValue(Expression expression, SqlRewriteContext context) {

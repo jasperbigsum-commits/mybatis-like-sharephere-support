@@ -26,6 +26,42 @@ Controller-boundary masking is a separate concern. See [Sensitive Response Guide
 
 ## Field model
 
+### JSON string field model
+
+When one main-table column is itself a JSON string and only selected exact paths should be encrypted, use:
+
+```java
+@EncryptJsonField(
+        column = "profile_json",
+        cipherAlgorithm = "sm4",
+        assistedQueryAlgorithm = "sm3",
+        paths = {
+                @EncryptJsonPath(
+                        path = "$.phone",
+                        storageTable = "phone_encrypt",
+                        storageIdColumn = "id",
+                        hashColumn = "phone_hash",
+                        cipherColumn = "phone_cipher"
+                )
+        }
+)
+private String profileJson;
+```
+
+Runtime behavior:
+
+- writes only process declared exact paths
+- matched plaintext path values are replaced with hashes in the JSON string
+- ciphertext is written to each path's bound external table
+- reads restore the hash-bearing JSON string back to plaintext JSON through external-table lookup
+
+Explicit boundaries:
+
+- whole-column JSON string writes only
+- exact static paths only
+- `JSON_SET`, `JSON_REPLACE`, and `JSON_MERGE` are rejected
+- no relaxed JSON-path `LIKE`, range, ordering, or aggregate semantics
+
 Typical `@EncryptField` example:
 
 ```java

@@ -3,7 +3,9 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.core.rewrite.EncryptJsonRuntimeSupport;
 import io.github.jasper.mybatis.encrypt.core.support.SeparateTableEncryptionManager;
 import io.github.jasper.mybatis.encrypt.util.ObjectTraversalUtils;
 import io.github.jasper.mybatis.encrypt.util.PropertyValueAccessor;
@@ -27,6 +29,7 @@ public class ResultDecryptor {
     private final SeparateTableEncryptionManager separateTableEncryptionManager;
     private final QueryResultPlanFactory queryResultPlanFactory;
     private final PropertyValueAccessor propertyValueAccessor = new PropertyValueAccessor();
+    private final EncryptJsonRuntimeSupport encryptJsonRuntimeSupport = new EncryptJsonRuntimeSupport();
 
     /**
      * 结果解密器
@@ -89,6 +92,11 @@ public class ResultDecryptor {
             return;
         }
         for (QueryResultPlan.PropertyPlan propertyPlan : typePlan.getPropertyPlans()) {
+            EncryptJsonFieldRule jsonFieldRule = propertyPlan.getJsonFieldRule();
+            if (jsonFieldRule != null) {
+                decryptJsonField(candidate, propertyPlan.getPropertyPath(), jsonFieldRule);
+                continue;
+            }
             EncryptColumnRule rule = propertyPlan.getRule();
             if (rule.isStoredInSeparateTable()) {
                 continue;
@@ -111,5 +119,29 @@ public class ResultDecryptor {
                         decrypted, rule);
             }
         }
+    }
+
+    private void decryptJsonField(Object candidate,
+                                  String propertyPath,
+                                  EncryptJsonFieldRule jsonFieldRule) {
+        if (separateTableEncryptionManager == null) {
+            return;
+        }
+        PropertyValueAccessor.PropertyReference propertyReference =
+                propertyValueAccessor.resolve(candidate, propertyPath);
+        if (propertyReference == null || !propertyReference.canWrite()) {
+            return;
+        }
+        Object value = propertyReference.getValue();
+        if (!(value instanceof String) || StringUtils.isBlank((String) value)) {
+            return;
+        }
+        String restored = encryptJsonRuntimeSupport.restoreJsonFromHashes(
+                (String) value,
+                jsonFieldRule,
+                separateTableEncryptionManager.jsonCipherLookup(),
+                algorithmRegistry
+        );
+        propertyReference.setValue(restored);
     }
 }

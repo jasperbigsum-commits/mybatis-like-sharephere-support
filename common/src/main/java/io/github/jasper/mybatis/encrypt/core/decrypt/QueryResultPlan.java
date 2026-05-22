@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.decrypt;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -120,6 +121,7 @@ public final class QueryResultPlan {
 
         private final String propertyPath;
         private final EncryptColumnRule rule;
+        private final EncryptJsonFieldRule jsonFieldRule;
 
         /**
          * 创建属性计划。
@@ -130,6 +132,19 @@ public final class QueryResultPlan {
         public PropertyPlan(String propertyPath, EncryptColumnRule rule) {
             this.propertyPath = propertyPath;
             this.rule = rule;
+            this.jsonFieldRule = null;
+        }
+
+        /**
+         * 创建 JSON 字段属性计划。
+         *
+         * @param propertyPath 根结果对象上的属性路径
+         * @param jsonFieldRule JSON 字段规则
+         */
+        public PropertyPlan(String propertyPath, EncryptJsonFieldRule jsonFieldRule) {
+            this.propertyPath = propertyPath;
+            this.rule = null;
+            this.jsonFieldRule = jsonFieldRule;
         }
 
         /**
@@ -148,6 +163,15 @@ public final class QueryResultPlan {
          */
         public EncryptColumnRule getRule() {
             return rule;
+        }
+
+        /**
+         * 返回 JSON 字段规则。
+         *
+         * @return JSON 字段规则；非 JSON 属性时返回 {@code null}
+         */
+        public EncryptJsonFieldRule getJsonFieldRule() {
+            return jsonFieldRule;
         }
     }
 }

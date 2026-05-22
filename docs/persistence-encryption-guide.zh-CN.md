@@ -26,6 +26,42 @@
 
 ## 字段模型
 
+### JSON 字符串字段模型
+
+当主表字段本身是 JSON 字符串，且只希望其中部分精确 path 做加密时，可以使用：
+
+```java
+@EncryptJsonField(
+        column = "profile_json",
+        cipherAlgorithm = "sm4",
+        assistedQueryAlgorithm = "sm3",
+        paths = {
+                @EncryptJsonPath(
+                        path = "$.phone",
+                        storageTable = "phone_encrypt",
+                        storageIdColumn = "id",
+                        hashColumn = "phone_hash",
+                        cipherColumn = "phone_cipher"
+                )
+        }
+)
+private String profileJson;
+```
+
+运行时行为：
+
+- 写入时只处理已声明的精确 path
+- 命中 path 的明文会先替换成 hash，再把密文写入对应独立表
+- 主表 JSON 列最终保存的是“普通字段 + hash path 值”的 JSON 字符串
+- 查询结果返回时，会按 path 绑定的独立表把 hash 回填成明文 JSON
+
+明确边界：
+
+- 只支持整列 JSON 字符串写入
+- 只支持精确静态 path
+- 不支持 `JSON_SET` / `JSON_REPLACE` / `JSON_MERGE`
+- 不支持 path 级 `LIKE`、范围查询、排序和聚合放宽
+
 `@EncryptField` 中最常见的几个属性：
 
 ```java

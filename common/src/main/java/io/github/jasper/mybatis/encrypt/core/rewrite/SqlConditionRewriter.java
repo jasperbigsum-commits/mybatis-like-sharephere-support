@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonPathRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import net.sf.jsqlparser.expression.BinaryExpression;
@@ -10,6 +11,7 @@ import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.JdbcParameter;
 import net.sf.jsqlparser.expression.NotExpression;
 import net.sf.jsqlparser.expression.Parenthesis;
+import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
@@ -211,6 +213,28 @@ final class SqlConditionRewriter {
     }
 
     private Expression rewriteEquality(BinaryExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
+        JsonExtractResolution jsonResolution = resolveEncryptedJsonExtract(expression.getLeftExpression(), tableContext);
+        if (jsonResolution != null) {
+            expression.setRightExpression(rewriteJsonAssistedOperand(
+                    jsonResolution.pathRule(),
+                    expression.getRightExpression(),
+                    context,
+                    "Encrypted JSON equality condition must use prepared parameter, string literal, or CONCAT of them."
+            ));
+            context.markChanged();
+            return expression;
+        }
+        jsonResolution = resolveEncryptedJsonExtract(expression.getRightExpression(), tableContext);
+        if (jsonResolution != null) {
+            expression.setLeftExpression(rewriteJsonAssistedOperand(
+                    jsonResolution.pathRule(),
+                    expression.getLeftExpression(),
+                    context,
+                    "Encrypted JSON equality condition must use prepared parameter, string literal, or CONCAT of them."
+            ));
+            context.markChanged();
+            return expression;
+        }
         ColumnResolution left = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         ColumnResolution right = resolveEncryptedColumn(expression.getRightExpression(), tableContext);
         if (left != null && right != null) {
@@ -273,6 +297,25 @@ final class SqlConditionRewriter {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private Expression rewriteInCondition(InExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {
+        JsonExtractResolution jsonResolution = resolveEncryptedJsonExtract(expression.getLeftExpression(), tableContext);
+        if (jsonResolution != null) {
+            if (!(expression.getRightExpression() instanceof ExpressionList<?>)) {
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                        "Unsupported JSON IN operand for encrypted fields.");
+            }
+            ExpressionList expressionList = (ExpressionList) expression.getRightExpression();
+            for (int index = 0; index < expressionList.size(); index++) {
+                Expression item = (Expression) expressionList.get(index);
+                expressionList.set(index, rewriteJsonAssistedOperand(
+                        jsonResolution.pathRule(),
+                        item,
+                        context,
+                        "Encrypted JSON IN condition must use prepared parameter, string literal, or CONCAT of them."
+                ));
+            }
+            context.markChanged();
+            return expression;
+        }
         ColumnResolution resolution = resolveEncryptedColumn(expression.getLeftExpression(), tableContext);
         if (resolution == null) {
             if (expression.getRightExpression() instanceof Select) {
@@ -415,6 +458,58 @@ final class SqlConditionRewriter {
         return operandSupport.buildComposableQueryExpression(queryOperand, context,
                 valueTransformer.transformAssisted(rule, queryOperand.value()),
                 MaskingMode.HASH);
+    }
+
+    private Expression rewriteJsonAssistedOperand(EncryptJsonPathRule pathRule,
+                                                  Expression operand,
+                                                  SqlRewriteContext context,
+                                                  String unsupportedMessage) {
+        QueryOperand queryOperand = operandSupport.readComposableQueryOperand(operand, context,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND, unsupportedMessage);
+        return operandSupport.buildComposableQueryExpression(queryOperand, context,
+                valueTransformer.transformJsonAssisted(pathRule, queryOperand.value()),
+                MaskingMode.HASH);
+    }
+
+    private JsonExtractResolution resolveEncryptedJsonExtract(Expression expression, SqlTableContext tableContext) {
+        if (!(expression instanceof Function)) {
+            return null;
+        }
+        Function function = (Function) expression;
+        if (!"json_extract".equalsIgnoreCase(function.getName())
+                || function.getParameters() == null
+                || function.getParameters().size() != 2) {
+            return null;
+        }
+        Object first = function.getParameters().get(0);
+        Object second = function.getParameters().get(1);
+        if (!(first instanceof Column) || !(second instanceof StringValue)) {
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_OPERATION,
+                    "Encrypted JSON path query requires static JSON_EXTRACT(column, '$.path').");
+        }
+        Column column = (Column) first;
+        String path = ((StringValue) second).getValue();
+        EncryptJsonPathRule pathRule = tableContext.resolveJsonPath(column, path).orElse(null);
+        return pathRule == null ? null : new JsonExtractResolution(function, pathRule);
+    }
+
+    private static final class JsonExtractResolution {
+
+        private final Function function;
+        private final EncryptJsonPathRule pathRule;
+
+        private JsonExtractResolution(Function function, EncryptJsonPathRule pathRule) {
+            this.function = function;
+            this.pathRule = pathRule;
+        }
+
+        private Function function() {
+            return function;
+        }
+
+        private EncryptJsonPathRule pathRule() {
+            return pathRule;
+        }
     }
 
     @FunctionalInterface

@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.migration.plan;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationDefinition;
 import io.github.jasper.mybatis.encrypt.migration.MigrationFieldSelectorException;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
@@ -41,6 +42,19 @@ final class MigrationFieldSelectorResolver {
         boolean matched = matchesSelector(columnRule, includedSelectors);
         if (matched) {
             markResolved(columnRule, unresolvedIncludedSelectors);
+        }
+        return matched;
+    }
+
+    boolean includes(EncryptJsonFieldRule jsonFieldRule) {
+        if (includedSelectors.isEmpty()) {
+            return true;
+        }
+        boolean matched = includedSelectors.contains(normalizeSelector(jsonFieldRule.property()))
+                || includedSelectors.contains(normalizeSelector(jsonFieldRule.column()));
+        if (matched) {
+            unresolvedIncludedSelectors.remove(normalizeSelector(jsonFieldRule.property()));
+            unresolvedIncludedSelectors.remove(normalizeSelector(jsonFieldRule.column()));
         }
         return matched;
     }

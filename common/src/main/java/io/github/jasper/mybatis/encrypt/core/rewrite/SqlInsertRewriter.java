@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
@@ -28,13 +29,16 @@ final class SqlInsertRewriter {
     private final SqlWriteExpressionRewriter writeExpressionRewriter;
     private final EncryptionValueTransformer valueTransformer;
     private final Function<String, String> identifierQuoter;
+    private final io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry algorithmRegistry;
 
     SqlInsertRewriter(SqlWriteExpressionRewriter writeExpressionRewriter,
                       EncryptionValueTransformer valueTransformer,
-                      Function<String, String> identifierQuoter) {
+                      Function<String, String> identifierQuoter,
+                      io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry algorithmRegistry) {
         this.writeExpressionRewriter = writeExpressionRewriter;
         this.valueTransformer = valueTransformer;
         this.identifierQuoter = identifierQuoter;
+        this.algorithmRegistry = algorithmRegistry;
     }
 
     boolean rewrite(Insert insert, EncryptTableRule tableRule, SqlRewriteContext context) {
@@ -61,6 +65,14 @@ final class SqlInsertRewriter {
             Expression expression = originalExpressions.get(index);
             EncryptColumnRule rule = tableRule.findByColumn(column.getColumnName()).orElse(null);
             if (rule == null) {
+                EncryptJsonFieldRule jsonFieldRule = tableRule.findJsonFieldByColumn(column.getColumnName()).orElse(null);
+                if (jsonFieldRule != null) {
+                    changed = true;
+                    rewrittenColumns.add(column);
+                    rewrittenExpressions.add(writeExpressionRewriter.rewriteEncryptJson(expression, jsonFieldRule, context,
+                            algorithmRegistry).expression());
+                    continue;
+                }
                 rewrittenColumns.add(column);
                 rewrittenExpressions.add(writeExpressionRewriter.passthrough(expression, context));
                 continue;
@@ -156,6 +168,14 @@ final class SqlInsertRewriter {
                 }
                 EncryptColumnRule rule = columnRules.get(colIndex);
                 if (rule == null) {
+                    EncryptJsonFieldRule jsonFieldRule =
+                            tableRule.findJsonFieldByColumn(originalColumns.get(colIndex).getColumnName()).orElse(null);
+                    if (jsonFieldRule != null) {
+                        WriteValue writeValue = writeExpressionRewriter.rewriteEncryptJson(expression, jsonFieldRule,
+                                context, algorithmRegistry);
+                        newRowExpressions.add(writeValue.expression());
+                        continue;
+                    }
                     newRowExpressions.add(writeExpressionRewriter.passthrough(expression, context));
                 } else if (rule.isStoredInSeparateTable()) {
                     newRowExpressions.add(writeExpressionRewriter.rewriteSeparateTableReference(expression, context));

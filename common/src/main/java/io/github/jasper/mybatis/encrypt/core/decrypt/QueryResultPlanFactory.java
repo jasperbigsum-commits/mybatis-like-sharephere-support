@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.util.JSqlParserSupport;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
@@ -150,6 +151,10 @@ public final class QueryResultPlanFactory {
         for (EncryptColumnRule rule : tableRule.getColumnRules()) {
             String propertyPath = concatPropertyPath(propertyPrefix, rule.property());
             registerPropertyPlan(rootType, propertyPath, propertyPlans);
+        }
+        for (EncryptJsonFieldRule rule : tableRule.getJsonFieldRules()) {
+            String propertyPath = concatPropertyPath(propertyPrefix, rule.property());
+            propertyPlans.putIfAbsent(propertyPath, new QueryResultPlan.PropertyPlan(propertyPath, rule));
         }
     }
 

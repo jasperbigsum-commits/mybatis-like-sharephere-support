@@ -37,6 +37,9 @@ through real MyBatis execution tests.
 | Top-level `MAX(encrypted_column)` / `FIRST(encrypted_column)` | Supported with warning | Same-table fields require `assistedQueryColumn` as an explicit opt-in and aggregate the ciphertext column so the result can be decrypted; separate-table fields aggregate the main-table reference value and are hydrated after read. Results reflect technical values, not plaintext ordering semantics. |
 | Single-sided range predicates `>`, `>=`, `<`, `<=` | Supported with warning | Same-table fields require `assistedQueryColumn`; separate-table fields compare the main-table reference column directly. Results reflect technical values for cursor-style comparisons, not plaintext business ordering. |
 | `IN (?, ?, ?)` | Supported | Same-table fields use assisted query column when available, otherwise `storageColumn`; separate-table fields rewrite directly to the main-table reference/hash column. |
+| `json_extract(encrypted_json_column, '$.path') = ?` | Supported | Exact static path only; the right-side operand is rewritten to the path's assisted hash value stored in the JSON string. |
+| `json_extract(encrypted_json_column, '$.path') != ?` | Supported | Exact static path only; the right-side operand is rewritten to the path's assisted hash value stored in the JSON string. |
+| `json_extract(encrypted_json_column, '$.path') IN (...)` | Supported | Exact static path only; every operand is transformed to the path's assisted hash value. |
 | `IS NULL` / `IS NOT NULL` | Supported | Same-table fields check `storageColumn`; separate-table fields check the main-table reference/hash column directly. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
 | `NOT IN` | Supported | Uses the same rewrite path as `IN`, preserving `NOT`. |
@@ -87,6 +90,8 @@ Avoid these if the field is encrypted:
 | `ORDER BY encrypted_column` | Supported with assisted/hash column | Requires `assistedQueryColumn`; same-table fields sort by the assisted/hash column, separate-table fields sort by the main-table reference column, and a warning is logged because the order reflects technical values rather than plaintext semantics. |
 | Aggregate functions on encrypted fields except supported `COUNT`, top-level `MAX`, and top-level `FIRST` variants | Rejected | `SUM(phone)`, `AVG(phone)`, `MIN(phone)`, `GROUP_CONCAT(phone)` and similar expressions are not semantically reliable. `MAX` and `FIRST` are only allowed in the outer select list with technical-value warning behavior. |
 | Window functions referencing encrypted fields | Rejected | `PARTITION BY`, analytic `ORDER BY`, filter expressions, and named windows fail fast when encrypted fields are involved. |
+| JSON mutation functions on `@EncryptJsonField` | Rejected | `JSON_SET`, `JSON_REPLACE`, `JSON_MERGE`, and similar partial JSON updates are not supported for encrypted JSON fields. |
+| Dynamic or non-exact JSON path expressions | Rejected | Only exact static paths registered under `@EncryptJsonPath` are supported. |
 | Separate-table encrypted field in `IN` subquery projection | Rejected | The plugin currently only supports same-table encrypted field comparison subqueries. |
 | Bare `*` in multi-table / unaliased derived query that contains encrypted table rules | Rejected | The plugin cannot safely decide which table the wildcard should expand from; use explicit `table.*` or `alias.*` to prevent encrypted alias projections from being covered by later wildcard columns. A single derived table with an alias is treated like a single source and is rewritten to `alias.*`. |
 

@@ -3,6 +3,8 @@ package io.github.jasper.mybatis.encrypt.migration.jdbc;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonPathPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
 import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
 import io.github.jasper.mybatis.encrypt.migration.MigrationExecutionException;
@@ -11,6 +13,8 @@ import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecordStateInspector;
 import io.github.jasper.mybatis.encrypt.migration.MigrationRecordWriter;
 import io.github.jasper.mybatis.encrypt.migration.ReferenceIdGenerator;
+import io.github.jasper.mybatis.encrypt.core.rewrite.EncryptJsonRuntimeSupport;
+import io.github.jasper.mybatis.encrypt.core.rewrite.EncryptJsonWriteResult;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import java.sql.Connection;
@@ -38,6 +42,7 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
     private final ReferenceIdGenerator referenceIdGenerator;
     private final MigrationValueResolver valueResolver;
     private final MigrationRecordStateSupport recordStateSupport;
+    private final EncryptJsonRuntimeSupport encryptJsonRuntimeSupport = new EncryptJsonRuntimeSupport();
 
     /**
      * jdbc迁移记录写入
@@ -111,6 +116,47 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                         derivedFieldValues.getMaskedValue(), currentRow);
             }
         }
+        for (EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+            Object currentValue = currentRow.get(jsonFieldPlan.getSourceColumn());
+            if (isBlankValue(currentValue)) {
+                continue;
+            }
+            EncryptJsonWriteResult jsonWriteResult = encryptJsonRuntimeSupport.rewriteJsonForWrite(
+                    String.valueOf(currentValue),
+                    jsonFieldPlan.toJsonFieldRule(),
+                    algorithmRegistry
+            );
+            if (StringUtils.isBlank(jsonWriteResult.rewrittenJson())
+                    || valueEquals(currentRow.get(jsonFieldPlan.getSourceColumn()), jsonWriteResult.rewrittenJson())) {
+                continue;
+            }
+            for (EncryptJsonWriteResult.PathWrite pathWrite : jsonWriteResult.pathWrites()) {
+                if (!existsSeparateReferenceByPath(connection, pathWrite)) {
+                    insertSeparateJsonPathRow(connection, pathWrite, referenceIdGenerator.nextReferenceId(
+                            new EntityMigrationColumnPlan(
+                                    jsonFieldPlan.getProperty(),
+                                    jsonFieldPlan.getSourceColumn(),
+                                    pathWrite.pathRule().cipherColumn(),
+                                    pathWrite.pathRule().hashColumn(),
+                                    null,
+                                    null,
+                                    pathWrite.pathRule().cipherAlgorithm(),
+                                    pathWrite.pathRule().assistedQueryAlgorithm(),
+                                    null,
+                                    null,
+                                    true,
+                                    pathWrite.pathRule().storageTable(),
+                                    pathWrite.pathRule().storageIdColumn(),
+                                    null
+                            ),
+                            record
+                    ));
+                    changed = true;
+                }
+            }
+            putIfChanged(mainTableUpdates, jsonFieldPlan.getSourceColumn(),
+                    jsonWriteResult.rewrittenJson(), currentRow);
+        }
         if (backupUpdates.isEmpty() && mainTableUpdates.isEmpty()) {
             return changed;
         }
@@ -146,6 +192,25 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
                 return true;
             }
         }
+        for (EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+            Object currentValue = currentRow.get(jsonFieldPlan.getSourceColumn());
+            if (isBlankValue(currentValue)) {
+                continue;
+            }
+            EncryptJsonWriteResult jsonWriteResult = encryptJsonRuntimeSupport.rewriteJsonForWrite(
+                    String.valueOf(currentValue),
+                    jsonFieldPlan.toJsonFieldRule(),
+                    algorithmRegistry
+            );
+            if (!valueEquals(currentValue, jsonWriteResult.rewrittenJson())) {
+                return true;
+            }
+            for (EncryptJsonWriteResult.PathWrite pathWrite : jsonWriteResult.pathWrites()) {
+                if (!existsSeparateReferenceByPath(connection, pathWrite)) {
+                    return true;
+                }
+            }
+        }
         return false;
     }
 
@@ -170,6 +235,9 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             if (columnPlan.shouldWriteBackup()) {
                 columns.add(columnPlan.getBackupColumn());
             }
+        }
+        for (EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+            columns.add(jsonFieldPlan.getSourceColumn());
         }
         StringBuilder sql = new StringBuilder("select ");
         int index = 0;
@@ -246,6 +314,33 @@ public class JdbcMigrationRecordWriter implements MigrationRecordWriter, Migrati
             return true;
         }
         return sourceValueMatches(columnPlan, plainValue, currentRow.get(columnPlan.getSourceColumn()), derivedFieldValues);
+    }
+
+    private boolean existsSeparateReferenceByPath(Connection connection,
+                                                  EncryptJsonWriteResult.PathWrite pathWrite) throws SQLException {
+        String sql = "select 1 from " + quote(pathWrite.pathRule().storageTable())
+                + " where " + quote(pathWrite.pathRule().hashColumn()) + " = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, pathWrite.hashValue());
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private void insertSeparateJsonPathRow(Connection connection,
+                                           EncryptJsonWriteResult.PathWrite pathWrite,
+                                           Object storageId) throws SQLException {
+        String sql = "insert into " + quote(pathWrite.pathRule().storageTable())
+                + " (" + quote(pathWrite.pathRule().storageIdColumn())
+                + ", " + quote(pathWrite.pathRule().hashColumn())
+                + ", " + quote(pathWrite.pathRule().cipherColumn()) + ") values (?, ?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            MigrationJdbcParameterBinder.bind(statement, 1, storageId);
+            statement.setString(2, pathWrite.hashValue());
+            statement.setString(3, pathWrite.cipherValue());
+            statement.executeUpdate();
+        }
     }
 
     private boolean isAlreadyMigratedWithoutPlaintext(Connection connection,

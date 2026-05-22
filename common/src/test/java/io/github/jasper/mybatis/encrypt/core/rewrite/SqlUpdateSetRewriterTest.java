@@ -76,11 +76,12 @@ class SqlUpdateSetRewriterTest {
     }
 
     private SqlUpdateSetRewriter newUpdateSetRewriter() {
-        EncryptionValueTransformer transformer = new EncryptionValueTransformer(new AlgorithmRegistry(
+        AlgorithmRegistry algorithmRegistry = new AlgorithmRegistry(
                 Collections.singletonMap("sm4", new Sm4CipherAlgorithm("test-key")),
                 Collections.singletonMap("sm3", new Sm3AssistedQueryAlgorithm()),
                 Collections.singletonMap("like", new NormalizedLikeQueryAlgorithm())
-        ));
+        );
+        EncryptionValueTransformer transformer = new EncryptionValueTransformer(algorithmRegistry);
         SqlConditionRewriter conditionRewriter = new SqlConditionRewriter(
                 transformer,
                 this::buildColumn,
@@ -91,7 +92,7 @@ class SqlUpdateSetRewriterTest {
                 }
         );
         SqlWriteExpressionRewriter writeExpressionRewriter = new SqlWriteExpressionRewriter(transformer, conditionRewriter);
-        return new SqlUpdateSetRewriter(writeExpressionRewriter, transformer, this::buildColumn);
+        return new SqlUpdateSetRewriter(writeExpressionRewriter, transformer, this::buildColumn, algorithmRegistry);
     }
 
     private SqlRewriteContext rewriteContext(String sql, List<ParameterMapping> parameterMappings, Object parameterObject) {

@@ -5,6 +5,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonPathRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 
@@ -38,7 +39,16 @@ final class EncryptionValueTransformer {
         return applyTransform(rule, plainValue, algorithmRegistry.like(rule.effectiveMaskedAlgorithm()));
     }
 
+    String transformJsonAssisted(EncryptJsonPathRule rule, Object plainValue) {
+        return applyTransform("json path " + rule.path(), plainValue,
+                algorithmRegistry.assisted(rule.assistedQueryAlgorithm()));
+    }
+
     private String applyTransform(EncryptColumnRule rule, Object plainValue, Object algorithm) {
+        return applyTransform(rule.property(), plainValue, algorithm);
+    }
+
+    private String applyTransform(String debugName, Object plainValue, Object algorithm) {
         if (plainValue == null) {
             return null;
         }
@@ -53,6 +63,6 @@ final class EncryptionValueTransformer {
             return ((LikeQueryAlgorithm) algorithm).transform(value);
         }
         throw new EncryptionConfigurationException(EncryptionErrorCode.GENERAL_FAILURE,
-                "Unsupported algorithm for field: " + rule.property());
+                "Unsupported algorithm for field: " + debugName);
     }
 }

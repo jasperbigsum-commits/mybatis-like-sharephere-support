@@ -256,6 +256,41 @@ class MigrationExecutionFlowTest extends MigrationJdbcTestSupport {
         }
     }
 
+    @Test
+    void shouldMigrateEncryptJsonFieldIntoHashJsonAndSeparateCipherRow() throws Exception {
+        DataSource dataSource = newDataSource("json_field_migration");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, profile_json varchar(1024))",
+                "create table phone_encrypt (id varchar(64) primary key, phone_hash varchar(128), phone_cipher varchar(512))",
+                "insert into user_account (id, profile_json) values (1, '{\"phone\":\"13800138000\",\"name\":\"Aster\"}')");
+
+        MigrationTask task = JdbcMigrationTasks.create(
+                dataSource,
+                EntityMigrationDefinition.builder(JsonEncryptedUserEntity.class, "id").build(),
+                metadataRegistry(),
+                algorithmRegistry(),
+                properties(),
+                new FileMigrationStateStore(createTempDirectory("migration-state-json-field"))
+        );
+
+        MigrationReport report = task.execute();
+
+        assertEquals(MigrationStatus.COMPLETED, report.getStatus());
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet mainResult = statement.executeQuery("select profile_json from user_account where id = 1")) {
+            assertTrue(mainResult.next());
+            String migratedJson = mainResult.getString(1);
+            assertTrue(migratedJson.contains("name"));
+            assertTrue(migratedJson.contains("phone"));
+            assertTrue(!migratedJson.contains("13800138000"));
+            try (ResultSet externalResult = statement.executeQuery("select phone_cipher from phone_encrypt")) {
+                assertTrue(externalResult.next());
+                assertNotNull(externalResult.getString(1));
+            }
+        }
+    }
+
     /**
      * 测试目的：验证数据迁移任务在同表模式和独立表模式下的完整执行结果。
      * 测试场景：准备源表、独立表和迁移状态目录，执行任务后校验密文数据、辅助列、检查点和报告统计。

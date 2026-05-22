@@ -11,6 +11,8 @@ import java.util.Optional;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonPathRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
@@ -73,6 +75,18 @@ final class SqlTableContext {
         return Optional.ofNullable(candidate);
     }
 
+    Optional<EncryptJsonFieldRule> resolveJsonField(Column column) {
+        EncryptTableRule tableRule = resolveTableRule(column);
+        return tableRule == null ? Optional.<EncryptJsonFieldRule>empty()
+                : tableRule.findJsonFieldByColumn(column.getColumnName());
+    }
+
+    Optional<EncryptJsonPathRule> resolveJsonPath(Column column, String path) {
+        EncryptTableRule tableRule = resolveTableRule(column);
+        return tableRule == null ? Optional.<EncryptJsonPathRule>empty()
+                : tableRule.findJsonPathRule(column.getColumnName(), path);
+    }
+
     List<EncryptColumnRule> rulesForSelectExpansion(Table table) {
         if (table != null && StringUtils.isNotBlank(table.getName())) {
             EncryptTableRule rule = ruleByAlias.get(NameUtils.normalizeIdentifier(table.getName()));
@@ -110,6 +124,31 @@ final class SqlTableContext {
 
     boolean isEmpty() {
         return ruleByAlias.isEmpty();
+    }
+
+    private EncryptTableRule resolveTableRule(Column column) {
+        if (column == null) {
+            return null;
+        }
+        if (column.getTable() != null && StringUtils.isNotBlank(column.getTable().getName())) {
+            EncryptTableRule tableRule = ruleByAlias.get(NameUtils.normalizeIdentifier(column.getTable().getName()));
+            if (tableRule != null) {
+                return tableRule;
+            }
+            return outerContext == null ? null : outerContext.resolveTableRule(column);
+        }
+        EncryptTableRule candidate = null;
+        for (EncryptTableRule tableRule : uniqueRules()) {
+            if (tableRule.findJsonFieldByColumn(column.getColumnName()).isPresent()
+                    || tableRule.findByColumn(column.getColumnName()).isPresent()) {
+                if (candidate != null && candidate != tableRule) {
+                    throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.AMBIGUOUS_ENCRYPTED_REFERENCE,
+                            "Ambiguous encrypted column reference: " + column.getFullyQualifiedName());
+                }
+                candidate = tableRule;
+            }
+        }
+        return candidate;
     }
 
     private EncryptColumnRule matchProjectedRule(EncryptTableRule tableRule, String columnName) {

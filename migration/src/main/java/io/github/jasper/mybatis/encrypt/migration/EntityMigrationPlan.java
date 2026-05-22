@@ -17,6 +17,7 @@ public final class EntityMigrationPlan {
     private final int batchSize;
     private final boolean verifyAfterWrite;
     private final List<EntityMigrationColumnPlan> columnPlans;
+    private final List<EntityMigrationJsonFieldPlan> jsonFieldPlans;
 
     /**
      * Create one immutable entity migration plan.
@@ -38,6 +39,32 @@ public final class EntityMigrationPlan {
                                int batchSize,
                                boolean verifyAfterWrite,
                                List<EntityMigrationColumnPlan> columnPlans) {
+        this(dataSourceName, entityType, entityName, tableName, cursorColumns, batchSize, verifyAfterWrite,
+                columnPlans, Collections.<EntityMigrationJsonFieldPlan>emptyList());
+    }
+
+    /**
+     * Create one immutable entity migration plan.
+     *
+     * @param dataSourceName 数据源名称
+     * @param entityType registered entity type, or {@code null} for table-driven tasks
+     * @param entityName entity or task display name
+     * @param tableName normalized main-table name
+     * @param cursorColumns ordered stable cursor columns in the main table
+     * @param batchSize migration batch size
+     * @param verifyAfterWrite whether write-after verification is enabled
+     * @param columnPlans immutable column migration plans
+     * @param jsonFieldPlans immutable JSON field migration plans
+     */
+    public EntityMigrationPlan(String dataSourceName,
+                               Class<?> entityType,
+                               String entityName,
+                               String tableName,
+                               List<String> cursorColumns,
+                               int batchSize,
+                               boolean verifyAfterWrite,
+                               List<EntityMigrationColumnPlan> columnPlans,
+                               List<EntityMigrationJsonFieldPlan> jsonFieldPlans) {
         this.dataSourceName = dataSourceName;
         this.entityType = entityType;
         this.entityName = entityName;
@@ -46,6 +73,9 @@ public final class EntityMigrationPlan {
         this.batchSize = batchSize;
         this.verifyAfterWrite = verifyAfterWrite;
         this.columnPlans = Collections.unmodifiableList(columnPlans);
+        this.jsonFieldPlans = jsonFieldPlans == null
+                ? Collections.<EntityMigrationJsonFieldPlan>emptyList()
+                : Collections.unmodifiableList(new ArrayList<EntityMigrationJsonFieldPlan>(jsonFieldPlans));
     }
 
     /**
@@ -66,7 +96,8 @@ public final class EntityMigrationPlan {
                                int batchSize,
                                boolean verifyAfterWrite,
                                List<EntityMigrationColumnPlan> columnPlans) {
-        this(null, entityType, entityName, tableName, cursorColumns, batchSize, verifyAfterWrite, columnPlans);
+        this(null, entityType, entityName, tableName, cursorColumns, batchSize, verifyAfterWrite, columnPlans,
+                Collections.<EntityMigrationJsonFieldPlan>emptyList());
     }
 
     /**
@@ -159,5 +190,14 @@ public final class EntityMigrationPlan {
      */
     public List<EntityMigrationColumnPlan> getColumnPlans() {
         return columnPlans;
+    }
+
+    /**
+     * Return the immutable JSON field migration plans.
+     *
+     * @return JSON field plans
+     */
+    public List<EntityMigrationJsonFieldPlan> getJsonFieldPlans() {
+        return jsonFieldPlans;
     }
 }

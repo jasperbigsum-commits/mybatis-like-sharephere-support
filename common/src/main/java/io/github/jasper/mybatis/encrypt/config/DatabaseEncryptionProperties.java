@@ -449,6 +449,11 @@ public class DatabaseEncryptionProperties {
          */
         private List<FieldRuleProperties> fields = new ArrayList<>();
 
+        /**
+         * JSON 字段规则集合。
+         */
+        private List<JsonFieldRuleProperties> jsonFields = new ArrayList<JsonFieldRuleProperties>();
+
     }
 
     /**
@@ -546,5 +551,79 @@ public class DatabaseEncryptionProperties {
             String normalizedValue = NameUtils.normalizeIdentifier(value);
             return normalizedValue != null && normalizedValue.equals(normalizedExpected);
         }
+    }
+
+    /**
+     * JSON 字段级加密规则定义。
+     */
+    @Data
+    public static class JsonFieldRuleProperties {
+
+        /**
+         * 实体属性名；省略时优先按 {@link #column} 推断驼峰属性名。
+         */
+        private String property;
+
+        /**
+         * 应用 SQL 使用的主表 JSON 列名；配置省略时使用属性名的 snake_case。
+         */
+        private String column;
+
+        /**
+         * 字段级默认密文算法 bean 名称。
+         */
+        private String cipherAlgorithm = "sm4";
+
+        /**
+         * 字段级默认 hash 算法 bean 名称。
+         */
+        private String assistedQueryAlgorithm = "sm3";
+
+        /**
+         * 精确 JSON path 规则集合。
+         */
+        private List<JsonPathRuleProperties> paths = new ArrayList<JsonPathRuleProperties>();
+    }
+
+    /**
+     * JSON path 绑定到独立表的规则定义。
+     */
+    @Data
+    public static class JsonPathRuleProperties {
+
+        /**
+         * 精确 JSON path。
+         */
+        private String path;
+
+        /**
+         * 独立表名。
+         */
+        private String storageTable;
+
+        /**
+         * 独立表主键列。
+         */
+        private String storageIdColumn = "id";
+
+        /**
+         * hash 列名。
+         */
+        private String hashColumn;
+
+        /**
+         * 密文列名。
+         */
+        private String cipherColumn;
+
+        /**
+         * path 级覆盖密文算法 bean 名称。
+         */
+        private String cipherAlgorithm;
+
+        /**
+         * path 级覆盖 hash 算法 bean 名称。
+         */
+        private String assistedQueryAlgorithm;
     }
 }

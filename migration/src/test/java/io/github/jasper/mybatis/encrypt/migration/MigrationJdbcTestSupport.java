@@ -7,6 +7,8 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.PhoneNumberMaskLikeQue
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
+import io.github.jasper.mybatis.encrypt.annotation.EncryptJsonField;
+import io.github.jasper.mybatis.encrypt.annotation.EncryptJsonPath;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
@@ -330,5 +332,27 @@ abstract class MigrationJdbcTestSupport {
                 storageColumn = "archive_phone_cipher"
         )
         private String archivePhone;
+    }
+
+    @EncryptTable("user_account")
+    static class JsonEncryptedUserEntity {
+
+        private Long id;
+
+        @EncryptJsonField(
+                column = "profile_json",
+                cipherAlgorithm = "sm4",
+                assistedQueryAlgorithm = "sm3",
+                paths = {
+                        @EncryptJsonPath(
+                                path = "$.phone",
+                                storageTable = "phone_encrypt",
+                                storageIdColumn = "id",
+                                hashColumn = "phone_hash",
+                                cipherColumn = "phone_cipher"
+                        )
+                }
+        )
+        private String profileJson;
     }
 }

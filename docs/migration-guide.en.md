@@ -52,6 +52,25 @@ Behavior:
 - Update the main table source column to the external reference id last
 - Optionally verify both the main-table reference and external-table row
 
+### 3. JSON string field mode
+
+Use this when one main-table column is itself a JSON string and only selected exact paths should be encrypted.
+
+Migration behavior:
+
+- reads the original plaintext JSON string from the main table
+- processes only the exact `@EncryptJsonPath` entries declared under `@EncryptJsonField`
+- derives hash and ciphertext for each matched path
+- replaces matched plaintext path values with hashes inside the main-table JSON string
+- de-duplicates and writes `hashColumn + cipherColumn` rows into each path's external table
+- writes the final hash-bearing JSON string back to the original main-table column
+
+Boundaries:
+
+- missing paths are skipped
+- path shape mismatches fail fast
+- JSON mutation functions are not treated as migration input
+
 ## Main entry point
 
 ```java

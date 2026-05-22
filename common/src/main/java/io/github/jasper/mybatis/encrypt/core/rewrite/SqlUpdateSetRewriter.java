@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
@@ -20,13 +21,16 @@ final class SqlUpdateSetRewriter {
     private final SqlWriteExpressionRewriter writeExpressionRewriter;
     private final EncryptionValueTransformer valueTransformer;
     private final BiFunction<Column, String, Column> columnBuilder;
+    private final io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry algorithmRegistry;
 
     SqlUpdateSetRewriter(SqlWriteExpressionRewriter writeExpressionRewriter,
                          EncryptionValueTransformer valueTransformer,
-                         BiFunction<Column, String, Column> columnBuilder) {
+                         BiFunction<Column, String, Column> columnBuilder,
+                         io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry algorithmRegistry) {
         this.writeExpressionRewriter = writeExpressionRewriter;
         this.valueTransformer = valueTransformer;
         this.columnBuilder = columnBuilder;
+        this.algorithmRegistry = algorithmRegistry;
     }
 
     boolean rewrite(Update update, SqlTableContext tableContext, SqlRewriteContext context) {
@@ -40,6 +44,15 @@ final class SqlUpdateSetRewriter {
                 Expression expression = updateValues.get(index);
                 EncryptColumnRule rule = tableContext.resolve(column).orElse(null);
                 if (rule == null) {
+                    EncryptJsonFieldRule jsonFieldRule = tableContext.resolveJsonField(column).orElse(null);
+                    if (jsonFieldRule != null) {
+                        rewrittenUpdateSets.add(new UpdateSet(
+                                column,
+                                writeExpressionRewriter.rewriteEncryptJson(expression, jsonFieldRule, context,
+                                        algorithmRegistry).expression()));
+                        changed = true;
+                        continue;
+                    }
                     rewrittenUpdateSets.add(new UpdateSet(column, writeExpressionRewriter.passthrough(expression, context)));
                     continue;
                 }

@@ -154,6 +154,9 @@ final class SeparateTableResultHydrator {
             handled = true;
             for (QueryResultPlan.PropertyPlan propertyPlan : typePlan.getPropertyPlans()) {
                 EncryptColumnRule rule = propertyPlan.getRule();
+                if (rule == null) {
+                    continue;
+                }
                 if (!rule.isStoredInSeparateTable()) {
                     continue;
                 }

@@ -3,9 +3,13 @@ package io.github.jasper.mybatis.encrypt.migration.plan;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
+import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonPathRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationDefinition;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonPathPlan;
 import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
 import io.github.jasper.mybatis.encrypt.migration.MigrationDefinitionException;
 import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
@@ -65,16 +69,18 @@ public class EntityMigrationPlanFactory {
         String normalizedTable = resolved.tableRule().getTableName();
         MigrationFieldSelectorResolver selectorResolver = new MigrationFieldSelectorResolver(definition);
         List<EntityMigrationColumnPlan> columnPlans = collectColumnPlans(resolved, normalizedTable, selectorResolver);
+        List<EntityMigrationJsonFieldPlan> jsonFieldPlans = collectJsonFieldPlans(resolved, normalizedTable, selectorResolver);
         selectorResolver.assertResolved();
-        if (columnPlans.isEmpty()) {
+        if (columnPlans.isEmpty() && jsonFieldPlans.isEmpty()) {
             throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
                     "No encrypt fields available for migration target: "
                     + resolved.entityName());
         }
         validateCursorColumns(definition.getCursorColumns(), columnPlans);
+        validateJsonCursorColumns(definition.getCursorColumns(), jsonFieldPlans);
         return new EntityMigrationPlan(dataSourceName, resolved.entityType(), resolved.entityName(), normalizedTable,
                 definition.getCursorColumns(),
-                definition.getBatchSize(), definition.isVerifyAfterWrite(), columnPlans);
+                definition.getBatchSize(), definition.isVerifyAfterWrite(), columnPlans, jsonFieldPlans);
     }
 
     private List<EntityMigrationColumnPlan> collectColumnPlans(ResolvedDefinition resolved,
@@ -109,6 +115,38 @@ public class EntityMigrationPlanFactory {
         return new ArrayList<>(deduplicatedPlans.values());
     }
 
+    private List<EntityMigrationJsonFieldPlan> collectJsonFieldPlans(ResolvedDefinition resolved,
+                                                                     String normalizedTable,
+                                                                     MigrationFieldSelectorResolver selectorResolver) {
+        List<EntityMigrationJsonFieldPlan> plans = new ArrayList<EntityMigrationJsonFieldPlan>();
+        for (EncryptJsonFieldRule jsonFieldRule : resolved.tableRule().getJsonFieldRules()) {
+            rejectDtoStyleJsonRuleIfNecessary(resolved, normalizedTable, jsonFieldRule);
+            if (!selectorResolver.includes(jsonFieldRule)) {
+                continue;
+            }
+            List<EntityMigrationJsonPathPlan> pathPlans = new ArrayList<EntityMigrationJsonPathPlan>();
+            for (EncryptJsonPathRule pathRule : jsonFieldRule.pathRules()) {
+                pathPlans.add(new EntityMigrationJsonPathPlan(
+                        pathRule.path(),
+                        pathRule.storageTable(),
+                        pathRule.storageIdColumn(),
+                        pathRule.hashColumn(),
+                        pathRule.cipherColumn(),
+                        pathRule.cipherAlgorithm(),
+                        pathRule.assistedQueryAlgorithm()
+                ));
+            }
+            plans.add(new EntityMigrationJsonFieldPlan(
+                    jsonFieldRule.property(),
+                    jsonFieldRule.column(),
+                    jsonFieldRule.cipherAlgorithm(),
+                    jsonFieldRule.assistedQueryAlgorithm(),
+                    pathPlans
+            ));
+        }
+        return plans;
+    }
+
     private boolean sameBackupColumn(String first, String second) {
         return Objects.equals(NameUtils.normalizeIdentifier(first), NameUtils.normalizeIdentifier(second));
     }
@@ -122,6 +160,18 @@ public class EntityMigrationPlanFactory {
             throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
                     "Migration only supports registered entity rules and ignores DTO fields: "
                     + resolved.entityName());
+        }
+    }
+
+    private void rejectDtoStyleJsonRuleIfNecessary(ResolvedDefinition resolved,
+                                                   String normalizedTable,
+                                                   EncryptJsonFieldRule jsonFieldRule) {
+        if (resolved.entityType() != null
+                && StringUtils.isNotBlank(jsonFieldRule.table())
+                && !normalizedTable.equals(NameUtils.normalizeIdentifier(jsonFieldRule.table()))) {
+            throw new MigrationDefinitionException(MigrationErrorCode.DEFINITION_INVALID,
+                    "Migration only supports registered entity rules and ignores DTO fields: "
+                            + resolved.entityName());
         }
     }
 
@@ -191,6 +241,19 @@ public class EntityMigrationPlanFactory {
                     throw new MigrationDefinitionException(MigrationErrorCode.CURSOR_COLUMN_MUTABLE,
                             "Migration cursor column will be mutated during migration: " + cursorColumn
                                     + ", property=" + columnPlan.getProperty());
+                }
+            }
+        }
+    }
+
+    private void validateJsonCursorColumns(List<String> cursorColumns, List<EntityMigrationJsonFieldPlan> jsonFieldPlans) {
+        for (String cursorColumn : cursorColumns) {
+            for (EntityMigrationJsonFieldPlan jsonFieldPlan : jsonFieldPlans) {
+                if (NameUtils.normalizeIdentifier(cursorColumn)
+                        .equals(NameUtils.normalizeIdentifier(jsonFieldPlan.getSourceColumn()))) {
+                    throw new MigrationDefinitionException(MigrationErrorCode.CURSOR_COLUMN_MUTABLE,
+                            "Migration cursor column will be mutated during migration: " + cursorColumn
+                                    + ", property=" + jsonFieldPlan.getProperty());
                 }
             }
         }

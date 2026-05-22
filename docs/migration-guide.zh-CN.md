@@ -52,6 +52,25 @@
 - 最后再将主表原字段更新为外表引用 id
 - 可选校验主表引用和外表数据是否一致
 
+### 3. JSON 字符串字段模式
+
+适用于主表字段本身是 JSON 字符串，且只有部分精确 path 需要加密的场景。
+
+迁移行为：
+
+- 读取主表原始 JSON 字符串
+- 只处理 `@EncryptJsonField` 下声明过的精确 `@EncryptJsonPath`
+- 对命中的 path 计算 hash 和密文
+- 把主表 JSON 对应 path 的明文替换为 hash
+- 向每个 path 绑定的独立表去重写入 `hashColumn + cipherColumn`
+- 最终把改写后的 hash JSON 写回主表原列
+
+边界：
+
+- path 不存在时跳过
+- path 结构不匹配时直接失败
+- 不支持把 JSON 局部更新函数当作迁移入口
+
 ## 核心入口
 
 ```java

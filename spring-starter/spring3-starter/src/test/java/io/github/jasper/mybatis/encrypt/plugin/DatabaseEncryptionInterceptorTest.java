@@ -385,6 +385,35 @@ class DatabaseEncryptionInterceptorTest {
         assertNotSame(mappedStatement, executor.lastMappedStatement);
     }
 
+    @Test
+    void shouldPersistPreparedJsonPathWritesAfterExecutorUpdate() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingSeparateTableEncryptionManager manager = new RecordingSeparateTableEncryptionManager();
+        TestExecutor executor = new TestExecutor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(manager);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                "test.updateJsonField",
+                SqlCommandType.UPDATE,
+                Map.class,
+                "update user_account set profile_json = ? where id = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "profileJson", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "id", Long.class).build()
+                )
+        );
+
+        Invocation invocation = new Invocation(
+                executor,
+                executorMethod("update", MappedStatement.class, Object.class),
+                new Object[]{mappedStatement, Map.of("profileJson", "{\"phone\":\"13800138000\"}", "id", 1L)}
+        );
+
+        interceptor.intercept(invocation);
+
+        assertEquals(1, manager.persistJsonWriteCalls);
+    }
+
     /**
      * 测试目的：验证标注 @SkipSqlRewrite 的 Mapper 方法在 Executor 阶段跳过 SQL 改写。
      * 测试场景：使用标注了 @SkipSqlRewrite 的接口方法名作为 statement id，
@@ -539,6 +568,22 @@ class DatabaseEncryptionInterceptorTest {
         idCardRule.setLikeQueryColumn("id_card_like");
         tableRule.getFields().add(idCardRule);
 
+        DatabaseEncryptionProperties.JsonFieldRuleProperties jsonFieldRule =
+                new DatabaseEncryptionProperties.JsonFieldRuleProperties();
+        jsonFieldRule.setProperty("profileJson");
+        jsonFieldRule.setColumn("profile_json");
+        jsonFieldRule.setCipherAlgorithm("sm4");
+        jsonFieldRule.setAssistedQueryAlgorithm("sm3");
+        DatabaseEncryptionProperties.JsonPathRuleProperties phonePathRule =
+                new DatabaseEncryptionProperties.JsonPathRuleProperties();
+        phonePathRule.setPath("$.phone");
+        phonePathRule.setStorageTable("phone_encrypt");
+        phonePathRule.setStorageIdColumn("id");
+        phonePathRule.setHashColumn("phone_hash");
+        phonePathRule.setCipherColumn("phone_cipher");
+        jsonFieldRule.getPaths().add(phonePathRule);
+        tableRule.getJsonFields().add(jsonFieldRule);
+
         properties.getTables().add(tableRule);
         properties.setDefaultCipherKey("unit-test-key");
         properties.setLogMaskedSql(false);
@@ -647,6 +692,7 @@ class DatabaseEncryptionInterceptorTest {
     static class RecordingSeparateTableEncryptionManager extends SeparateTableEncryptionManager {
 
         private int prepareCalls;
+        private int persistJsonWriteCalls;
 
         RecordingSeparateTableEncryptionManager() {
             super(null, null, null, new DatabaseEncryptionProperties());
@@ -656,6 +702,15 @@ class DatabaseEncryptionInterceptorTest {
         public void prepareWriteReferences(MappedStatement mappedStatement, BoundSql boundSql) {
             prepareCalls++;
             boundSql.setAdditionalParameter("idCard", "1001");
+        }
+
+        @Override
+        public void persistPreparedJsonPathWrites(MappedStatement mappedStatement, BoundSql boundSql, Executor executor) {
+            if (boundSql.hasAdditionalParameter(
+                    io.github.jasper.mybatis.encrypt.core.rewrite.ParameterValueResolver
+                            .PREPARED_JSON_PATH_WRITES_PARAMETER)) {
+                persistJsonWriteCalls++;
+            }
         }
     }
 

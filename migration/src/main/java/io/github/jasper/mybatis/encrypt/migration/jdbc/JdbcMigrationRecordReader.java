@@ -63,6 +63,9 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
         for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
             selectColumns.add(columnPlan.getSourceColumn());
         }
+        for (io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+            selectColumns.add(jsonFieldPlan.getSourceColumn());
+        }
         String sql = buildSelectSql(plan, selectColumns, lastProcessedCursor != null);
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int parameterIndex = bindCheckpoint(statement, lastProcessedCursor);
@@ -80,12 +83,15 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
                         }
                         cursorValues.put(cursorColumn, cursorValue);
                     }
-                    Map<String, Object> values = new LinkedHashMap<>();
-                    for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
-                        values.put(columnPlan.getSourceColumn(), resultSet.getObject(columnPlan.getSourceColumn()));
-                    }
-                    records.add(new MigrationRecord(new MigrationCursor(cursorValues), values));
+                Map<String, Object> values = new LinkedHashMap<>();
+                for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
+                    values.put(columnPlan.getSourceColumn(), resultSet.getObject(columnPlan.getSourceColumn()));
                 }
+                for (io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+                    values.put(jsonFieldPlan.getSourceColumn(), resultSet.getObject(jsonFieldPlan.getSourceColumn()));
+                }
+                records.add(new MigrationRecord(new MigrationCursor(cursorValues), values));
+            }
                 return records;
             }
         }

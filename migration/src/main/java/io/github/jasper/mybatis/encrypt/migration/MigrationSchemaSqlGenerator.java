@@ -4,6 +4,8 @@ import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.config.SqlDialect;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonPathPlan;
 import io.github.jasper.mybatis.encrypt.migration.plan.EntityMigrationPlanFactory;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
@@ -315,6 +317,20 @@ public final class MigrationSchemaSqlGenerator {
             if (columnPlan.shouldWriteBackup()) {
                 registerRequirement(requirements, ownerMainTable, plan.getTableName(), columnPlan.getBackupColumn(),
                         backupType(sourceColumn), false, columnPlan.getSourceColumn());
+            }
+        }
+        for (EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+            ColumnMetadata sourceColumn = snapshot.requireColumn(plan.getTableName(), jsonFieldPlan.getSourceColumn());
+            for (EntityMigrationJsonPathPlan pathPlan : jsonFieldPlan.getPathPlans()) {
+                String previousColumn = pathPlan.getStorageIdColumn();
+                if (!snapshot.hasTable(pathPlan.getStorageTable())) {
+                    registerRequirement(requirements, ownerMainTable, pathPlan.getStorageTable(),
+                            pathPlan.getStorageIdColumn(), referenceIdType(), true);
+                }
+                previousColumn = registerRequirement(requirements, ownerMainTable, pathPlan.getStorageTable(),
+                        pathPlan.getCipherColumn(), cipherType(sourceColumn), false, previousColumn);
+                registerRequirement(requirements, ownerMainTable, pathPlan.getStorageTable(),
+                        pathPlan.getHashColumn(), hashType(), false, previousColumn);
             }
         }
     }

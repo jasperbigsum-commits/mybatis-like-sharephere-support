@@ -244,6 +244,22 @@ class MigrationSchemaSqlGeneratorTest extends MigrationJdbcTestSupport {
         ), separateTableDdl);
     }
 
+    @Test
+    void shouldGenerateExternalTableSqlForEncryptJsonPath() throws Exception {
+        DataSource dataSource = newDataSource("schema-json-path-table");
+        executeSql(dataSource,
+                "create table user_account (id bigint primary key, profile_json varchar(1024))");
+
+        MigrationSchemaSqlGenerator generator =
+                new MigrationSchemaSqlGenerator(dataSource, metadataRegistry(), properties());
+
+        List<String> ddl = generator.generateForEntity(JsonEncryptedUserEntity.class);
+
+        assertTrue(ddl.stream().anyMatch(sql -> sql.contains("create table `phone_encrypt`")));
+        assertTrue(ddl.stream().anyMatch(sql -> sql.contains("`phone_hash`")));
+        assertTrue(ddl.stream().anyMatch(sql -> sql.contains("`phone_cipher`")));
+    }
+
     /**
      * 测试目的：验证迁移 DDL 生成逻辑能按字段规则补齐密文列、脱敏列或独立表结构。
      * 测试场景：构造不同方言、字段长度和表结构状态，断言生成的建表/改表 SQL 符合迁移预期。

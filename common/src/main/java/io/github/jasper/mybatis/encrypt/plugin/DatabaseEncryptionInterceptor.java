@@ -179,7 +179,9 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
                     args[5] = boundSql;
                 }
             }
-            return invocation.proceed();
+            Object result = invocation.proceed();
+            persistPreparedJsonPathWrites(executor, rewrittenStatement, boundSql);
+            return result;
         }
     }
 
@@ -387,6 +389,17 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
             return;
         }
         separateTableEncryptionManager.prepareWriteReferences(mappedStatement, boundSql, executor);
+    }
+
+    private void persistPreparedJsonPathWrites(Executor executor, MappedStatement mappedStatement, BoundSql boundSql) {
+        if (separateTableEncryptionManager == null || mappedStatement == null || boundSql == null) {
+            return;
+        }
+        SqlCommandType commandType = mappedStatement.getSqlCommandType();
+        if (commandType != SqlCommandType.INSERT && commandType != SqlCommandType.UPDATE) {
+            return;
+        }
+        separateTableEncryptionManager.persistPreparedJsonPathWrites(mappedStatement, boundSql, executor);
     }
 
     /**

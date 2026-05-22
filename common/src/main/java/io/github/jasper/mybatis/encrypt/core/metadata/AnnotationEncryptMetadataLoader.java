@@ -8,7 +8,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
+import io.github.jasper.mybatis.encrypt.annotation.EncryptJsonField;
+import io.github.jasper.mybatis.encrypt.annotation.EncryptJsonPath;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
+import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
@@ -36,27 +40,57 @@ public class AnnotationEncryptMetadataLoader {
         boolean found = false;
         for (Field field : fieldsInHierarchy(type)) {
             EncryptField encryptField = field.getAnnotation(EncryptField.class);
-            if (encryptField == null) {
+            if (encryptField != null) {
+                found = true;
+                String property = field.getName();
+                String column = blankToDefault(encryptField.column(), resolveColumnName(field));
+                rule.addColumnRule(new EncryptColumnRule(
+                        property,
+                        blankToDefault(encryptField.table(), tableName),
+                        column,
+                        encryptField.cipherAlgorithm(),
+                        blankToNull(encryptField.assistedQueryColumn()),
+                        blankToNull(encryptField.assistedQueryAlgorithm()),
+                        blankToNull(encryptField.likeQueryColumn()),
+                        blankToNull(encryptField.likeQueryAlgorithm()),
+                        blankToNull(encryptField.maskedColumn()),
+                        blankToNull(encryptField.maskedAlgorithm()),
+                        encryptField.storageMode(),
+                        blankToNull(encryptField.storageTable()),
+                        blankToDefault(encryptField.storageColumn(), column),
+                        blankToDefault(encryptField.storageIdColumn(), "id")
+                ));
+            }
+            EncryptJsonField encryptJsonField = field.getAnnotation(EncryptJsonField.class);
+            if (encryptJsonField == null) {
                 continue;
             }
+            if (!String.class.equals(field.getType())) {
+                throw new EncryptionConfigurationException(
+                        EncryptionErrorCode.INVALID_FIELD_RULE,
+                        "@EncryptJsonField only supports String properties. property=" + field.getName()
+                );
+            }
             found = true;
-            String property = field.getName();
-            String column = blankToDefault(encryptField.column(), resolveColumnName(field));
-            rule.addColumnRule(new EncryptColumnRule(
+            String property =
+                    JsonField.paths()) {
+                pathRules.add(new EncryptJsonPathRule(
+                        path.path(),
+                        blankToNull(path.storageTable()),
+                        blankToDefault(path.storageIdColumn(), "id"),
+                        blankToNull(path.hashColumn()),
+                        blankToNull(path.cipherColumn()),
+                        blankToDefault(path.cipherAlgorithm(), encryptJsonField.cipherAlgorithm()),
+                        blankToDefault(path.assistedQueryAlgorithm(), encryptJsonField.assistedQueryAlgorithm())
+                ));
+            }
+            rule.addJsonFieldRule(new EncryptJsonFieldRule(
                     property,
-                    blankToDefault(encryptField.table(), tableName),
+                    tableName,
                     column,
-                    encryptField.cipherAlgorithm(),
-                    blankToNull(encryptField.assistedQueryColumn()),
-                    blankToNull(encryptField.assistedQueryAlgorithm()),
-                    blankToNull(encryptField.likeQueryColumn()),
-                    blankToNull(encryptField.likeQueryAlgorithm()),
-                    blankToNull(encryptField.maskedColumn()),
-                    blankToNull(encryptField.maskedAlgorithm()),
-                    encryptField.storageMode(),
-                    blankToNull(encryptField.storageTable()),
-                    blankToDefault(encryptField.storageColumn(), column),
-                    blankToDefault(encryptField.storageIdColumn(), "id")
+                    encryptJsonField.cipherAlgorithm(),
+                    encryptJsonField.assistedQueryAlgorithm(),
+                    pathRules
             ));
         }
         return found ? rule : null;

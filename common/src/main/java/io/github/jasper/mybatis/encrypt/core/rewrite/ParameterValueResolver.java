@@ -21,6 +21,11 @@ public class ParameterValueResolver {
     public static final String PREPARED_REFERENCE_PARAMETER = "__encrypt_prepared_refs";
 
     /**
+     * BoundSql 中保存 JSON path 独立表写入列表的附加参数名。
+     */
+    public static final String PREPARED_JSON_PATH_WRITES_PARAMETER = "__encrypt_json_path_writes";
+
+    /**
      * 解析单个参数映射对应的运行时值。
      *
      * @param configuration MyBatis 配置

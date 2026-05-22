@@ -53,6 +53,7 @@ public class SqlRewriteEngine {
     private final SqlInsertRewriter sqlInsertRewriter;
     private final SqlUpdateSetRewriter sqlUpdateSetRewriter;
     private final SqlSelectTableContextBuilder sqlSelectTableContextBuilder;
+    private final AlgorithmRegistry algorithmRegistry;
 
     /**
      * 创建 SQL 改写引擎。
@@ -66,6 +67,7 @@ public class SqlRewriteEngine {
                             DatabaseEncryptionProperties properties) {
         this.metadataRegistry = metadataRegistry;
         this.properties = properties;
+        this.algorithmRegistry = algorithmRegistry;
         this.valueTransformer = new EncryptionValueTransformer(algorithmRegistry);
         this.derivedTableRuleBuilder = new DerivedTableRuleBuilder(metadataRegistry);
         this.sqlConditionRewriter = new SqlConditionRewriter(
@@ -83,11 +85,13 @@ public class SqlRewriteEngine {
                 this::buildColumn,
                 this::requireAssistedQueryColumn
         );
-        this.sqlInsertRewriter = new SqlInsertRewriter(sqlWriteExpressionRewriter, valueTransformer, this::quote);
+        this.sqlInsertRewriter = new SqlInsertRewriter(sqlWriteExpressionRewriter, valueTransformer, this::quote,
+                algorithmRegistry);
         this.sqlUpdateSetRewriter = new SqlUpdateSetRewriter(
                 sqlWriteExpressionRewriter,
                 valueTransformer,
-                this::buildColumn
+                this::buildColumn,
+                algorithmRegistry
         );
         this.sqlSelectTableContextBuilder = new SqlSelectTableContextBuilder(
                 metadataRegistry,

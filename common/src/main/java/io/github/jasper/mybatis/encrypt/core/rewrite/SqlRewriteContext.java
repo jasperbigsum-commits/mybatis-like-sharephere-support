@@ -108,6 +108,28 @@ final class SqlRewriteContext {
         return maskedParameters;
     }
 
+    @SuppressWarnings("unchecked")
+    void appendPreparedJsonPathWrites(List<EncryptJsonWriteResult.PathWrite> pathWrites) {
+        if (pathWrites == null || pathWrites.isEmpty()) {
+            return;
+        }
+        List<EncryptJsonWriteResult.PathWrite> writes;
+        if (boundSql.hasAdditionalParameter(ParameterValueResolver.PREPARED_JSON_PATH_WRITES_PARAMETER)) {
+            Object existing = boundSql.getAdditionalParameter(ParameterValueResolver.PREPARED_JSON_PATH_WRITES_PARAMETER);
+            if (existing instanceof List<?>) {
+                writes = (List<EncryptJsonWriteResult.PathWrite>) existing;
+            } else {
+                writes = new ArrayList<EncryptJsonWriteResult.PathWrite>();
+                boundSql.setAdditionalParameter(ParameterValueResolver.PREPARED_JSON_PATH_WRITES_PARAMETER, writes);
+            }
+        } else {
+            writes = new ArrayList<EncryptJsonWriteResult.PathWrite>();
+            boundSql.setAdditionalParameter(ParameterValueResolver.PREPARED_JSON_PATH_WRITES_PARAMETER, writes);
+        }
+        writes.addAll(pathWrites);
+        changed = true;
+    }
+
     boolean changed() {
         return changed;
     }

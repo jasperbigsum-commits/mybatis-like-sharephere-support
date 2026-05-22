@@ -27,6 +27,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -229,6 +230,8 @@ public class EncryptMetadataRegistry {
             EncryptTableRule tableRule = new EncryptTableRule(tableName);
             tableProperties.getFields().forEach(fieldProperties ->
                     tableRule.addColumnRule(toColumnRule(tableName, fieldProperties)));
+            tableProperties.getJsonFields().forEach(jsonFieldProperties ->
+                    tableRule.addJsonFieldRule(toJsonFieldRule(tableName, jsonFieldProperties)));
             tableRules.put(tableRule.getTableName(), tableRule);
         });
     }
@@ -271,6 +274,48 @@ public class EncryptMetadataRegistry {
         return null;
     }
 
+    private EncryptJsonFieldRule toJsonFieldRule(String tableName,
+                                                 DatabaseEncryptionProperties.JsonFieldRuleProperties properties) {
+        String property = resolveConfiguredJsonProperty(properties);
+        String column = properties.getColumn() != null ? properties.getColumn() : NameUtils.camelToSnake(property);
+        if (StringUtils.isBlank(column)) {
+            throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                    "Configured json field rule must define column or property name.");
+        }
+        List<EncryptJsonPathRule> pathRules = new java.util.ArrayList<EncryptJsonPathRule>();
+        for (DatabaseEncryptionProperties.JsonPathRuleProperties pathProperties : properties.getPaths()) {
+            pathRules.add(new EncryptJsonPathRule(
+                    pathProperties.getPath(),
+                    pathProperties.getStorageTable(),
+                    firstNonBlank(pathProperties.getStorageIdColumn(), "id"),
+                    pathProperties.getHashColumn(),
+                    pathProperties.getCipherColumn(),
+                    firstNonBlank(pathProperties.getCipherAlgorithm(), properties.getCipherAlgorithm(), "sm4"),
+                    firstNonBlank(pathProperties.getAssistedQueryAlgorithm(), properties.getAssistedQueryAlgorithm(), "sm3")
+            ));
+        }
+        EncryptJsonFieldRule rule = new EncryptJsonFieldRule(
+                property,
+                tableName,
+                column,
+                firstNonBlank(properties.getCipherAlgorithm(), "sm4"),
+                firstNonBlank(properties.getAssistedQueryAlgorithm(), "sm3"),
+                pathRules
+        );
+        validateJsonRule(rule);
+        return rule;
+    }
+
+    private String resolveConfiguredJsonProperty(DatabaseEncryptionProperties.JsonFieldRuleProperties properties) {
+        if (StringUtils.isNotBlank(properties.getProperty())) {
+            return properties.getProperty();
+        }
+        if (StringUtils.isNotBlank(properties.getColumn())) {
+            return NameUtils.columnToProperty(properties.getColumn());
+        }
+        return null;
+    }
+
     private void registerAnnotationColumnRule(EncryptTableRule entityRule, EncryptColumnRule columnRule) {
         // 字段级 table 优先级高于类级 @EncryptTable，适合一个 DTO 混合多张表字段的场景。
         String effectiveTable = firstNonBlank(columnRule.table(), entityRule.getTableName());
@@ -279,6 +324,15 @@ public class EncryptMetadataRegistry {
                 ignored -> new EncryptTableRule(effectiveTable)
         );
         tableRule.mergeMissing(columnRule);
+    }
+
+    private void registerAnnotationJsonFieldRule(EncryptTableRule entityRule, EncryptJsonFieldRule jsonFieldRule) {
+        String effectiveTable = firstNonBlank(jsonFieldRule.table(), entityRule.getTableName());
+        EncryptTableRule tableRule = tableRules.computeIfAbsent(
+                NameUtils.normalizeIdentifier(effectiveTable),
+                ignored -> new EncryptTableRule(effectiveTable)
+        );
+        tableRule.mergeMissing(jsonFieldRule);
     }
 
     private void validateRule(EncryptColumnRule rule) {
@@ -324,6 +378,48 @@ public class EncryptMetadataRegistry {
         );
     }
 
+    private void validateJsonRule(EncryptJsonFieldRule rule) {
+        if (StringUtils.isBlank(rule.column())) {
+            throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                    "EncryptJsonField must define column. property=" + rule.property());
+        }
+        for (EncryptJsonPathRule pathRule : rule.pathRules()) {
+            validateExactJsonPath(rule, pathRule);
+            if (StringUtils.isBlank(pathRule.storageTable())) {
+                throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_STORAGE_TABLE,
+                        "EncryptJsonPath must define storageTable. property=" + rule.property()
+                                + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                                + ", column=" + rule.column()
+                                + ", path=" + pathRule.path());
+            }
+            if (StringUtils.isBlank(pathRule.hashColumn())) {
+                throw new EncryptionConfigurationException(EncryptionErrorCode.MISSING_ASSISTED_QUERY_COLUMN,
+                        "EncryptJsonPath must define hashColumn. property=" + rule.property()
+                                + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                                + ", column=" + rule.column()
+                                + ", path=" + pathRule.path());
+            }
+            if (StringUtils.isBlank(pathRule.cipherColumn())) {
+                throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                        "EncryptJsonPath must define cipherColumn. property=" + rule.property()
+                                + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                                + ", column=" + rule.column()
+                                + ", path=" + pathRule.path());
+            }
+        }
+    }
+
+    private void validateExactJsonPath(EncryptJsonFieldRule rule, EncryptJsonPathRule pathRule) {
+        String path = pathRule.path();
+        if (StringUtils.isBlank(path) || !path.matches("^\\$(\\.[A-Za-z0-9_]+|\\[[0-9]+\\])+$")) {
+            throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                    "EncryptJsonPath must use exact json path. property=" + rule.property()
+                            + ", table=" + firstNonBlank(rule.table(), "<entity-default-table>")
+                            + ", column=" + rule.column()
+                            + ", path=" + path);
+        }
+    }
+
     private String firstNonBlank(String... candidates) {
         for (String candidate : candidates) {
             if (StringUtils.isNotBlank(candidate)) {
@@ -346,6 +442,10 @@ public class EncryptMetadataRegistry {
             annotationRule.getColumnRules().forEach(this::validateRule);
             for (EncryptColumnRule columnRule : annotationRule.getColumnRules()) {
                 registerAnnotationColumnRule(annotationRule, columnRule);
+            }
+            annotationRule.getJsonFieldRules().forEach(this::validateJsonRule);
+            for (EncryptJsonFieldRule jsonFieldRule : annotationRule.getJsonFieldRules()) {
+                registerAnnotationJsonFieldRule(annotationRule, jsonFieldRule);
             }
             return annotationRule;
         }
@@ -375,6 +475,16 @@ public class EncryptMetadataRegistry {
                     columnRule.storageTable(),
                     columnRule.storageColumn(),
                     columnRule.storageIdColumn()
+            ));
+        }
+        for (EncryptJsonFieldRule jsonFieldRule : configuredTableRule.getJsonFieldRules()) {
+            entityRule.addJsonFieldRule(new EncryptJsonFieldRule(
+                    resolveEntityJsonProperty(entityType, jsonFieldRule),
+                    jsonFieldRule.table(),
+                    jsonFieldRule.column(),
+                    jsonFieldRule.cipherAlgorithm(),
+                    jsonFieldRule.assistedQueryAlgorithm(),
+                    jsonFieldRule.pathRules()
             ));
         }
         return entityRule;
@@ -409,6 +519,11 @@ public class EncryptMetadataRegistry {
             current = current.getSuperclass();
         }
         return null;
+    }
+
+    private String resolveEntityJsonProperty(Class<?> entityType, EncryptJsonFieldRule jsonFieldRule) {
+        java.lang.reflect.Field matchedField = findFieldByColumn(entityType, jsonFieldRule.column());
+        return matchedField != null ? matchedField.getName() : jsonFieldRule.property();
     }
 
     private String resolveFieldColumn(java.lang.reflect.Field field) {

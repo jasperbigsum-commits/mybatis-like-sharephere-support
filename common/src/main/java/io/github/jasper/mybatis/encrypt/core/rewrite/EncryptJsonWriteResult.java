@@ -27,10 +27,20 @@ public final class EncryptJsonWriteResult {
                 : Collections.unmodifiableList(new ArrayList<PathWrite>(pathWrites));
     }
 
+    /**
+     * 返回已经把受保护 path 明文替换为 hash 的 JSON 字符串。
+     *
+     * @return 改写后的 JSON 字符串
+     */
     public String rewrittenJson() {
         return rewrittenJson;
     }
 
+    /**
+     * 返回需要同步写入独立表的 path 结果。
+     *
+     * @return 不可变 path 写入结果列表
+     */
     public List<PathWrite> pathWrites() {
         return pathWrites;
     }
@@ -63,18 +73,38 @@ public final class EncryptJsonWriteResult {
             this.cipherValue = cipherValue;
         }
 
+        /**
+         * 返回当前 path 对应的规则。
+         *
+         * @return JSON path 规则
+         */
         public EncryptJsonPathRule pathRule() {
             return pathRule;
         }
 
+        /**
+         * 返回从 JSON path 读取到的原始明文值。
+         *
+         * @return 原始明文值
+         */
         public String plainValue() {
             return plainValue;
         }
 
+        /**
+         * 返回由明文计算得到的 hash 引用值。
+         *
+         * @return hash 引用值
+         */
         public String hashValue() {
             return hashValue;
         }
 
+        /**
+         * 返回由明文加密得到的密文值。
+         *
+         * @return 密文值
+         */
         public String cipherValue() {
             return cipherValue;
         }

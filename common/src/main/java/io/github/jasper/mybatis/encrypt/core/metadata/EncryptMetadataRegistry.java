@@ -18,6 +18,7 @@ import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SetOperationList;
+import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ResultMap;
@@ -684,6 +685,7 @@ public class EncryptMetadataRegistry {
     }
 
     private void collectTables(Select select, Set<String> tables) {
+        collectWithItemTables(select, tables);
         if (select instanceof ParenthesedSelect) {
             ParenthesedSelect parenthesedSelect = (ParenthesedSelect) select;
             if (parenthesedSelect.getSelect() != null) {
@@ -706,6 +708,26 @@ public class EncryptMetadataRegistry {
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
                 collectTables(join.getRightItem(), tables);
+            }
+        }
+    }
+
+    /**
+     * 收集 CTE body 中出现的真实物理表。
+     *
+     * <p>预热阶段不能只看最终 `FROM cte_alias`，否则返回 DTO 没有注解或 hint 时，
+     * CTE body 里真实表的加密规则可能无法提前加载，后续 SQL 改写也就无法识别这些字段。</p>
+     *
+     * @param select 当前 SELECT 查询块
+     * @param tables 已收集的物理表名集合
+     */
+    private void collectWithItemTables(Select select, Set<String> tables) {
+        if (select.getWithItemsList() == null) {
+            return;
+        }
+        for (WithItem withItem : select.getWithItemsList()) {
+            if (withItem != null && withItem.getSelect() != null) {
+                collectTables(withItem.getSelect(), tables);
             }
         }
     }

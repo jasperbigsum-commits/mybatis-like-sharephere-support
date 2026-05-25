@@ -72,8 +72,10 @@ public class AnnotationEncryptMetadataLoader {
                 );
             }
             found = true;
-            String property =
-                    JsonField.paths()) {
+            String property = field.getName();
+            String column = blankToDefault(encryptJsonField.column(), resolveColumnName(field));
+            List<EncryptJsonPathRule> pathRules = new ArrayList<>();
+            for (EncryptJsonPath path : encryptJsonField.paths()) {
                 pathRules.add(new EncryptJsonPathRule(
                         path.path(),
                         blankToNull(path.storageTable()),

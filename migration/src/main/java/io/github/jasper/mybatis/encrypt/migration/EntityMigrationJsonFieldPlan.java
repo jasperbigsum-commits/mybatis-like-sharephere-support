@@ -41,22 +41,47 @@ public final class EntityMigrationJsonFieldPlan {
                 : Collections.unmodifiableList(new ArrayList<EntityMigrationJsonPathPlan>(pathPlans));
     }
 
+    /**
+     * Return the entity property name.
+     *
+     * @return entity property name
+     */
     public String getProperty() {
         return property;
     }
 
+    /**
+     * Return the main-table JSON source column.
+     *
+     * @return JSON source column
+     */
     public String getSourceColumn() {
         return sourceColumn;
     }
 
+    /**
+     * Return the default cipher algorithm bean name for this JSON field.
+     *
+     * @return cipher algorithm bean name
+     */
     public String getCipherAlgorithm() {
         return cipherAlgorithm;
     }
 
+    /**
+     * Return the default assisted-query algorithm bean name for this JSON field.
+     *
+     * @return assisted-query algorithm bean name
+     */
     public String getAssistedQueryAlgorithm() {
         return assistedQueryAlgorithm;
     }
 
+    /**
+     * Return exact JSON path migration plans under this field.
+     *
+     * @return immutable JSON path plan list
+     */
     public List<EntityMigrationJsonPathPlan> getPathPlans() {
         return pathPlans;
     }

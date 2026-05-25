@@ -42,30 +42,65 @@ public final class EncryptJsonPathRule {
         this.assistedQueryAlgorithm = assistedQueryAlgorithm;
     }
 
+    /**
+     * 返回精确 JSON path。
+     *
+     * @return JSON path
+     */
     public String path() {
         return path;
     }
 
+    /**
+     * 返回保存该 path 密文的独立表名。
+     *
+     * @return 独立表名
+     */
     public String storageTable() {
         return storageTable;
     }
 
+    /**
+     * 返回独立表主键列名。
+     *
+     * @return 独立表主键列名
+     */
     public String storageIdColumn() {
         return storageIdColumn;
     }
 
+    /**
+     * 返回主表 JSON 中保存 hash 引用值的列名。
+     *
+     * @return hash 列名
+     */
     public String hashColumn() {
         return hashColumn;
     }
 
+    /**
+     * 返回独立表中保存密文的列名。
+     *
+     * @return 密文列名
+     */
     public String cipherColumn() {
         return cipherColumn;
     }
 
+    /**
+     * 返回该 path 使用的密文算法 bean 名称。
+     *
+     * @return 密文算法 bean 名称
+     */
     public String cipherAlgorithm() {
         return cipherAlgorithm;
     }
 
+    /**
+     * 返回该 path 使用的辅助查询算法 bean 名称。
+     *
+     * @return 辅助查询算法 bean 名称
+     */
     public String assistedQueryAlgorithm() {
         return assistedQueryAlgorithm;
     }

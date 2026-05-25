@@ -50,6 +50,8 @@ through real MyBatis execution tests.
 | `HAVING` | Supported | Runs through the same predicate rewrite pipeline as `WHERE`. |
 | `QUALIFY` | Supported | Rewrites predicates the same way as `WHERE` and `HAVING`. |
 | Derived tables | Supported with helper aliases | Derived subqueries can project hidden assisted/like aliases so outer predicates on logical columns still work. |
+| Non-recursive `WITH` / CTE | Supported with helper aliases | CTE bodies are rewritten like named derived tables, and outer predicates can continue to reference projected logical encrypted columns. |
+| `WITH RECURSIVE` without encrypted fields | Supported | Recursive CTEs that do not reference encrypted fields are left alone or processed normally by the surrounding query block. |
 | `UNION` / `UNION ALL` | Supported | Each branch is rewritten recursively. |
 | Same-table decryption | Supported | Query results are decrypted back into entity properties. |
 | Separate-table hydration | Supported | Separate-table ciphertext is synchronized on write and hydrated on read by entity id. |
@@ -94,6 +96,7 @@ Avoid these if the field is encrypted:
 | Dynamic or non-exact JSON path expressions | Rejected | Only exact static paths registered under `@EncryptJsonPath` are supported. |
 | Separate-table encrypted field in `IN` subquery projection | Rejected | The plugin currently only supports same-table encrypted field comparison subqueries. |
 | Bare `*` in multi-table / unaliased derived query that contains encrypted table rules | Rejected | The plugin cannot safely decide which table the wildcard should expand from; use explicit `table.*` or `alias.*` to prevent encrypted alias projections from being covered by later wildcard columns. A single derived table with an alias is treated like a single source and is rewritten to `alias.*`. |
+| `WITH RECURSIVE` / recursive CTE referencing encrypted fields | Rejected | Recursive self-reference can make encrypted projection metadata ambiguous across iterations, so the rewriter fails fast instead of guessing. |
 
 ## Still Conservative / Not Fully Covered
 

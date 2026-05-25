@@ -43,26 +43,56 @@ public final class EncryptJsonFieldRule {
                 : Collections.unmodifiableList(new ArrayList<EncryptJsonPathRule>(pathRules));
     }
 
+    /**
+     * 返回实体属性名。
+     *
+     * @return 实体属性名
+     */
     public String property() {
         return property;
     }
 
+    /**
+     * 返回字段来源表名。
+     *
+     * @return 字段来源表名
+     */
     public String table() {
         return table;
     }
 
+    /**
+     * 返回主表 JSON 物理列名。
+     *
+     * @return JSON 列名
+     */
     public String column() {
         return column;
     }
 
+    /**
+     * 返回字段默认密文算法 bean 名称。
+     *
+     * @return 密文算法 bean 名称
+     */
     public String cipherAlgorithm() {
         return cipherAlgorithm;
     }
 
+    /**
+     * 返回字段默认辅助查询算法 bean 名称。
+     *
+     * @return 辅助查询算法 bean 名称
+     */
     public String assistedQueryAlgorithm() {
         return assistedQueryAlgorithm;
     }
 
+    /**
+     * 返回该 JSON 字段下声明的精确 path 规则。
+     *
+     * @return 不可变 path 规则列表
+     */
     public List<EncryptJsonPathRule> pathRules() {
         return pathRules;
     }

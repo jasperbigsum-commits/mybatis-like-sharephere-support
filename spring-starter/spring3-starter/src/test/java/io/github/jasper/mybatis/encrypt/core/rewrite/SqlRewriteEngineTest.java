@@ -2890,6 +2890,92 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteNonRecursiveWithSelectAsDerivedTable() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH u AS (SELECT id, phone FROM user_account WHERE phone = ?) "
+                        + "SELECT u.phone FROM u WHERE u.phone = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "innerPhone", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "outerPhone", String.class).build()
+                ),
+                Map.of("innerPhone", "13800138000", "outerPhone", "13900139000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("WITH u AS"));
+        assertTrue(result.sql().contains("`phone_cipher` AS phone")
+                || result.sql().contains("`phone_cipher` phone"));
+        assertTrue(result.sql().contains("`phone_hash` = ?"));
+        assertTrue(result.sql().contains("u.`__enc_assisted_phone` = ?"));
+        assertEquals(2, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldFailFastForWithRecursiveSelect() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH RECURSIVE u(id, phone) AS ("
+                        + "SELECT id, phone FROM user_account WHERE phone = ? "
+                        + "UNION ALL SELECT ua.id, ua.phone FROM user_account ua JOIN u ON ua.id = u.id"
+                        + ") SELECT phone FROM u",
+                List.of(new ParameterMapping.Builder(configuration, "phone", String.class).build()),
+                Map.of("phone", "13800138000")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("WITH RECURSIVE"));
+    }
+
+    @Test
+    void shouldAllowWithRecursiveWhenNoEncryptedFieldIsReferenced() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH RECURSIVE tree(id, parent_id) AS ("
+                        + "SELECT id, parent_id FROM org_node WHERE parent_id IS NULL "
+                        + "UNION ALL SELECT n.id, n.parent_id FROM org_node n JOIN tree t ON n.parent_id = t.id"
+                        + ") SELECT id FROM tree WHERE id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build()),
+                Map.of("id", 1L)
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertFalse(result.changed());
+    }
+
+    @Test
     void shouldRewriteCountAggregateOnSameTableEncryptedFieldToAssistedColumn() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();

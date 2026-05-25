@@ -26,6 +26,17 @@ import java.util.Map;
 @ConditionalOnClass(EncryptedJdbcExecutor.class)
 public class EncryptedJdbcAutoConfiguration {
 
+    /**
+     * Create the encrypted JDBC facade bean when a data source is available.
+     *
+     * @param dataSources available Spring data sources keyed by bean name
+     * @param dataSourceNameResolver optional resolver for configured data source names
+     * @param sqlRewriteEngine SQL rewrite engine shared with mapper execution
+     * @param resultDecryptor result decryptor shared with mapper execution
+     * @param metadataRegistry encryption metadata registry
+     * @param properties encryption configuration properties
+     * @return encrypted JDBC facade
+     */
     @Bean
     @ConditionalOnBean(DataSource.class)
     @ConditionalOnMissingBean(EncryptedJdbcExecutor.class)

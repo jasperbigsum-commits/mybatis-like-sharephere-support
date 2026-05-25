@@ -211,6 +211,10 @@ public class SqlRewriteEngine {
      * <p>这里同时处理三件事：注册当前查询块可见的表与别名、递归改写条件和子查询、
      * 以及按 `ProjectionMode` 决定投影列展开方式。复杂 SQL 排查时，先确认当前查询块
      * 落在哪个投影模式，通常能更快定位问题是在投影阶段还是条件阶段。</p>
+     *
+     * <p>`WITH` 查询会在当前查询块建表上下文前先处理 CTE body。普通 CTE 按命名派生表
+     * 暴露投影元数据；递归 CTE 只有在递归体引用加密字段时才拒绝，完全不涉及加密字段的
+     * 递归查询保持透传，避免把业务侧的组织树、菜单树等普通递归查询误伤。</p>
      */
     private void rewriteSelect(Select select, SqlRewriteContext context, ProjectionMode projectionMode) {
         rewriteSelect(select, context, projectionMode, null);
@@ -220,6 +224,7 @@ public class SqlRewriteEngine {
                                SqlRewriteContext context,
                                ProjectionMode projectionMode,
                                SqlTableContext outerTableContext) {
+        validateWithItems(select, context, outerTableContext);
         if (select instanceof SetOperationList) {
             SetOperationList setOperationList = (SetOperationList) select;
             for (Select child : setOperationList.getSelects()) {
@@ -265,6 +270,250 @@ public class SqlRewriteEngine {
         if (sqlSelectProjectionRewriter.rewrite(plainSelect, tableContext, projectionMode)) {
             context.markChanged();
         }
+    }
+
+    /**
+     * 校验当前查询块声明的 CTE。
+     *
+     * <p>非递归 CTE 会交给后续表上下文构建逻辑按派生表改写。递归 CTE 的自引用会让
+     * “上一轮投影出的逻辑列”和“当前轮真实表字段”混在同一名称空间里，因此只要递归体
+     * 触碰加密字段就 fail fast；若递归体只使用普通字段，则不需要加密改写参与，允许放行。</p>
+     *
+     * @param select 当前查询块
+     * @param context 当前 SQL 改写上下文
+     * @param outerTableContext 外层查询块可见的表上下文，供相关子查询解析外层引用
+     */
+    private void validateWithItems(Select select, SqlRewriteContext context, SqlTableContext outerTableContext) {
+        if (select.getWithItemsList() == null) {
+            return;
+        }
+        for (WithItem withItem : select.getWithItemsList()) {
+            if (withItem == null) {
+                continue;
+            }
+            if (withItem.isRecursive() && containsEncryptedReferenceInRecursiveWithItem(withItem, context, outerTableContext)) {
+                throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT,
+                        "WITH RECURSIVE referencing encrypted fields is not supported for encrypted SQL rewrite.");
+            }
+            if (withItem.getSelect() != null) {
+                validateWithItems(withItem.getSelect(), context, outerTableContext);
+            }
+        }
+    }
+
+    /**
+     * 判断递归 CTE body 是否引用了加密字段。
+     *
+     * <p>这里是只读扫描，不做任何 AST 改写，也不消费参数槽位；它只回答“是否需要拒绝”
+     * 这个安全问题。真正的普通 CTE 改写仍由 {@link SqlSelectTableContextBuilder} 统一处理。</p>
+     *
+     * @param withItem 当前 CTE 定义
+     * @param context 当前 SQL 改写上下文
+     * @param outerTableContext 外层查询块表上下文
+     * @return 若递归 CTE body 引用加密字段则返回 {@code true}
+     */
+    private boolean containsEncryptedReferenceInRecursiveWithItem(WithItem withItem,
+                                                                  SqlRewriteContext context,
+                                                                  SqlTableContext outerTableContext) {
+        if (withItem.getSelect() == null) {
+            return false;
+        }
+        return containsEncryptedReferenceInSelect(withItem.getSelect(), context, outerTableContext);
+    }
+
+    /**
+     * 递归扫描一个 SELECT 树，判断其中是否存在可解析到加密规则的列引用。
+     *
+     * <p>扫描范围覆盖投影、WHERE、JOIN ON、HAVING、QUALIFY、ORDER BY、GROUP BY 以及
+     * UNION 分支。它故意复用表上下文构建器，以保证 CTE、派生表和相关子查询里的列解析
+     * 与实际改写路径保持一致。</p>
+     *
+     * @param select 待扫描 SELECT
+     * @param context 当前 SQL 改写上下文
+     * @param outerTableContext 外层查询块表上下文
+     * @return 若 SELECT 树引用加密字段则返回 {@code true}
+     */
+    private boolean containsEncryptedReferenceInSelect(Select select,
+                                                       SqlRewriteContext context,
+                                                       SqlTableContext outerTableContext) {
+        if (select == null) {
+            return false;
+        }
+        if (select instanceof ParenthesedSelect) {
+            return containsEncryptedReferenceInSelect(((ParenthesedSelect) select).getSelect(), context, outerTableContext);
+        }
+        if (select instanceof SetOperationList) {
+            SetOperationList setOperationList = (SetOperationList) select;
+            for (Select child : setOperationList.getSelects()) {
+                if (containsEncryptedReferenceInSelect(child, context, outerTableContext)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!(select instanceof PlainSelect)) {
+            return false;
+        }
+        PlainSelect plainSelect = (PlainSelect) select;
+        SqlTableContext tableContext = sqlSelectTableContextBuilder.build(plainSelect, context, outerTableContext);
+        if (containsEncryptedReferenceInSelectItems(plainSelect.getSelectItems(), tableContext, context)
+                || containsEncryptedReference(plainSelect.getWhere(), tableContext, context)
+                || containsEncryptedReference(plainSelect.getHaving(), tableContext, context)
+                || containsEncryptedReference(plainSelect.getQualify(), tableContext, context)
+                || containsEncryptedReferenceInOrderBy(plainSelect.getOrderByElements(), tableContext, context)
+                || containsEncryptedReferenceInGroupBy(plainSelect.getGroupBy(), tableContext, context)) {
+            return true;
+        }
+        return containsEncryptedReferenceInJoins(plainSelect.getJoins(), tableContext, context);
+    }
+
+    private boolean containsEncryptedReferenceInSelectItems(List<SelectItem<?>> selectItems,
+                                                            SqlTableContext tableContext,
+                                                            SqlRewriteContext context) {
+        if (selectItems == null) {
+            return false;
+        }
+        for (SelectItem<?> item : selectItems) {
+            if (item != null && containsEncryptedReference(item.getExpression(), tableContext, context)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsEncryptedReferenceInJoins(List<Join> joins,
+                                                      SqlTableContext tableContext,
+                                                      SqlRewriteContext context) {
+        if (joins == null) {
+            return false;
+        }
+        for (Join join : joins) {
+            if (join.getOnExpressions() == null) {
+                continue;
+            }
+            for (Expression expression : join.getOnExpressions()) {
+                if (containsEncryptedReference(expression, tableContext, context)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean containsEncryptedReferenceInOrderBy(List<OrderByElement> orderByElements,
+                                                        SqlTableContext tableContext,
+                                                        SqlRewriteContext context) {
+        if (orderByElements == null) {
+            return false;
+        }
+        for (OrderByElement element : orderByElements) {
+            if (element != null && containsEncryptedReference(element.getExpression(), tableContext, context)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @SuppressWarnings("rawtypes")
+    private boolean containsEncryptedReferenceInGroupBy(GroupByElement groupByElement,
+                                                        SqlTableContext tableContext,
+                                                        SqlRewriteContext context) {
+        if (groupByElement == null || groupByElement.getGroupByExpressionList() == null) {
+            return false;
+        }
+        ExpressionList expressionList = groupByElement.getGroupByExpressionList();
+        for (Object item : expressionList) {
+            if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext, context)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 扫描表达式树，判断是否包含加密字段引用。
+     *
+     * <p>该方法只做保守识别，覆盖常见表达式容器和嵌套 SELECT。它不尝试解释业务语义，
+     * 只要某个 {@link Column} 能通过当前 {@link SqlTableContext} 解析到加密规则，就认为
+     * 当前递归 CTE 不适合继续自动改写。</p>
+     *
+     * @param expression 待扫描表达式
+     * @param tableContext 当前表达式所在查询块的表上下文
+     * @param context 当前 SQL 改写上下文
+     * @return 若表达式引用加密字段则返回 {@code true}
+     */
+    @SuppressWarnings("rawtypes")
+    private boolean containsEncryptedReference(Expression expression,
+                                               SqlTableContext tableContext,
+                                               SqlRewriteContext context) {
+        if (expression == null) {
+            return false;
+        }
+        if (resolveEncryptedColumn(expression, tableContext) != null) {
+            return true;
+        }
+        if (expression instanceof Parenthesis) {
+            return containsEncryptedReference(((Parenthesis) expression).getExpression(), tableContext, context);
+        }
+        if (expression instanceof BinaryExpression) {
+            BinaryExpression binaryExpression = (BinaryExpression) expression;
+            return containsEncryptedReference(binaryExpression.getLeftExpression(), tableContext, context)
+                    || containsEncryptedReference(binaryExpression.getRightExpression(), tableContext, context);
+        }
+        if (expression instanceof Function && ((Function) expression).getParameters() != null) {
+            for (Expression item : ((Function) expression).getParameters()) {
+                if (containsEncryptedReference(item, tableContext, context)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (expression instanceof ParenthesedExpressionList) {
+            ParenthesedExpressionList parenthesed = (ParenthesedExpressionList) expression;
+            for (Object item : parenthesed) {
+                if (item instanceof Expression && containsEncryptedReference((Expression) item, tableContext, context)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (expression instanceof CaseExpression) {
+            CaseExpression caseExpression = (CaseExpression) expression;
+            if (containsEncryptedReference(caseExpression.getSwitchExpression(), tableContext, context)
+                    || containsEncryptedReference(caseExpression.getElseExpression(), tableContext, context)) {
+                return true;
+            }
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    if (containsEncryptedReference(whenClause.getWhenExpression(), tableContext, context)
+                            || containsEncryptedReference(whenClause.getThenExpression(), tableContext, context)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        if (expression instanceof NotExpression) {
+            return containsEncryptedReference(((NotExpression) expression).getExpression(), tableContext, context);
+        }
+        if (expression instanceof IsNullExpression) {
+            return containsEncryptedReference(((IsNullExpression) expression).getLeftExpression(), tableContext, context);
+        }
+        if (expression instanceof Between) {
+            Between between = (Between) expression;
+            return containsEncryptedReference(between.getLeftExpression(), tableContext, context)
+                    || containsEncryptedReference(between.getBetweenExpressionStart(), tableContext, context)
+                    || containsEncryptedReference(between.getBetweenExpressionEnd(), tableContext, context);
+        }
+        if (expression instanceof InExpression) {
+            InExpression inExpression = (InExpression) expression;
+            return containsEncryptedReference(inExpression.getLeftExpression(), tableContext, context)
+                    || containsEncryptedReference(inExpression.getRightExpression(), tableContext, context);
+        }
+        if (expression instanceof Select) {
+            return context != null && containsEncryptedReferenceInSelect((Select) expression, context, tableContext);
+        }
+        return false;
     }
 
     private void rewriteJoinConditions(PlainSelect plainSelect, SqlTableContext tableContext, SqlRewriteContext context) {

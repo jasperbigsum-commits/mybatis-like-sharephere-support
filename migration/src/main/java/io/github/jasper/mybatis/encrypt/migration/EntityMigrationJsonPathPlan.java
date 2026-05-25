@@ -40,30 +40,65 @@ public final class EntityMigrationJsonPathPlan {
         this.assistedQueryAlgorithm = assistedQueryAlgorithm;
     }
 
+    /**
+     * Return the exact JSON path.
+     *
+     * @return exact JSON path
+     */
     public String getPath() {
         return path;
     }
 
+    /**
+     * Return the external table used to store ciphertext for this path.
+     *
+     * @return external storage table
+     */
     public String getStorageTable() {
         return storageTable;
     }
 
+    /**
+     * Return the external table primary key column.
+     *
+     * @return external table primary key column
+     */
     public String getStorageIdColumn() {
         return storageIdColumn;
     }
 
+    /**
+     * Return the hash column used to bind the main-table JSON value to the external row.
+     *
+     * @return hash column
+     */
     public String getHashColumn() {
         return hashColumn;
     }
 
+    /**
+     * Return the external table ciphertext column.
+     *
+     * @return ciphertext column
+     */
     public String getCipherColumn() {
         return cipherColumn;
     }
 
+    /**
+     * Return the cipher algorithm bean name for this path.
+     *
+     * @return cipher algorithm bean name
+     */
     public String getCipherAlgorithm() {
         return cipherAlgorithm;
     }
 
+    /**
+     * Return the assisted-query algorithm bean name for this path.
+     *
+     * @return assisted-query algorithm bean name
+     */
     public String getAssistedQueryAlgorithm() {
         return assistedQueryAlgorithm;
     }

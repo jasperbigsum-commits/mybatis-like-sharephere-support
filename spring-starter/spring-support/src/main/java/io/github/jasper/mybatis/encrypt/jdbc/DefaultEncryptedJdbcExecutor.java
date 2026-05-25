@@ -47,6 +47,16 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
     private final EncryptMetadataRegistry metadataRegistry;
     private final DatabaseEncryptionProperties properties;
 
+    /**
+     * Create the default encrypted JDBC executor.
+     *
+     * @param dataSources available Spring data sources keyed by bean name
+     * @param dataSourceNameResolver resolver for configuration data source names
+     * @param sqlRewriteEngine SQL rewrite engine shared with the MyBatis interceptor
+     * @param resultDecryptor result decryptor shared with the MyBatis interceptor
+     * @param metadataRegistry encryption metadata registry
+     * @param properties encryption configuration properties
+     */
     public DefaultEncryptedJdbcExecutor(Map<String, DataSource> dataSources,
                                         DataSourceNameResolver dataSourceNameResolver,
                                         SqlRewriteEngine sqlRewriteEngine,

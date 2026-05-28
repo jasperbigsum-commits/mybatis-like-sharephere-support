@@ -37,6 +37,7 @@ through real MyBatis execution tests.
 | Top-level `MAX(encrypted_column)` / `FIRST(encrypted_column)` | Supported with warning | Same-table fields require `assistedQueryColumn` as an explicit opt-in and aggregate the ciphertext column so the result can be decrypted; separate-table fields aggregate the main-table reference value and are hydrated after read. Results reflect technical values, not plaintext ordering semantics. |
 | Single-sided range predicates `>`, `>=`, `<`, `<=` | Supported with warning | Same-table fields require `assistedQueryColumn`; separate-table fields compare the main-table reference column directly. Results reflect technical values for cursor-style comparisons, not plaintext business ordering. |
 | `IN (?, ?, ?)` | Supported | Same-table fields use assisted query column when available, otherwise `storageColumn`; separate-table fields rewrite directly to the main-table reference/hash column. |
+| `FIND_IN_SET(encrypted_column, ?)` | Supported for comma-separated exact values | Same-table fields rewrite the first argument to `assistedQueryColumn`; separate-table fields use the main-table reference/hash column. The comma-separated candidate list is transformed item by item with the assisted query algorithm. This is exact membership matching, not fuzzy search. |
 | `json_extract(encrypted_json_column, '$.path') = ?` | Supported | Exact static path only; the right-side operand is rewritten to the path's assisted hash value stored in the JSON string. |
 | `json_extract(encrypted_json_column, '$.path') != ?` | Supported | Exact static path only; the right-side operand is rewritten to the path's assisted hash value stored in the JSON string. |
 | `json_extract(encrypted_json_column, '$.path') IN (...)` | Supported | Exact static path only; every operand is transformed to the path's assisted hash value. |
@@ -66,6 +67,7 @@ Use these examples as low-cost templates during mapper review.
 | exact lookup by phone | `where phone = #{phone}` | rewritten to `assistedQueryColumn` when configured |
 | compare two encrypted fields | `where phone = backup_phone` | rewritten to assisted columns or separate-table reference columns |
 | lookup by multiple IDs / phones | `where phone in (...)` | each value can be transformed through the same helper path |
+| lookup by comma-separated IDs / phones | `where find_in_set(phone, #{phones})` | exact membership only; candidates are transformed to assisted/hash values one by one |
 | fuzzy lookup | `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm`; without `likeQueryColumn`, only assisted/hash exact fallback is available |
 | return decrypted entity | `select id, phone from user_account` | logical projection can be mapped back to the entity property |
 | return flat DTO | explicit aliases plus `@EncryptResultHint` | keeps projected source columns traceable |
@@ -91,7 +93,7 @@ Avoid these if the field is encrypted:
 | `SELECT DISTINCT encrypted_column` | Rejected | Returning distinct ciphertext/helper values is not equivalent to returning distinct business plaintext. |
 | `ORDER BY encrypted_column` | Supported with assisted/hash column | Requires `assistedQueryColumn`; same-table fields sort by the assisted/hash column, separate-table fields sort by the main-table reference column, and a warning is logged because the order reflects technical values rather than plaintext semantics. |
 | Aggregate functions on encrypted fields except supported `COUNT`, top-level `MAX`, and top-level `FIRST` variants | Rejected | `SUM(phone)`, `AVG(phone)`, `MIN(phone)`, `GROUP_CONCAT(phone)` and similar expressions are not semantically reliable. `MAX` and `FIRST` are only allowed in the outer select list with technical-value warning behavior. |
-| Window functions referencing encrypted fields | Rejected | `PARTITION BY`, analytic `ORDER BY`, filter expressions, and named windows fail fast when encrypted fields are involved. |
+| Window functions using encrypted fields outside supported `PARTITION BY` | Rejected | `PARTITION BY encrypted_column` is supported as technical hash/reference bucketing. Analytic `ORDER BY`, filter expressions, named windows, and other encrypted window references fail fast. |
 | JSON mutation functions on `@EncryptJsonField` | Rejected | `JSON_SET`, `JSON_REPLACE`, `JSON_MERGE`, and similar partial JSON updates are not supported for encrypted JSON fields. |
 | Dynamic or non-exact JSON path expressions | Rejected | Only exact static paths registered under `@EncryptJsonPath` are supported. |
 | Separate-table encrypted field in `IN` subquery projection | Rejected | The plugin currently only supports same-table encrypted field comparison subqueries. |

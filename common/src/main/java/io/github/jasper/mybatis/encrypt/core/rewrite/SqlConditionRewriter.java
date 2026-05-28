@@ -200,16 +200,84 @@ final class SqlConditionRewriter {
             return binaryExpression;
         }
         if (expression instanceof Function && ((Function) expression).getParameters() != null) {
-            Function function = (Function) expression;
-            for (Expression item : function.getParameters()) {
-                rewrite(item, tableContext, context);
-            }
+            rewriteFunctionCondition((Function) expression, tableContext, context);
             return expression;
         }
         if (expression instanceof JdbcParameter) {
             context.consumeOriginal();
         }
         return expression;
+    }
+
+    private void rewriteFunctionCondition(Function function,
+                                          SqlTableContext tableContext,
+                                          SqlRewriteContext context) {
+        if (function.getName() != null && "find_in_set".equalsIgnoreCase(function.getName())) {
+            rewriteFindInSetCondition(function, tableContext, context);
+            return;
+        }
+        rewriteFunctionParameters(function, tableContext, context);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void rewriteFindInSetCondition(Function function,
+                                           SqlTableContext tableContext,
+                                           SqlRewriteContext context) {
+        ExpressionList parameters = function.getParameters();
+        if (parameters.size() != 2) {
+            rewriteFunctionParameters(function, tableContext, context);
+            return;
+        }
+        Object first = parameters.get(0);
+        Object second = parameters.get(1);
+        if (!(first instanceof Expression) || !(second instanceof Expression)) {
+            return;
+        }
+        ColumnResolution resolution = resolveEncryptedColumn((Expression) first, tableContext);
+        if (resolution == null) {
+            rewriteFunctionParameters(function, tableContext, context);
+            return;
+        }
+        EncryptColumnRule rule = resolution.rule();
+        String targetColumn = rule.isStoredInSeparateTable()
+                ? rule.column()
+                : assistedQueryColumnProvider.apply(rule, "FIND_IN_SET query");
+        parameters.set(0, columnBuilder.apply(resolution.column(), targetColumn));
+        parameters.set(1, rewriteFindInSetCandidates(rule, (Expression) second, context));
+        context.markChanged();
+    }
+
+    private Expression rewriteFindInSetCandidates(EncryptColumnRule rule,
+                                                  Expression operand,
+                                                  SqlRewriteContext context) {
+        QueryOperand queryOperand = operandSupport.readComposableQueryOperand(operand, context,
+                EncryptionErrorCode.INVALID_ENCRYPTED_QUERY_OPERAND,
+                "Encrypted FIND_IN_SET condition must use prepared parameter, string literal, or CONCAT of them.");
+        Object value = queryOperand.value();
+        if (value == null) {
+            return operandSupport.buildComposableQueryExpression(queryOperand, context, null, MaskingMode.HASH);
+        }
+        String[] items = String.valueOf(value).split(",", -1);
+        StringBuilder transformed = new StringBuilder();
+        for (int index = 0; index < items.length; index++) {
+            if (index > 0) {
+                transformed.append(',');
+            }
+            transformed.append(valueTransformer.transformAssisted(rule, items[index].trim()));
+        }
+        return operandSupport.buildComposableQueryExpression(queryOperand, context, transformed.toString(), MaskingMode.HASH);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void rewriteFunctionParameters(Function function,
+                                           SqlTableContext tableContext,
+                                           SqlRewriteContext context) {
+        if (function.getParameters() == null) {
+            return;
+        }
+        for (Expression item : function.getParameters()) {
+            rewrite(item, tableContext, context);
+        }
     }
 
     private Expression rewriteEquality(BinaryExpression expression, SqlTableContext tableContext, SqlRewriteContext context) {

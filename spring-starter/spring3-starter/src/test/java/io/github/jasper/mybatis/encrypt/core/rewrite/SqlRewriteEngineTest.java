@@ -2812,6 +2812,73 @@ class SqlRewriteEngineTest {
         assertFalse(result.sql().contains("ORDER BY a.`cert_cde_hash`"));
     }
 
+    @Test
+    void shouldRewriteWithWindowPartitionAndFindInSetOnEncryptedField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleCrmOdueCollMainProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH group_first AS ("
+                        + "SELECT *, row_number() OVER (PARTITION BY id_card ORDER BY create_time DESC) AS rn "
+                        + "FROM crm_odue_coll_main "
+                        + "WHERE del_flag = 0 AND find_in_set(id_card, ?)"
+                        + ") SELECT * FROM group_first WHERE rn = 1",
+                List.of(new ParameterMapping.Builder(configuration, "idCards", String.class).build()),
+                Map.of("idCards", "320101199001011234,320101199001011235")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("PARTITION BY `id_card_hash` ORDER BY create_time DESC")
+                || result.sql().contains("PARTITION BY id_card_hash ORDER BY create_time DESC"));
+        assertTrue(result.sql().contains("find_in_set(`id_card_hash`, ?)")
+                || result.sql().contains("find_in_set(id_card_hash, ?)"));
+        result.applyTo(boundSql);
+        assertEquals(
+                new Sm3AssistedQueryAlgorithm().transform("320101199001011234")
+                        + "," + new Sm3AssistedQueryAlgorithm().transform("320101199001011235"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty())
+        );
+    }
+
+    @Test
+    void shouldRewriteFindInSetOnSeparateTableEncryptedField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleCrmOdueCollMainSeparateTableProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT id FROM crm_odue_coll_main WHERE find_in_set(id_card, ?)",
+                List.of(new ParameterMapping.Builder(configuration, "idCards", String.class).build()),
+                Map.of("idCards", "320101199001011234,320101199001011235")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("find_in_set(`id_card`, ?)")
+                || result.sql().contains("find_in_set(id_card, ?)"));
+        assertFalse(result.sql().contains("crm_odue_coll_main_id_card_encrypt"));
+        result.applyTo(boundSql);
+        assertEquals(
+                new Sm3AssistedQueryAlgorithm().transform("320101199001011234")
+                        + "," + new Sm3AssistedQueryAlgorithm().transform("320101199001011235"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty())
+        );
+    }
+
     /**
      * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
@@ -2922,6 +2989,71 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldRewriteNonRecursiveWithSelectForSeparateTableFieldAsDerivedTable() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH u AS (SELECT id, id_card FROM user_account WHERE id_card = ?) "
+                        + "SELECT u.id_card FROM u WHERE u.id_card = ?",
+                List.of(
+                        new ParameterMapping.Builder(configuration, "innerIdCard", String.class).build(),
+                        new ParameterMapping.Builder(configuration, "outerIdCard", String.class).build()
+                ),
+                Map.of("innerIdCard", "320101199001011234", "outerIdCard", "320101199001011235")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("WITH u AS"));
+        assertFalse(result.sql().contains("user_id_card_encrypt"));
+        assertTrue(result.sql().contains("`id_card` = ?"));
+        assertTrue(result.sql().contains("u.`id_card` = ?"));
+        result.applyTo(boundSql);
+        assertEquals(2, boundSql.getParameterMappings().size());
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("320101199001011234"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty()));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("320101199001011235"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
+        assertEquals(2, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteNonRecursiveWithAliasedSeparateTableProjection() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH u AS (SELECT id, id_card AS cert_no FROM user_account) "
+                        + "SELECT u.cert_no FROM u WHERE u.cert_no = ?",
+                List.of(new ParameterMapping.Builder(configuration, "certNo", String.class).build()),
+                Map.of("certNo", "320101199001011234")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("id_card AS cert_no"));
+        assertTrue(result.sql().contains("u.`cert_no` = ?") || result.sql().contains("u.cert_no = ?"));
+        result.applyTo(boundSql);
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("320101199001011234"),
+                boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty()));
+    }
+
+    @Test
     void shouldFailFastForWithRecursiveSelect() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -2951,6 +3083,35 @@ class SqlRewriteEngineTest {
     }
 
     @Test
+    void shouldFailFastForWithRecursiveSelectReferencingSeparateTableField() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH RECURSIVE u(id, id_card) AS ("
+                        + "SELECT id, id_card FROM user_account WHERE id_card = ? "
+                        + "UNION ALL SELECT ua.id, ua.id_card FROM user_account ua JOIN u ON ua.id = u.id"
+                        + ") SELECT id_card FROM u",
+                List.of(new ParameterMapping.Builder(configuration, "idCard", String.class).build()),
+                Map.of("idCard", "320101199001011234")
+        );
+
+        UnsupportedEncryptedOperationException exception = assertThrows(
+                UnsupportedEncryptedOperationException.class,
+                () -> engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql)
+        );
+
+        assertEquals(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_SELECT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("WITH RECURSIVE"));
+    }
+
+    @Test
     void shouldAllowWithRecursiveWhenNoEncryptedFieldIsReferenced() {
         Configuration configuration = new Configuration();
         DatabaseEncryptionProperties properties = sampleProperties();
@@ -2966,6 +3127,56 @@ class SqlRewriteEngineTest {
                         + "SELECT id, parent_id FROM org_node WHERE parent_id IS NULL "
                         + "UNION ALL SELECT n.id, n.parent_id FROM org_node n JOIN tree t ON n.parent_id = t.id"
                         + ") SELECT id FROM tree WHERE id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build()),
+                Map.of("id", 1L)
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertFalse(result.changed());
+    }
+
+    @Test
+    void shouldAllowWithRecursiveOnEncryptedTableWhenSameTableFieldIsNotReferenced() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH RECURSIVE u(id, parent_id) AS ("
+                        + "SELECT id, parent_id FROM user_account WHERE parent_id IS NULL "
+                        + "UNION ALL SELECT ua.id, ua.parent_id FROM user_account ua JOIN u ON ua.parent_id = u.id"
+                        + ") SELECT id FROM u WHERE id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build()),
+                Map.of("id", 1L)
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertFalse(result.changed());
+    }
+
+    @Test
+    void shouldAllowWithRecursiveOnSeparateTableRuleWhenSeparateTableFieldIsNotReferenced() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleSeparateOnlyProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "WITH RECURSIVE u(id, parent_id) AS ("
+                        + "SELECT id, parent_id FROM user_account WHERE parent_id IS NULL "
+                        + "UNION ALL SELECT ua.id, ua.parent_id FROM user_account ua JOIN u ON ua.parent_id = u.id"
+                        + ") SELECT id FROM u WHERE id = ?",
                 List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build()),
                 Map.of("id", 1L)
         );
@@ -3615,6 +3826,27 @@ class SqlRewriteEngineTest {
         return properties;
     }
 
+    private DatabaseEncryptionProperties sampleSeparateOnlyProperties() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("user_account");
+        DatabaseEncryptionProperties.FieldRuleProperties separateFieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        separateFieldRule.setProperty("idCard");
+        separateFieldRule.setColumn("id_card");
+        separateFieldRule.setStorageMode(FieldStorageMode.SEPARATE_TABLE);
+        separateFieldRule.setStorageTable("user_id_card_encrypt");
+        separateFieldRule.setStorageColumn("id_card_cipher");
+        separateFieldRule.setStorageIdColumn("id");
+        separateFieldRule.setAssistedQueryColumn("id_card_hash");
+        separateFieldRule.setLikeQueryColumn("id_card_like");
+        separateFieldRule.setMaskedColumn("id_card_masked");
+        separateFieldRule.setMaskedAlgorithm("idCardMaskLike");
+        tableRule.getFields().add(separateFieldRule);
+        properties.getTables().add(tableRule);
+        properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
     private DatabaseEncryptionProperties samplePropertiesForSeparateTableJoinComparison() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         properties.getTables().add(separateTableJoinRule(
@@ -3784,6 +4016,40 @@ class SqlRewriteEngineTest {
         tableRule.getFields().add(certRule);
 
         properties.getTables().add(tableRule);
+        properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties sampleCrmOdueCollMainProperties() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("crm_odue_coll_main");
+
+        DatabaseEncryptionProperties.FieldRuleProperties idCardRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        idCardRule.setProperty("idCard");
+        idCardRule.setColumn("id_card");
+        idCardRule.setStorageColumn("id_card_cipher");
+        idCardRule.setAssistedQueryColumn("id_card_hash");
+        tableRule.getFields().add(idCardRule);
+
+        properties.getTables().add(tableRule);
+        properties.setDefaultCipherKey("unit-test-key");
+        return properties;
+    }
+
+    private DatabaseEncryptionProperties sampleCrmOdueCollMainSeparateTableProperties() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        properties.getTables().add(encryptedFieldRule(
+                "crm_odue_coll_main",
+                "idCard",
+                "id_card",
+                true,
+                "crm_odue_coll_main_id_card_encrypt",
+                "id_card_cipher",
+                "id_card_hash",
+                null,
+                null
+        ));
         properties.setDefaultCipherKey("unit-test-key");
         return properties;
     }

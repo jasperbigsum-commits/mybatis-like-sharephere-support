@@ -43,6 +43,7 @@
 - 对 `@EncryptJsonField`，仅支持整列 JSON 字符串写入；命中 path 的明文会先替换成 hash，再把密文写入各自绑定的独立表。
 - 对 `assistedQueryColumn` / `likeQueryColumn` 自动补充插入列、更新列并改写 WHERE 条件。
 - 对独立加密表字段，等值、非等值、`IN`、`IS NULL`、`IS NOT NULL` 以及无 `likeQueryColumn` 时退化出的等值 `LIKE`，都优先改写为主表逻辑列上的 hash/ref 直接比较；只有真正需要模糊匹配的 `LIKE` 才保留 `EXISTS` 子查询语义，主表逻辑列写入 `assistedQueryColumn` 对应的 hash 引用值。
+- 对 `FIND_IN_SET(encrypted_col, ?)` 仅支持逗号分隔的精确候选值匹配：同表字段改写到 `assistedQueryColumn`，独立表字段使用主表 hash/ref 引用列，并逐项转换候选值。
 - 对 `json_extract(json_col, '$.path')`，仅支持精确静态 path 的 `=` / `!=` / `IN (...)`；右侧参数会改写为对应 path 的 hash 值。
 - 对插件内部新生成的标识符，按配置的 `sqlDialect` 输出对应转义风格，当前支持 MySQL、OceanBase、达梦、Oracle12、ClickHouse。
 - 对排序、`BETWEEN`、`JSON_SET/JSON_REPLACE/JSON_MERGE`、动态 path 等不可安全支持的操作主动失败；对显式放宽的单边范围比较输出 warning，避免把技术值结果误读成明文业务语义。
@@ -137,7 +138,7 @@
 3. 对主业务 `INSERT/UPDATE`，若存在写前参数预处理器，先原地补齐审计字段、租户字段或敏感更新保护后的参数值。
 4. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
 5. 若命中 `@EncryptJsonField`，则整列 JSON 字符串中的精确 path 明文会替换为 hash，并把密文写入各自绑定的独立表。
-6. 查询条件遇到等值、LIKE、精确静态 `json_extract(...)`，或显式放宽的单边范围比较时，改写到对应辅助列或 JSON path hash，并对参数做算法转换。
+6. 查询条件遇到等值、LIKE、`FIND_IN_SET` 精确候选列表、精确静态 `json_extract(...)`，或显式放宽的单边范围比较时，改写到对应辅助列或 JSON path hash，并对参数做算法转换。
 7. 查询结果返回后，按实体字段规则解密成业务可读值；`@EncryptJsonField` 会把 hash JSON 再回填成明文 JSON。
 8. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
 9. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。

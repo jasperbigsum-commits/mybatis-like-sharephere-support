@@ -36,6 +36,8 @@
 4. 只有 controller 上的 `@SensitiveResponse` 才负责打开响应脱敏上下文。
 5. `@SensitiveResponseTrigger` 只能消费已经打开的上下文；没有上下文时不做任何操作。
 6. 响应层优先从数据库存储态脱敏列回填；取不到时才回退到算法脱敏；再不满足时才落到 `@SensitiveField` 的对象图脱敏。
+7. 如果返回 DTO 继承 `SensitiveExtraInfoSupport`，框架可以把每个脱敏字段的 `sid/pid/vid/hash` 以 `Map<String, SensitiveLookupMeta>` 的形式附加到响应中。
+8. 显式明文回查通过 `SensitivePlaintextLookupService` 完成，支持同表和独立表字段；默认只考虑单实体 1:1 场景，并可通过 `SensitivePlaintextAuditRecorder` 记录审计。
 
 ## 适用边界
 
@@ -96,14 +98,19 @@
 - `SensitiveResponseBodyAdvice`
 - `SensitiveDataContext`
 - `SensitiveDataMasker`
+- `SensitiveExtraInfoSupport`
 - `StoredSensitiveValueResolver`
 - `JdbcStoredSensitiveValueResolver`
+- `SensitivePlaintextLookupService`
+- `SensitivePlaintextAuditRecorder`
 
 职责：
 
 - 在 controller 入口打开一次请求级脱敏上下文
 - 在命中 `@SensitiveResponseTrigger` 的 service / 装配方法上复用当前线程里已打开的脱敏上下文
 - 在响应写回前根据上下文与注解做最终脱敏替换
+- 在字段成功脱敏后，按属性把 best-effort lookup meta 附加到 `SensitiveExtraInfoSupport`
+- 为业务显式提供“lookup meta -> 明文”的查询与审计挂点
 
 ## 组件关系图
 
@@ -203,6 +210,162 @@ sequenceDiagram
 - 标准查询接口用 `RECORDED_ONLY`
 - 手工组装 DTO、无 MyBatis 解密记录的接口用 `ANNOTATED_FIELDS`
 - 混合场景用 `RECORDED_THEN_ANNOTATED`
+
+## 响应补充信息与明文回查
+
+### 1. 返回 DTO 额外补充信息
+
+如果你希望接口在返回脱敏值的同时，再附带一份供业务后续回查明文的扩展信息，返回 DTO 需要继承 `SensitiveExtraInfoSupport`：
+
+```java
+public class UserView extends SensitiveExtraInfoSupport {
+
+    private String phone;
+    private String idCard;
+}
+```
+
+运行时返回结构中的 `sensitiveLookupMeta` 是一个按属性名分组的 map：
+
+```json
+{
+  "phone": "138****8000",
+  "sensitiveLookupMeta": {
+    "phone": {
+      "sid": "sid_xxx",
+      "pid": "pid_xxx",
+      "vid": "U-100",
+      "hash": "7f8c..."
+    }
+  }
+}
+```
+
+字段含义：
+
+- `sid`
+  来源编码，默认按表维度生成稳定值，也可显式配置
+- `pid`
+  属性编码，默认按表名 + 属性名生成稳定值，也可显式配置
+- `vid`
+  业务键值，供明文回查时定位同一条业务记录
+- `hash`
+  当前敏感字段的辅助查询 hash 值
+
+### 2. 什么时候会返回 `sensitiveLookupMeta`
+
+只有同时满足下面条件时，某个属性才会附带扩展信息：
+
+1. 当前返回对象继承了 `SensitiveExtraInfoSupport`
+2. 当前字段在本次响应中实际发生了脱敏替换
+3. 字段规则允许返回扩展信息
+4. `sid / pid / vid / hash` 都已成功解析
+
+不会返回的情况：
+
+- DTO 没有继承 `SensitiveExtraInfoSupport`
+- 字段本次没有被脱敏
+- 字段上显式关闭了扩展信息
+- 业务键或编码无法解析
+
+注意：
+
+- 这是 best-effort 能力，解析失败不会影响原有解密和脱敏流程
+- `getSensitiveLookupMeta()` 在 map 为空时会返回 `null`，避免接口固定返回空对象
+
+### 3. `@EncryptField` 相关属性
+
+`@EncryptField` / 配置规则新增了 4 个与响应补充信息相关的属性：
+
+| 属性 | 默认行为 | 作用 |
+| --- | --- | --- |
+| `sidCode` | 按来源表生成稳定默认值 | 自定义来源编码 |
+| `pidCode` | 按表名 + 属性名生成稳定默认值 | 自定义属性编码 |
+| `returnLookupMeta` | `true` | 是否允许该字段返回扩展信息 |
+| `lookupBusinessKey` | 按实体主键注解和 `id` 约定推断 | 指定业务键属性名 |
+
+示例：
+
+```java
+@EncryptField(
+        column = "phone",
+        storageColumn = "phone_cipher",
+        assistedQueryColumn = "phone_hash",
+        maskedColumn = "phone_masked",
+        sidCode = "user_phone_sid",
+        pidCode = "user_phone_pid",
+        lookupBusinessKey = "tenantId"
+)
+private String phone;
+```
+
+规则说明：
+
+- `lookupBusinessKey` 显式配置优先级最高
+- 未显式配置时，会按 `@TableId`、JPA `@Id`、字段名 `id` 的顺序保守推断
+- 对纯配置表规则，如果没有实体预热，会保守把 `lookupBusinessKey=id` 映射到物理列 `id`
+- 如果某个字段不希望对外返回扩展信息，可设为 `returnLookupMeta = false`
+
+### 4. 显式明文回查服务
+
+框架提供显式服务：
+
+```java
+public interface SensitivePlaintextLookupService {
+
+    String lookup(SensitiveLookupMeta lookupMeta);
+}
+```
+
+典型用法：
+
+```java
+String plaintext = sensitivePlaintextLookupService.lookup(meta);
+```
+
+当前实现行为：
+
+- 支持同表加密字段回查
+- 支持独立表加密字段回查
+- 主表会按 `vid + hash` 做一致性校验
+- 回查成功后再按字段加密算法解密真实明文
+
+失败边界：
+
+- `sid / pid / vid / hash` 任一缺失会失败
+- 找不到对应字段规则会失败
+- 当前多数据源自动路由暂不支持，多个 `DataSource` 时会直接 fail-fast
+
+### 5. 审计钩子
+
+显式明文回查不会自动决定你的审计策略，但 starter 会注册一个默认 no-op 实现：
+
+```java
+public interface SensitivePlaintextAuditRecorder {
+
+    void recordSuccess(SensitiveLookupMeta lookupMeta);
+
+    void recordFailure(SensitiveLookupMeta lookupMeta, String errorCode);
+}
+```
+
+你可以自定义这个 Bean，把回查成功 / 失败事件写入审计表、消息队列或安全平台。
+
+推荐记录内容：
+
+- `sid / pid / vid / hash`
+- 调用时间
+- 调用人或租户
+- 成功 / 失败状态
+- 稳定错误码
+
+### 6. 使用建议
+
+- 对需要返回扩展信息的接口，优先让返回 DTO 继承 `SensitiveExtraInfoSupport`
+- 对纯展示字段或不允许任何回查能力的字段，显式配置 `returnLookupMeta = false`
+- 若业务需要更稳定的 `vid` 解析，优先显式配置 `lookupBusinessKey`
+- 把 `SensitivePlaintextLookupService` 当成显式受控入口，不要在普通 controller 出口隐式触发明文回查
+- 若未来存在多数据源或一对多明文回查需求，建议先显式扩展规则模型和审计模型，再放开能力边界
 
 ## DTO 映射与复杂 SQL 一致性
 
@@ -408,6 +571,14 @@ private String phone;
   面向接口返回的存储态脱敏列
 - `maskedAlgorithm`
   在写入和迁移时生成 `maskedColumn` 的算法
+- `sidCode`
+  响应扩展信息中的来源编码
+- `pidCode`
+  响应扩展信息中的属性编码
+- `returnLookupMeta`
+  是否允许该字段把 lookup meta 返回给调用方
+- `lookupBusinessKey`
+  解析 `vid` 时使用的业务键属性名
 
 ### 2. 同列复用规则
 
@@ -742,6 +913,29 @@ public class UserView {
 
 此时即使没有 `SensitiveDataContext.record(...)` 记录，仍然会通过对象图遍历进行脱敏。
 
+### 场景三点五：返回脱敏值并附带回查扩展信息
+
+```java
+public class UserView extends SensitiveExtraInfoSupport {
+
+    private String phone;
+
+    public UserView(String phone) {
+        this.phone = phone;
+    }
+}
+```
+
+适合：
+
+- 对外接口返回脱敏值
+- 但下游受控系统还需要拿到一份 `sid/pid/vid/hash` 做后续授权回查
+
+注意：
+
+- 只有字段实际被脱敏且元数据成功解析时，`sensitiveLookupMeta` 才会出现
+- 这不是明文本身，只是显式回查的索引信息
+
 ### 场景四：手工组装 DTO 但直接复用 LIKE 脱敏算法
 
 ```java
@@ -787,6 +981,22 @@ public class CustomerView {
 
 - 某些字段展示规则和手机号/身份证号这类通用掩码完全不同
 - 需要按字段声明少量可配置参数，但又不希望在 DTO 里写业务逻辑
+
+### 场景六：业务侧显式查回明文
+
+```java
+String plaintext = sensitivePlaintextLookupService.lookup(meta);
+```
+
+适合：
+
+- 受控内部系统已拿到响应中的 `sensitiveLookupMeta`
+- 需要在额外授权、审计完成后，再显式查回对应明文
+
+建议：
+
+- 搭配自定义 `SensitivePlaintextAuditRecorder`
+- 在应用层补充调用人、工单号、权限来源等审计维度
 
 ## 启动期校验
 

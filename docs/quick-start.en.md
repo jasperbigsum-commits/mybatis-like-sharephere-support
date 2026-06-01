@@ -13,7 +13,7 @@ This guide is for first-time users who want the shortest path to:
 For deeper topics, continue with:
 
 - [Persistence Encryption Guide](persistence-encryption-guide.en.md)
-- [Sensitive Response Guide](sensitive-response-guide.zh-CN.md)
+- [Sensitive Response Guide](sensitive-response-guide.en.md)
 - [Migration Guide](migration-guide.en.md)
 
 ## 1. Add the starter
@@ -205,5 +205,5 @@ Three minimal scenarios:
 ## Next documents
 
 - field model and DTO inference: [Persistence Encryption Guide](persistence-encryption-guide.en.md)
-- advanced masking and custom maskers: [Sensitive Response Guide](sensitive-response-guide.zh-CN.md)
+- advanced masking, response lookup metadata, and custom maskers: [Sensitive Response Guide](sensitive-response-guide.en.md)
 - historical data backfill: [Migration Guide](migration-guide.en.md)

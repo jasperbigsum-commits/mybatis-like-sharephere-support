@@ -114,4 +114,32 @@ public @interface EncryptField {
      * @return 脱敏存储算法 bean 名称
      */
     String maskedAlgorithm() default "normalizedLike";
+
+    /**
+     * 敏感字段来源编码；省略时按来源表名生成稳定默认值。
+     *
+     * @return 来源编码
+     */
+    String sidCode() default "";
+
+    /**
+     * 敏感字段属性编码；省略时按表名和属性名生成稳定默认值。
+     *
+     * @return 属性编码
+     */
+    String pidCode() default "";
+
+    /**
+     * 是否允许该字段在响应脱敏链路中返回 lookup meta。
+     *
+     * @return 返回 lookup meta 时返回 {@code true}
+     */
+    boolean returnLookupMeta() default true;
+
+    /**
+     * lookup meta 使用的业务主键属性名；省略时按实体主键注解和约定保守推断。
+     *
+     * @return 业务主键属性名
+     */
+    String lookupBusinessKey() default "";
 }

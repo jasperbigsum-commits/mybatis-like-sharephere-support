@@ -50,10 +50,12 @@
 ### 3. 响应脱敏
 
 - [脱敏响应指南](docs/sensitive-response-guide.zh-CN.md)
+- [Sensitive Response Guide (English)](docs/sensitive-response-guide.en.md)
 
 适合：
 
 - 想理解 `@SensitiveResponse`、`@SensitiveField`
+- 想理解响应返回的 `sensitiveLookupMeta`、显式明文回查与审计 hook
 - 想区分数据库存储态脱敏、DTO 输出脱敏、自定义脱敏器和复用 `likeAlgorithm`
 - 需要注解属性说明、自定义脱敏器示例和策略选择表
 

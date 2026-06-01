@@ -27,6 +27,9 @@ import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -259,10 +262,16 @@ public class EncryptMetadataRegistry {
                 properties.getStorageMode(),
                 properties.getStorageTable(),
                 properties.getStorageColumn() != null ? properties.getStorageColumn() : column,
-                firstNonBlank(properties.getStorageIdColumn(), "id")
+                firstNonBlank(properties.getStorageIdColumn(), "id"),
+                blankToNull(properties.getSidCode()),
+                blankToNull(properties.getPidCode()),
+                properties.isReturnLookupMeta(),
+                blankToNull(properties.getLookupBusinessKey()),
+                null,
+                false
         );
         validateRule(rule);
-        return rule;
+        return finalizeLookupMeta(null, rule);
     }
 
     private String resolveConfiguredProperty(DatabaseEncryptionProperties.FieldRuleProperties properties) {
@@ -440,15 +449,20 @@ public class EncryptMetadataRegistry {
     private EncryptTableRule loadEntityRule(Class<?> entityType) {
         EncryptTableRule annotationRule = annotationLoader.load(entityType);
         if (annotationRule != null) {
-            annotationRule.getColumnRules().forEach(this::validateRule);
+            EncryptTableRule entityRule = new EncryptTableRule(annotationRule.getTableName());
             for (EncryptColumnRule columnRule : annotationRule.getColumnRules()) {
-                registerAnnotationColumnRule(annotationRule, columnRule);
+                EncryptColumnRule finalized = finalizeLookupMeta(entityType, columnRule);
+                validateRule(finalized);
+                entityRule.addColumnRule(finalized);
+                registerAnnotationColumnRule(entityRule, finalized);
             }
             annotationRule.getJsonFieldRules().forEach(this::validateJsonRule);
             for (EncryptJsonFieldRule jsonFieldRule : annotationRule.getJsonFieldRules()) {
-                registerAnnotationJsonFieldRule(annotationRule, jsonFieldRule);
+                entityRule.addJsonFieldRule(jsonFieldRule);
+                registerAnnotationJsonFieldRule(entityRule, jsonFieldRule);
             }
-            return annotationRule;
+            refreshTableRuleCache(entityRule);
+            return entityRule;
         }
         return loadConfiguredEntityRule(entityType);
     }
@@ -461,7 +475,7 @@ public class EncryptMetadataRegistry {
         }
         EncryptTableRule entityRule = new EncryptTableRule(tableName);
         for (EncryptColumnRule columnRule : configuredTableRule.getColumnRules()) {
-            entityRule.addColumnRule(new EncryptColumnRule(
+            entityRule.addColumnRule(finalizeLookupMeta(entityType, new EncryptColumnRule(
                     resolveEntityProperty(entityType, columnRule),
                     columnRule.table(),
                     columnRule.column(),
@@ -475,8 +489,14 @@ public class EncryptMetadataRegistry {
                     columnRule.storageMode(),
                     columnRule.storageTable(),
                     columnRule.storageColumn(),
-                    columnRule.storageIdColumn()
-            ));
+                    columnRule.storageIdColumn(),
+                    columnRule.sidCode(),
+                    columnRule.pidCode(),
+                    columnRule.returnLookupMeta(),
+                    columnRule.lookupBusinessKey(),
+                    columnRule.lookupBusinessKeyColumn(),
+                    columnRule.hasResolvedLookupBusinessKey()
+            )));
         }
         for (EncryptJsonFieldRule jsonFieldRule : configuredTableRule.getJsonFieldRules()) {
             entityRule.addJsonFieldRule(new EncryptJsonFieldRule(
@@ -488,7 +508,226 @@ public class EncryptMetadataRegistry {
                     jsonFieldRule.pathRules()
             ));
         }
+        refreshTableRuleCache(entityRule);
         return entityRule;
+    }
+
+    private EncryptColumnRule finalizeLookupMeta(Class<?> entityType, EncryptColumnRule sourceRule) {
+        String sidCode = StringUtils.isNotBlank(sourceRule.sidCode())
+                ? sourceRule.sidCode()
+                : defaultLookupCode("sid", sourceRule.table(), null);
+        String pidCode = StringUtils.isNotBlank(sourceRule.pidCode())
+                ? sourceRule.pidCode()
+                : defaultLookupCode("pid", sourceRule.table(), sourceRule.property());
+        LookupBusinessKeyResolution lookupBusinessKeyResolution =
+                resolveLookupBusinessKey(entityType, sourceRule.lookupBusinessKey());
+        return new EncryptColumnRule(
+                sourceRule.property(),
+                sourceRule.table(),
+                sourceRule.column(),
+                sourceRule.cipherAlgorithm(),
+                sourceRule.assistedQueryColumn(),
+                sourceRule.assistedQueryAlgorithm(),
+                sourceRule.likeQueryColumn(),
+                sourceRule.likeQueryAlgorithm(),
+                sourceRule.maskedColumn(),
+                sourceRule.maskedAlgorithm(),
+                sourceRule.storageMode(),
+                sourceRule.storageTable(),
+                sourceRule.storageColumn(),
+                sourceRule.storageIdColumn(),
+                sidCode,
+                pidCode,
+                sourceRule.returnLookupMeta(),
+                lookupBusinessKeyResolution.lookupBusinessKey,
+                lookupBusinessKeyResolution.lookupBusinessKeyColumn,
+                lookupBusinessKeyResolution.resolved
+        );
+    }
+
+    private void refreshTableRuleCache(EncryptTableRule finalizedRule) {
+        if (finalizedRule == null) {
+            return;
+        }
+        String normalizedTableName = NameUtils.normalizeIdentifier(finalizedRule.getTableName());
+        EncryptTableRule mergedRule = new EncryptTableRule(finalizedRule.getTableName());
+        EncryptTableRule existingRule = tableRules.get(normalizedTableName);
+        if (existingRule != null) {
+            for (EncryptColumnRule columnRule : existingRule.getColumnRules()) {
+                mergedRule.addColumnRule(columnRule);
+            }
+            for (EncryptJsonFieldRule jsonFieldRule : existingRule.getJsonFieldRules()) {
+                mergedRule.addJsonFieldRule(jsonFieldRule);
+            }
+        }
+        for (EncryptColumnRule columnRule : finalizedRule.getColumnRules()) {
+            mergedRule.addColumnRule(columnRule);
+        }
+        for (EncryptJsonFieldRule jsonFieldRule : finalizedRule.getJsonFieldRules()) {
+            mergedRule.addJsonFieldRule(jsonFieldRule);
+        }
+        tableRules.put(normalizedTableName, mergedRule);
+    }
+
+    private LookupBusinessKeyResolution resolveLookupBusinessKey(Class<?> entityType, String configuredLookupBusinessKey) {
+        if (StringUtils.isNotBlank(configuredLookupBusinessKey)) {
+            if (entityType == null) {
+                return LookupBusinessKeyResolution.resolved(
+                        configuredLookupBusinessKey, NameUtils.camelToSnake(configuredLookupBusinessKey));
+            }
+            return hasField(entityType, configuredLookupBusinessKey)
+                    ? LookupBusinessKeyResolution.resolved(
+                    configuredLookupBusinessKey, resolveFieldColumn(findFieldByName(entityType, configuredLookupBusinessKey)))
+                    : LookupBusinessKeyResolution.unresolved(configuredLookupBusinessKey);
+        }
+        if (entityType == null) {
+            return LookupBusinessKeyResolution.resolved("id", "id");
+        }
+        String inferred = inferLookupBusinessKey(entityType);
+        if (StringUtils.isNotBlank(inferred)) {
+            return LookupBusinessKeyResolution.resolved(
+                    inferred, resolveFieldColumn(findFieldByName(entityType, inferred)));
+        }
+        return LookupBusinessKeyResolution.unresolved(null);
+    }
+
+    private String inferLookupBusinessKey(Class<?> entityType) {
+        if (entityType == null) {
+            return null;
+        }
+        String tableId = selectSingleCandidate(entityType, "com.baomidou.mybatisplus.annotation.TableId");
+        if (StringUtils.isNotBlank(tableId)) {
+            return tableId;
+        }
+        String jakartaId = selectSingleCandidate(entityType, "jakarta.persistence.Id");
+        if (StringUtils.isNotBlank(jakartaId)) {
+            return jakartaId;
+        }
+        String javaxId = selectSingleCandidate(entityType, "javax.persistence.Id");
+        if (StringUtils.isNotBlank(javaxId)) {
+            return javaxId;
+        }
+        String namedId = selectSingleCandidateByName(entityType, "id");
+        return StringUtils.isNotBlank(namedId) ? namedId : null;
+    }
+
+    private String selectSingleCandidate(Class<?> entityType, String annotationClassName) {
+        String selected = null;
+        for (java.lang.reflect.Field field : fieldsInHierarchy(entityType)) {
+            if (!hasAnnotation(field, annotationClassName)) {
+                continue;
+            }
+            if (selected != null) {
+                return null;
+            }
+            selected = field.getName();
+        }
+        return selected;
+    }
+
+    private String selectSingleCandidateByName(Class<?> entityType, String fieldName) {
+        String selected = null;
+        for (java.lang.reflect.Field field : fieldsInHierarchy(entityType)) {
+            if (!NameUtils.normalizeIdentifier(field.getName()).equals(NameUtils.normalizeIdentifier(fieldName))) {
+                continue;
+            }
+            if (selected != null) {
+                return null;
+            }
+            selected = field.getName();
+        }
+        return selected;
+    }
+
+    private boolean hasField(Class<?> entityType, String fieldName) {
+        return findFieldByName(entityType, fieldName) != null;
+    }
+
+    private java.lang.reflect.Field findFieldByName(Class<?> entityType, String fieldName) {
+        if (entityType == null || StringUtils.isBlank(fieldName)) {
+            return null;
+        }
+        String normalizedFieldName = NameUtils.normalizeIdentifier(fieldName);
+        for (java.lang.reflect.Field field : fieldsInHierarchy(entityType)) {
+            if (normalizedFieldName.equals(NameUtils.normalizeIdentifier(field.getName()))) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    private boolean hasAnnotation(java.lang.reflect.Field field, String annotationClassName) {
+        for (java.lang.annotation.Annotation annotation : field.getAnnotations()) {
+            if (annotation.annotationType().getName().equals(annotationClassName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<java.lang.reflect.Field> fieldsInHierarchy(Class<?> type) {
+        List<Class<?>> hierarchy = new java.util.ArrayList<Class<?>>();
+        Class<?> current = type;
+        while (current != null && current != Object.class) {
+            hierarchy.add(current);
+            current = current.getSuperclass();
+        }
+        Collections.reverse(hierarchy);
+        List<java.lang.reflect.Field> fields = new java.util.ArrayList<java.lang.reflect.Field>();
+        for (Class<?> candidate : hierarchy) {
+            Collections.addAll(fields, candidate.getDeclaredFields());
+        }
+        return fields;
+    }
+
+    private String defaultLookupCode(String prefix, String table, String property) {
+        String normalizedTable = NameUtils.normalizeIdentifier(table);
+        String normalizedProperty = NameUtils.normalizeIdentifier(property);
+        String payload = firstNonBlank(prefix, "") + "|" + firstNonBlank(normalizedTable, "") + "|"
+                + firstNonBlank(normalizedProperty, "");
+        return prefix + "_" + digestHex(payload);
+    }
+
+    private String digestHex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(bytes.length * 2);
+            for (byte current : bytes) {
+                String hex = Integer.toHexString(current & 0xff);
+                if (hex.length() == 1) {
+                    builder.append('0');
+                }
+                builder.append(hex);
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            return Integer.toHexString(value.hashCode());
+        }
+    }
+
+    private String blankToNull(String value) {
+        return StringUtils.isBlank(value) ? null : value;
+    }
+
+    private static final class LookupBusinessKeyResolution {
+        private final String lookupBusinessKey;
+        private final String lookupBusinessKeyColumn;
+        private final boolean resolved;
+
+        private LookupBusinessKeyResolution(String lookupBusinessKey, String lookupBusinessKeyColumn, boolean resolved) {
+            this.lookupBusinessKey = lookupBusinessKey;
+            this.lookupBusinessKeyColumn = lookupBusinessKeyColumn;
+            this.resolved = resolved;
+        }
+
+        private static LookupBusinessKeyResolution resolved(String lookupBusinessKey, String lookupBusinessKeyColumn) {
+            return new LookupBusinessKeyResolution(lookupBusinessKey, lookupBusinessKeyColumn, true);
+        }
+
+        private static LookupBusinessKeyResolution unresolved(String lookupBusinessKey) {
+            return new LookupBusinessKeyResolution(lookupBusinessKey, null, false);
+        }
     }
 
     private String resolveEntityTableName(Class<?> entityType) {

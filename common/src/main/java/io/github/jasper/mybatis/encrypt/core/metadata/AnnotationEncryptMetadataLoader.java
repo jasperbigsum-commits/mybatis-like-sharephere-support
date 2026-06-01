@@ -58,7 +58,13 @@ public class AnnotationEncryptMetadataLoader {
                         encryptField.storageMode(),
                         blankToNull(encryptField.storageTable()),
                         blankToDefault(encryptField.storageColumn(), column),
-                        blankToDefault(encryptField.storageIdColumn(), "id")
+                        blankToDefault(encryptField.storageIdColumn(), "id"),
+                        blankToNull(encryptField.sidCode()),
+                        blankToNull(encryptField.pidCode()),
+                        encryptField.returnLookupMeta(),
+                        blankToNull(encryptField.lookupBusinessKey()),
+                        null,
+                        false
                 ));
             }
             EncryptJsonField encryptJsonField = field.getAnnotation(EncryptJsonField.class);

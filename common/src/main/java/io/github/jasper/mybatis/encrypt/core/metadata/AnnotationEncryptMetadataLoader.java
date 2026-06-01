@@ -61,7 +61,6 @@ public class AnnotationEncryptMetadataLoader {
                         blankToDefault(encryptField.storageIdColumn(), "id"),
                         blankToNull(encryptField.sidCode()),
                         blankToNull(encryptField.pidCode()),
-                        encryptField.returnLookupMeta(),
                         blankToNull(encryptField.lookupBusinessKey()),
                         null,
                         false

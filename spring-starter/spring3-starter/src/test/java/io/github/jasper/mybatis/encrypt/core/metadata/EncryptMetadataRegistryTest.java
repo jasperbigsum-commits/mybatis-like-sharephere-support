@@ -189,7 +189,6 @@ class EncryptMetadataRegistryTest {
                 .findByProperty("phone")
                 .orElseThrow();
 
-        assertTrue(rule.returnLookupMeta());
         assertNotNull(rule.sidCode());
         assertNotNull(rule.pidCode());
         assertEquals("id", rule.lookupBusinessKey());
@@ -219,7 +218,6 @@ class EncryptMetadataRegistryTest {
                 .findByProperty("phone")
                 .orElseThrow();
 
-        assertTrue(rule.returnLookupMeta());
         assertNotNull(rule.sidCode());
         assertNotNull(rule.pidCode());
         assertEquals("id", rule.lookupBusinessKey());
@@ -236,7 +234,6 @@ class EncryptMetadataRegistryTest {
                 .findByProperty("phone")
                 .orElseThrow();
 
-        assertTrue(rule.returnLookupMeta());
         assertFalse(rule.hasResolvedLookupBusinessKey());
     }
 
@@ -253,7 +250,6 @@ class EncryptMetadataRegistryTest {
 
         assertEquals("custom-sid", rule.sidCode());
         assertEquals("custom-pid", rule.pidCode());
-        assertFalse(rule.returnLookupMeta());
         assertEquals("tenantId", rule.lookupBusinessKey());
         assertTrue(rule.hasResolvedLookupBusinessKey());
     }
@@ -270,7 +266,6 @@ class EncryptMetadataRegistryTest {
 
         assertEquals("custom-sid", rule.sidCode());
         assertEquals("custom-pid", rule.pidCode());
-        assertFalse(rule.returnLookupMeta());
         assertEquals("tenantId", rule.lookupBusinessKey());
         assertTrue(rule.hasResolvedLookupBusinessKey());
     }
@@ -492,7 +487,6 @@ class EncryptMetadataRegistryTest {
                 assistedQueryColumn = "phone_hash",
                 sidCode = "custom-sid",
                 pidCode = "custom-pid",
-                returnLookupMeta = false,
                 lookupBusinessKey = "tenantId"
         )
         private String phone;

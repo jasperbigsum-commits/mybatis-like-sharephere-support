@@ -134,7 +134,7 @@ Metadata is attached only when all of these are true:
 
 1. the response object extends `SensitiveExtraInfoSupport`
 2. the field was actually replaced during masking
-3. the field rule allows lookup metadata
+3. the response field did not explicitly opt out
 4. `sid`, `pid`, `vid`, and `hash` were all resolved successfully
 
 Best-effort rule:
@@ -142,15 +142,14 @@ Best-effort rule:
 - if lookup metadata cannot be resolved, decryption and masking still succeed
 - `getSensitiveLookupMeta()` returns `null` when the map is empty
 
-## `@EncryptField` attributes for lookup metadata
+## `@EncryptField` attributes for lookup metadata resolution
 
-The response-layer lookup metadata feature uses these field attributes:
+The response-layer lookup metadata feature uses these persistence-side attributes for resolution:
 
 | Attribute | Default behavior | Purpose |
 | --- | --- | --- |
 | `sidCode` | stable table-level default | custom source identifier |
 | `pidCode` | stable table + property default | custom property identifier |
-| `returnLookupMeta` | `true` | allow or suppress lookup metadata for this field |
 | `lookupBusinessKey` | inferred from entity id metadata or `id` | business-key property used to resolve `vid` |
 
 Example:
@@ -173,7 +172,21 @@ Resolution rules:
 - explicit `lookupBusinessKey` wins
 - otherwise the registry tries `@TableId`, JPA `@Id`, then a field named `id`
 - for config-only table rules without entity preloading, the fallback stays conservative and uses `id`
-- set `returnLookupMeta = false` when a field must never expose response lookup metadata
+
+## `@SensitiveField` controls whether metadata is returned
+
+Whether lookup metadata is returned to the caller is now a response-side decision:
+
+| Attribute | Default behavior | Purpose |
+| --- | --- | --- |
+| `returnLookupMeta` | `true` | allow or suppress lookup metadata for this response field |
+
+Rules:
+
+- once a field is actually masked, metadata is attached by default
+- `@SensitiveField(returnLookupMeta = false)` suppresses metadata for that response field
+- if a field has no `@SensitiveField` annotation but was still masked through the recorded/stored-value path, metadata is still attached by default
+- this keeps the “return metadata or not” choice inside the concrete response DTO instead of the persistence rule
 
 ## Explicit plaintext lookup
 
@@ -287,6 +300,7 @@ Do this:
 1. extend `SensitiveExtraInfoSupport`
 2. keep response masking enabled
 3. leave `returnLookupMeta = true` only on fields that are allowed to emit metadata
+   Or set `@SensitiveField(returnLookupMeta = false)` on the fields that must opt out.
 
 ### Pattern D: explicit plaintext retrieval
 
@@ -307,4 +321,4 @@ Do this:
 - keep plaintext lookup explicit and audited
 - do not rely on lookup metadata for unsupported many-to-one or many-to-many retrievals
 - if you need multi-datasource lookup routing, extend the rule model first instead of guessing at runtime
-- if a field is display-only, set `returnLookupMeta = false`
+- if a field is display-only, set `@SensitiveField(returnLookupMeta = false)` on the response DTO field

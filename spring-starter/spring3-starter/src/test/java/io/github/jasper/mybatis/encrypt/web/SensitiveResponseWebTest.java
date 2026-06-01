@@ -130,6 +130,52 @@ class SensitiveResponseWebTest {
     }
 
     @Test
+    void shouldAttachLookupMetaByDefaultForRecordedMaskedFieldWithoutSensitiveFieldAnnotation() throws Exception {
+        SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
+        StoredSensitiveValueResolver resolver = records -> Map.of(records.iterator().next(), "138****8000");
+        SensitiveResponseBodyAdvice advice = new SensitiveResponseBodyAdvice(new SensitiveDataMasker(resolver, null));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        DemoController controller = new DemoController();
+        HandlerMethod handlerMethod = handlerMethod(controller, "maskedLookupMetaWithoutAnnotation");
+        LookupMetaWithoutAnnotationDto dto = new LookupMetaWithoutAnnotationDto("13800138000");
+
+        assertTrue(interceptor.preHandle(request, response, handlerMethod));
+        SensitiveDataContext.record(dto, "phone", "13800138000", null,
+                new SensitiveLookupMeta("SID-NA", "PID-NA", "U-101", "HASH-NA"));
+        assertTrue(advice.supports(null, null));
+        advice.beforeBodyWrite(dto, null, null, null, null, null);
+        interceptor.afterCompletion(request, response, handlerMethod, null);
+
+        assertEquals("138****8000", dto.phone);
+        assertEquals("SID-NA", dto.getSensitiveLookupMeta().get("phone").sid());
+        assertEquals("PID-NA", dto.getSensitiveLookupMeta().get("phone").pid());
+        assertFalse(SensitiveDataContext.isActive());
+    }
+
+    @Test
+    void shouldAllowSensitiveFieldToOptOutLookupMeta() throws Exception {
+        SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
+        SensitiveResponseBodyAdvice advice = new SensitiveResponseBodyAdvice(new SensitiveDataMasker());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        DemoController controller = new DemoController();
+        HandlerMethod handlerMethod = handlerMethod(controller, "maskedLookupMetaOptOut");
+        LookupMetaOptOutDto dto = new LookupMetaOptOutDto("13800138000");
+
+        assertTrue(interceptor.preHandle(request, response, handlerMethod));
+        SensitiveDataContext.record(dto, "phone", "13800138000", null,
+                new SensitiveLookupMeta("SID-OFF", "PID-OFF", "U-102", "HASH-OFF"));
+        assertTrue(advice.supports(null, null));
+        advice.beforeBodyWrite(dto, null, null, null, null, null);
+        interceptor.afterCompletion(request, response, handlerMethod, null);
+
+        assertEquals("*******8000", dto.phone);
+        assertEquals(null, dto.getSensitiveLookupMeta());
+        assertFalse(SensitiveDataContext.isActive());
+    }
+
+    @Test
     void shouldSkipLookupMetaMapWhenFieldMetaIsMissing() throws Exception {
         SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
         SensitiveResponseBodyAdvice advice = new SensitiveResponseBodyAdvice(new SensitiveDataMasker());
@@ -345,6 +391,16 @@ class SensitiveResponseWebTest {
         LookupMetaDto maskedLookupMeta() {
             return null;
         }
+
+        @SensitiveResponse
+        LookupMetaWithoutAnnotationDto maskedLookupMetaWithoutAnnotation() {
+            return null;
+        }
+
+        @SensitiveResponse
+        LookupMetaOptOutDto maskedLookupMetaOptOut() {
+            return null;
+        }
     }
 
     @SensitiveResponse(returnSensitive = true)
@@ -409,6 +465,25 @@ class SensitiveResponseWebTest {
         private String phone;
 
         LookupMetaDto(String phone) {
+            this.phone = phone;
+        }
+    }
+
+    static class LookupMetaWithoutAnnotationDto extends SensitiveExtraInfoSupport {
+
+        private String phone;
+
+        LookupMetaWithoutAnnotationDto(String phone) {
+            this.phone = phone;
+        }
+    }
+
+    static class LookupMetaOptOutDto extends SensitiveExtraInfoSupport {
+
+        @SensitiveField(returnLookupMeta = false)
+        private String phone;
+
+        LookupMetaOptOutDto(String phone) {
             this.phone = phone;
         }
     }

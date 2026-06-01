@@ -88,7 +88,7 @@
 - `SensitiveDataMasker`
   - 优先使用数据库 `maskedColumn` 的存储态脱敏值替换已解密字段
   - 再按 `maskedAlgorithm` / `@SensitiveField` 作为回退策略
-  - `@SensitiveField` 支持内置规则、复用 `LikeQueryAlgorithm` 和自定义 `SensitiveFieldMasker`
+  - `@SensitiveField` 支持内置规则、复用 `LikeQueryAlgorithm`、自定义 `SensitiveFieldMasker`，并决定是否返回 lookup meta
   - 对继承 `SensitiveExtraInfoSupport` 的返回 DTO，按字段附加 best-effort `sensitiveLookupMeta`
 - `JdbcStoredSensitiveValueResolver`
   - 按数据源、表、规则批量查询 `maskedColumn`
@@ -102,7 +102,7 @@
 - 脱敏是 controller 边界的最终输出决策，不回写数据库，也不反向影响 SQL 改写与结果解密。
 - `RECORDED_ONLY` 是标准查询接口的首选策略，因为它只处理真正被解密过的对象引用。
 - `ANNOTATED_FIELDS` / `RECORDED_THEN_ANNOTATED` 仅作为手工组装 DTO 的补充，不替代 MyBatis 结果映射。
-- `sensitiveLookupMeta` 只会在字段实际发生脱敏替换、字段规则允许返回扩展信息且元数据已成功解析时附加；解析失败不影响原有解密与脱敏流程。
+- `sensitiveLookupMeta` 只会在字段实际发生脱敏替换、响应侧字段未显式关闭扩展信息且元数据已成功解析时附加；解析失败不影响原有解密与脱敏流程。
 - 当前显式明文回查只面向单实体 1:1 场景；同表与独立表字段都支持，多数据源自动路由暂不支持。
 - 同一请求线程内允许多个嵌套 scope；异步 continuation 默认不传播当前 scope。
 

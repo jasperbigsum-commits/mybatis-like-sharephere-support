@@ -265,7 +265,6 @@ public class EncryptMetadataRegistry {
                 firstNonBlank(properties.getStorageIdColumn(), "id"),
                 blankToNull(properties.getSidCode()),
                 blankToNull(properties.getPidCode()),
-                properties.isReturnLookupMeta(),
                 blankToNull(properties.getLookupBusinessKey()),
                 null,
                 false
@@ -492,7 +491,6 @@ public class EncryptMetadataRegistry {
                     columnRule.storageIdColumn(),
                     columnRule.sidCode(),
                     columnRule.pidCode(),
-                    columnRule.returnLookupMeta(),
                     columnRule.lookupBusinessKey(),
                     columnRule.lookupBusinessKeyColumn(),
                     columnRule.hasResolvedLookupBusinessKey()
@@ -538,7 +536,6 @@ public class EncryptMetadataRegistry {
                 sourceRule.storageIdColumn(),
                 sidCode,
                 pidCode,
-                sourceRule.returnLookupMeta(),
                 lookupBusinessKeyResolution.lookupBusinessKey,
                 lookupBusinessKeyResolution.lookupBusinessKeyColumn,
                 lookupBusinessKeyResolution.resolved

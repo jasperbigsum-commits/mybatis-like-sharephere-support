@@ -130,13 +130,6 @@ public @interface EncryptField {
     String pidCode() default "";
 
     /**
-     * 是否允许该字段在响应脱敏链路中返回 lookup meta。
-     *
-     * @return 返回 lookup meta 时返回 {@code true}
-     */
-    boolean returnLookupMeta() default true;
-
-    /**
      * lookup meta 使用的业务主键属性名；省略时按实体主键注解和约定保守推断。
      *
      * @return 业务主键属性名

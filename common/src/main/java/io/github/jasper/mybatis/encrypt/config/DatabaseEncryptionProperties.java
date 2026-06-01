@@ -538,11 +538,6 @@ public class DatabaseEncryptionProperties {
         private String pidCode;
 
         /**
-         * 是否允许响应链路返回 lookup meta。
-         */
-        private boolean returnLookupMeta = true;
-
-        /**
          * lookup meta 使用的业务主键属性名；省略时按实体主键注解和约定保守推断。
          */
         private String lookupBusinessKey;

@@ -153,7 +153,7 @@ public class ResultDecryptor {
                                                      Object leafOwner,
                                                      EncryptColumnRule rule,
                                                      String decrypted) {
-        if (rule == null || StringUtils.isBlank(decrypted) || !rule.returnLookupMeta()) {
+        if (rule == null || StringUtils.isBlank(decrypted)) {
             return null;
         }
         if (StringUtils.isBlank(rule.sidCode()) || StringUtils.isBlank(rule.pidCode())

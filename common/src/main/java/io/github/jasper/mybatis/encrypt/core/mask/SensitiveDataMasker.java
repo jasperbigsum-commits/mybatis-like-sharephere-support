@@ -246,6 +246,10 @@ public final class SensitiveDataMasker {
         if (!(record.owner() instanceof SensitiveExtraInfoSupport)) {
             return;
         }
+        FieldBinding binding = binding(record.owner().getClass(), record.propertyName()).orElse(null);
+        if (binding != null && !binding.shouldReturnLookupMeta()) {
+            return;
+        }
         ((SensitiveExtraInfoSupport) record.owner()).sensitiveLookupMetaStorage()
                 .put(record.propertyName(), record.lookupMeta());
     }
@@ -494,6 +498,10 @@ public final class SensitiveDataMasker {
                 builder.append(maskChar);
             }
             return builder.toString();
+        }
+
+        private boolean shouldReturnLookupMeta() {
+            return annotation.returnLookupMeta();
         }
     }
 }

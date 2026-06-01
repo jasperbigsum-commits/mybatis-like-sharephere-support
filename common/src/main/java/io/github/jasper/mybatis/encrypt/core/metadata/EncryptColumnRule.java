@@ -25,7 +25,6 @@ public final class EncryptColumnRule {
     private final String storageIdColumn;
     private final String sidCode;
     private final String pidCode;
-    private final boolean returnLookupMeta;
     private final String lookupBusinessKey;
     private final String lookupBusinessKeyColumn;
     private final boolean resolvedLookupBusinessKey;
@@ -48,7 +47,6 @@ public final class EncryptColumnRule {
      * @param storageIdColumn 外部表标识列
      * @param sidCode 敏感字段来源编码
      * @param pidCode 敏感字段属性编码
-     * @param returnLookupMeta 是否允许返回 lookup meta
      * @param lookupBusinessKey lookup meta 使用的业务主键属性名
      * @param resolvedLookupBusinessKey 业务主键是否已成功解析
      */
@@ -68,7 +66,6 @@ public final class EncryptColumnRule {
                              String storageIdColumn,
                              String sidCode,
                              String pidCode,
-                             boolean returnLookupMeta,
                              String lookupBusinessKey,
                              String lookupBusinessKeyColumn,
                              boolean resolvedLookupBusinessKey) {
@@ -88,7 +85,6 @@ public final class EncryptColumnRule {
         this.storageIdColumn = storageIdColumn;
         this.sidCode = sidCode;
         this.pidCode = pidCode;
-        this.returnLookupMeta = returnLookupMeta;
         this.lookupBusinessKey = lookupBusinessKey;
         this.lookupBusinessKeyColumn = lookupBusinessKeyColumn;
         this.resolvedLookupBusinessKey = resolvedLookupBusinessKey;
@@ -124,7 +120,7 @@ public final class EncryptColumnRule {
                              String storageIdColumn) {
         this(property, table, column, cipherAlgorithm, assistedQueryColumn, assistedQueryAlgorithm,
                 likeQueryColumn, likeQueryAlgorithm, null, null, storageMode, storageTable, storageColumn,
-                storageIdColumn, null, null, true, null, null, false);
+                storageIdColumn, null, null, null, null, false);
     }
 
     /**
@@ -161,7 +157,7 @@ public final class EncryptColumnRule {
                              String storageIdColumn) {
         this(property, table, column, cipherAlgorithm, assistedQueryColumn, assistedQueryAlgorithm,
                 likeQueryColumn, likeQueryAlgorithm, maskedColumn, maskedAlgorithm, storageMode, storageTable,
-                storageColumn, storageIdColumn, null, null, true, null, null, false);
+                storageColumn, storageIdColumn, null, null, null, null, false);
     }
 
     /**
@@ -327,15 +323,6 @@ public final class EncryptColumnRule {
     }
 
     /**
-     * 是否允许在响应链路返回 lookup meta。
-     *
-     * @return 允许返回 lookup meta 时返回 {@code true}
-     */
-    public boolean returnLookupMeta() {
-        return returnLookupMeta;
-    }
-
-    /**
      * 获取 lookup meta 使用的业务主键属性名。
      *
      * @return 业务主键属性名
@@ -429,7 +416,6 @@ public final class EncryptColumnRule {
                 && Objects.equals(storageIdColumn, that.storageIdColumn)
                 && Objects.equals(sidCode, that.sidCode)
                 && Objects.equals(pidCode, that.pidCode)
-                && returnLookupMeta == that.returnLookupMeta
                 && Objects.equals(lookupBusinessKey, that.lookupBusinessKey)
                 && Objects.equals(lookupBusinessKeyColumn, that.lookupBusinessKeyColumn)
                 && resolvedLookupBusinessKey == that.resolvedLookupBusinessKey;
@@ -439,7 +425,7 @@ public final class EncryptColumnRule {
     public int hashCode() {
         return Objects.hash(property, table, column, cipherAlgorithm, assistedQueryColumn,
                 assistedQueryAlgorithm, likeQueryColumn, likeQueryAlgorithm, maskedColumn, maskedAlgorithm, storageMode,
-                storageTable, storageColumn, storageIdColumn, sidCode, pidCode, returnLookupMeta,
+                storageTable, storageColumn, storageIdColumn, sidCode, pidCode,
                 lookupBusinessKey, lookupBusinessKeyColumn, resolvedLookupBusinessKey);
     }
 
@@ -462,7 +448,6 @@ public final class EncryptColumnRule {
                 + ", storageIdColumn='" + storageIdColumn + '\''
                 + ", sidCode='" + sidCode + '\''
                 + ", pidCode='" + pidCode + '\''
-                + ", returnLookupMeta=" + returnLookupMeta
                 + ", lookupBusinessKey='" + lookupBusinessKey + '\''
                 + ", lookupBusinessKeyColumn='" + lookupBusinessKeyColumn + '\''
                 + ", resolvedLookupBusinessKey=" + resolvedLookupBusinessKey

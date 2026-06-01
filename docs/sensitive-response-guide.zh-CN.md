@@ -258,7 +258,7 @@ public class UserView extends SensitiveExtraInfoSupport {
 
 1. 当前返回对象继承了 `SensitiveExtraInfoSupport`
 2. 当前字段在本次响应中实际发生了脱敏替换
-3. 字段规则允许返回扩展信息
+3. 响应侧字段没有显式关闭扩展信息
 4. `sid / pid / vid / hash` 都已成功解析
 
 不会返回的情况：
@@ -275,13 +275,12 @@ public class UserView extends SensitiveExtraInfoSupport {
 
 ### 3. `@EncryptField` 相关属性
 
-`@EncryptField` / 配置规则新增了 4 个与响应补充信息相关的属性：
+`@EncryptField` / 配置规则提供 3 个与响应补充信息解析相关的属性：
 
 | 属性 | 默认行为 | 作用 |
 | --- | --- | --- |
 | `sidCode` | 按来源表生成稳定默认值 | 自定义来源编码 |
 | `pidCode` | 按表名 + 属性名生成稳定默认值 | 自定义属性编码 |
-| `returnLookupMeta` | `true` | 是否允许该字段返回扩展信息 |
 | `lookupBusinessKey` | 按实体主键注解和 `id` 约定推断 | 指定业务键属性名 |
 
 示例：
@@ -304,9 +303,23 @@ private String phone;
 - `lookupBusinessKey` 显式配置优先级最高
 - 未显式配置时，会按 `@TableId`、JPA `@Id`、字段名 `id` 的顺序保守推断
 - 对纯配置表规则，如果没有实体预热，会保守把 `lookupBusinessKey=id` 映射到物理列 `id`
-- 如果某个字段不希望对外返回扩展信息，可设为 `returnLookupMeta = false`
 
-### 4. 显式明文回查服务
+### 4. `@SensitiveField` 对扩展信息的控制
+
+是否真的把 `sensitiveLookupMeta` 返回给调用方，由响应侧 `@SensitiveField` 决定：
+
+| 属性 | 默认行为 | 作用 |
+| --- | --- | --- |
+| `returnLookupMeta` | `true` | 是否允许该响应字段返回扩展信息 |
+
+规则说明：
+
+- 只要字段实际发生了脱敏替换，默认就会追加扩展信息
+- 如果响应字段标了 `@SensitiveField(returnLookupMeta = false)`，则该字段不返回扩展信息
+- 如果字段没有 `@SensitiveField`，但它仍通过记录链路和存储态脱敏值完成了脱敏，默认仍会返回扩展信息
+- 这让“是否对外暴露回查索引”的决定落在具体响应 DTO，而不是持久层加密声明上
+
+### 5. 显式明文回查服务
 
 框架提供显式服务：
 
@@ -336,7 +349,7 @@ String plaintext = sensitivePlaintextLookupService.lookup(meta);
 - 找不到对应字段规则会失败
 - 当前多数据源自动路由暂不支持，多个 `DataSource` 时会直接 fail-fast
 
-### 5. 审计钩子
+### 6. 审计钩子
 
 显式明文回查不会自动决定你的审计策略，但 starter 会注册一个默认 no-op 实现：
 
@@ -359,10 +372,10 @@ public interface SensitivePlaintextAuditRecorder {
 - 成功 / 失败状态
 - 稳定错误码
 
-### 6. 使用建议
+### 7. 使用建议
 
 - 对需要返回扩展信息的接口，优先让返回 DTO 继承 `SensitiveExtraInfoSupport`
-- 对纯展示字段或不允许任何回查能力的字段，显式配置 `returnLookupMeta = false`
+- 对纯展示字段或不允许任何回查能力的字段，在响应 DTO 上显式配置 `@SensitiveField(returnLookupMeta = false)`
 - 若业务需要更稳定的 `vid` 解析，优先显式配置 `lookupBusinessKey`
 - 把 `SensitivePlaintextLookupService` 当成显式受控入口，不要在普通 controller 出口隐式触发明文回查
 - 若未来存在多数据源或一对多明文回查需求，建议先显式扩展规则模型和审计模型，再放开能力边界
@@ -575,7 +588,7 @@ private String phone;
   响应扩展信息中的来源编码
 - `pidCode`
   响应扩展信息中的属性编码
-- `returnLookupMeta`
+- `@SensitiveField(returnLookupMeta = false)`
   是否允许该字段把 lookup meta 返回给调用方
 - `lookupBusinessKey`
   解析 `vid` 时使用的业务键属性名

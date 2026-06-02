@@ -10,6 +10,7 @@ target/
 .idea/compiler.xml
 .idea/libraries/
 .idea/inspectionProfiles/
+.idea/
 *.iws
 *.iml
 *.ipr
@@ -46,3 +47,4 @@ build/
 .DS_Store
 /.m2repo/
 /.idea/
+/.worktrees/

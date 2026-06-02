@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @Tag("integration")
@@ -83,6 +84,13 @@ class EncryptedJdbcExecutorIntegrationTest {
     @Test
     void shouldExposeEncryptedJdbcExecutorBean() {
         contextRunner.run(context -> assertNotNull(context.getBean(EncryptedJdbcExecutor.class)));
+    }
+
+    @Test
+    void shouldNotExposeEncryptedJdbcExecutorBeanWhenEncryptionDisabled() {
+        contextRunner
+                .withPropertyValues("mybatis.encrypt.enabled=false")
+                .run(context -> assertFalse(context.containsBean("encryptedJdbcExecutor")));
     }
 
     @Test

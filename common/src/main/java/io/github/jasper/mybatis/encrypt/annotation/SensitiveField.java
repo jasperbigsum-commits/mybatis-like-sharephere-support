@@ -96,4 +96,15 @@ public @interface SensitiveField {
      * @return custom options
      */
     String[] options() default {};
+
+    /**
+     * Whether the masked response field should expose lookup metadata.
+     *
+     * <p>The default is {@code true}. This flag is only consulted when the response object extends
+     * {@link io.github.jasper.mybatis.encrypt.core.mask.SensitiveExtraInfoSupport} and lookup
+     * metadata was successfully resolved earlier in the decrypt pipeline.</p>
+     *
+     * @return {@code true} to include lookup metadata for this response field
+     */
+    boolean returnLookupMeta() default true;
 }

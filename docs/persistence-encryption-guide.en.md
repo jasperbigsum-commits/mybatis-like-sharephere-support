@@ -22,7 +22,7 @@ The persistence layer in this project solves four problems:
 3. how LIKE lookup stays usable
 4. how query results return to business code as plaintext
 
-Controller-boundary masking is a separate concern. See [Sensitive Response Guide](sensitive-response-guide.zh-CN.md).
+Controller-boundary masking is a separate concern. See [Sensitive Response Guide](sensitive-response-guide.en.md).
 
 ## Field model
 

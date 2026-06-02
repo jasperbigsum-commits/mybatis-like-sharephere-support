@@ -23,6 +23,11 @@ public final class EncryptColumnRule {
     private final String storageTable;
     private final String storageColumn;
     private final String storageIdColumn;
+    private final String sidCode;
+    private final String pidCode;
+    private final String lookupBusinessKey;
+    private final String lookupBusinessKeyColumn;
+    private final boolean resolvedLookupBusinessKey;
 
     /**
      * 字段级加密规则
@@ -40,6 +45,10 @@ public final class EncryptColumnRule {
      * @param storageTable 启用独立表模式时使用的外部密文表
      * @param storageColumn 实际密文存储列，默认与 {@code column} 一致
      * @param storageIdColumn 外部表标识列
+     * @param sidCode 敏感字段来源编码
+     * @param pidCode 敏感字段属性编码
+     * @param lookupBusinessKey lookup meta 使用的业务主键属性名
+     * @param resolvedLookupBusinessKey 业务主键是否已成功解析
      */
     public EncryptColumnRule(String property,
                              String table,
@@ -54,7 +63,12 @@ public final class EncryptColumnRule {
                              FieldStorageMode storageMode,
                              String storageTable,
                              String storageColumn,
-                             String storageIdColumn) {
+                             String storageIdColumn,
+                             String sidCode,
+                             String pidCode,
+                             String lookupBusinessKey,
+                             String lookupBusinessKeyColumn,
+                             boolean resolvedLookupBusinessKey) {
         this.property = property;
         this.table = table;
         this.column = column;
@@ -69,6 +83,11 @@ public final class EncryptColumnRule {
         this.storageTable = storageTable;
         this.storageColumn = storageColumn;
         this.storageIdColumn = storageIdColumn;
+        this.sidCode = sidCode;
+        this.pidCode = pidCode;
+        this.lookupBusinessKey = lookupBusinessKey;
+        this.lookupBusinessKeyColumn = lookupBusinessKeyColumn;
+        this.resolvedLookupBusinessKey = resolvedLookupBusinessKey;
     }
 
     /**
@@ -101,7 +120,44 @@ public final class EncryptColumnRule {
                              String storageIdColumn) {
         this(property, table, column, cipherAlgorithm, assistedQueryColumn, assistedQueryAlgorithm,
                 likeQueryColumn, likeQueryAlgorithm, null, null, storageMode, storageTable, storageColumn,
-                storageIdColumn);
+                storageIdColumn, null, null, null, null, false);
+    }
+
+    /**
+     * 兼容旧构造签名，允许显式传入存储态脱敏列配置。
+     *
+     * @param property 实体属性名
+     * @param table 字段来源的物理表
+     * @param column 应用 SQL 使用的原始业务列名
+     * @param cipherAlgorithm 加密算法 bean 名称
+     * @param assistedQueryColumn 辅助等值查询列
+     * @param assistedQueryAlgorithm 辅助等值算法 bean 名称
+     * @param likeQueryColumn LIKE 辅助查询列
+     * @param likeQueryAlgorithm LIKE 辅助算法 bean 名称
+     * @param maskedColumn 存储态脱敏列
+     * @param maskedAlgorithm 存储态脱敏列算法
+     * @param storageMode 密文存储模式
+     * @param storageTable 启用独立表模式时使用的外部密文表
+     * @param storageColumn 实际密文存储列
+     * @param storageIdColumn 外部表标识列
+     */
+    public EncryptColumnRule(String property,
+                             String table,
+                             String column,
+                             String cipherAlgorithm,
+                             String assistedQueryColumn,
+                             String assistedQueryAlgorithm,
+                             String likeQueryColumn,
+                             String likeQueryAlgorithm,
+                             String maskedColumn,
+                             String maskedAlgorithm,
+                             FieldStorageMode storageMode,
+                             String storageTable,
+                             String storageColumn,
+                             String storageIdColumn) {
+        this(property, table, column, cipherAlgorithm, assistedQueryColumn, assistedQueryAlgorithm,
+                likeQueryColumn, likeQueryAlgorithm, maskedColumn, maskedAlgorithm, storageMode, storageTable,
+                storageColumn, storageIdColumn, null, null, null, null, false);
     }
 
     /**
@@ -249,6 +305,51 @@ public final class EncryptColumnRule {
     }
 
     /**
+     * 获取敏感字段来源编码。
+     *
+     * @return 来源编码
+     */
+    public String sidCode() {
+        return sidCode;
+    }
+
+    /**
+     * 获取敏感字段属性编码。
+     *
+     * @return 属性编码
+     */
+    public String pidCode() {
+        return pidCode;
+    }
+
+    /**
+     * 获取 lookup meta 使用的业务主键属性名。
+     *
+     * @return 业务主键属性名
+     */
+    public String lookupBusinessKey() {
+        return lookupBusinessKey;
+    }
+
+    /**
+     * 获取 lookup meta 使用的业务主键物理列名。
+     *
+     * @return 业务主键物理列名
+     */
+    public String lookupBusinessKeyColumn() {
+        return lookupBusinessKeyColumn;
+    }
+
+    /**
+     * 判断 lookup meta 使用的业务主键是否已成功解析。
+     *
+     * @return 成功解析时返回 {@code true}
+     */
+    public boolean hasResolvedLookupBusinessKey() {
+        return resolvedLookupBusinessKey && StringUtils.isNotBlank(lookupBusinessKey);
+    }
+
+    /**
      * 判断是否配置了辅助等值查询列。
      *
      * @return 配置了辅助列时返回 {@code true}
@@ -312,14 +413,20 @@ public final class EncryptColumnRule {
                 && storageMode == that.storageMode
                 && Objects.equals(storageTable, that.storageTable)
                 && Objects.equals(storageColumn, that.storageColumn)
-                && Objects.equals(storageIdColumn, that.storageIdColumn);
+                && Objects.equals(storageIdColumn, that.storageIdColumn)
+                && Objects.equals(sidCode, that.sidCode)
+                && Objects.equals(pidCode, that.pidCode)
+                && Objects.equals(lookupBusinessKey, that.lookupBusinessKey)
+                && Objects.equals(lookupBusinessKeyColumn, that.lookupBusinessKeyColumn)
+                && resolvedLookupBusinessKey == that.resolvedLookupBusinessKey;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(property, table, column, cipherAlgorithm, assistedQueryColumn,
                 assistedQueryAlgorithm, likeQueryColumn, likeQueryAlgorithm, maskedColumn, maskedAlgorithm, storageMode,
-                storageTable, storageColumn, storageIdColumn);
+                storageTable, storageColumn, storageIdColumn, sidCode, pidCode,
+                lookupBusinessKey, lookupBusinessKeyColumn, resolvedLookupBusinessKey);
     }
 
     @Override
@@ -339,6 +446,11 @@ public final class EncryptColumnRule {
                 + ", storageTable='" + storageTable + '\''
                 + ", storageColumn='" + storageColumn + '\''
                 + ", storageIdColumn='" + storageIdColumn + '\''
+                + ", sidCode='" + sidCode + '\''
+                + ", pidCode='" + pidCode + '\''
+                + ", lookupBusinessKey='" + lookupBusinessKey + '\''
+                + ", lookupBusinessKeyColumn='" + lookupBusinessKeyColumn + '\''
+                + ", resolvedLookupBusinessKey=" + resolvedLookupBusinessKey
                 + '}';
     }
 }

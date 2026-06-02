@@ -89,18 +89,25 @@
 - `SensitiveDataMasker`
   - 优先使用数据库 `maskedColumn` 的存储态脱敏值替换已解密字段
   - 再按 `maskedAlgorithm` / `@SensitiveField` 作为回退策略
-  - `@SensitiveField` 支持内置规则、复用 `LikeQueryAlgorithm` 和自定义 `SensitiveFieldMasker`
+  - `@SensitiveField` 支持内置规则、复用 `LikeQueryAlgorithm`、自定义 `SensitiveFieldMasker`，并决定是否返回 lookup meta
+  - 对继承 `SensitiveExtraInfoSupport` 的返回 DTO，按字段附加 best-effort `sensitiveLookupMeta`
 - `JdbcStoredSensitiveValueResolver`
   - 按数据源、表、规则批量查询 `maskedColumn`
+- `SensitivePlaintextLookupService`
+  - 为业务侧显式提供“lookup meta -> 明文”的查询入口
+- `SensitivePlaintextAuditRecorder`
+  - 为显式明文回查提供审计钩子，默认 no-op，可由业务自定义落库或上报
 
 边界补充：
 
 - 脱敏是 controller 边界的最终输出决策，不回写数据库，也不反向影响 SQL 改写与结果解密。
 - `RECORDED_ONLY` 是标准查询接口的首选策略，因为它只处理真正被解密过的对象引用。
 - `ANNOTATED_FIELDS` / `RECORDED_THEN_ANNOTATED` 仅作为手工组装 DTO 的补充，不替代 MyBatis 结果映射。
+- `sensitiveLookupMeta` 只会在字段实际发生脱敏替换、响应侧字段未显式关闭扩展信息且元数据已成功解析时附加；解析失败不影响原有解密与脱敏流程。
+- 当前显式明文回查只面向单实体 1:1 场景；同表与独立表字段都支持，多数据源自动路由暂不支持。
 - 同一请求线程内允许多个嵌套 scope；异步 continuation 默认不传播当前 scope。
 
-详细设计见 [sensitive-response-guide.zh-CN.md](sensitive-response-guide.zh-CN.md)。
+详细设计见 [sensitive-response-guide.zh-CN.md](sensitive-response-guide.zh-CN.md) / [Sensitive Response Guide](sensitive-response-guide.en.md)。
 
 ### 6. Spring Boot 自动配置
 
@@ -127,6 +134,9 @@
   - 注册 `SensitiveResponseBodyAdvice`
   - 在存在 `DataSource` 时注册 `JdbcStoredSensitiveValueResolver`
   - 自动收集 `SensitiveFieldMasker` Bean 供 `@SensitiveField(masker=...)` 使用
+- `SensitiveLookupMetaAutoConfiguration`
+  - 注册默认的 `SensitivePlaintextAuditRecorder`（no-op）
+  - 在存在 `DataSource` 时注册 `SensitivePlaintextLookupService`
 - `UserDatabaseEncryptionProperties`
   - starter 只负责外部配置绑定
   - 具体规则模型直接复用 `common` 模块中的 `DatabaseEncryptionProperties`，避免 Spring 2/3 各维护一套重复配置结构
@@ -141,7 +151,9 @@
 6. 查询条件遇到等值、LIKE、`FIND_IN_SET` 精确候选列表、精确静态 `json_extract(...)`，或显式放宽的单边范围比较时，改写到对应辅助列或 JSON path hash，并对参数做算法转换。
 7. 查询结果返回后，按实体字段规则解密成业务可读值；`@EncryptJsonField` 会把 hash JSON 再回填成明文 JSON。
 8. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
-9. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
+9. 如果返回 DTO 继承 `SensitiveExtraInfoSupport`，且某个敏感字段成功脱敏并具备 lookup meta，则响应会附加按属性名分组的 `sensitiveLookupMeta`。
+10. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
+11. 业务如果需要显式查回明文，可调用 `SensitivePlaintextLookupService.lookup(...)`，并通过 `SensitivePlaintextAuditRecorder` 记录审计事件。
 
 ## 风险控制
 

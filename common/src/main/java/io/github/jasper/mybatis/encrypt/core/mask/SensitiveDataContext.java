@@ -99,11 +99,28 @@ public final class SensitiveDataContext {
      * @param rule encryption rule that produced the value
      */
     public static void record(Object owner, String propertyName, String value, EncryptColumnRule rule) {
+        record(owner, propertyName, value, rule, null);
+    }
+
+    /**
+     * Records a decrypted property value against the owning object reference.
+     *
+     * @param owner property owner
+     * @param propertyName leaf property name
+     * @param value decrypted value
+     * @param rule encryption rule that produced the value
+     * @param lookupMeta best-effort lookup meta captured during decrypt
+     */
+    public static void record(Object owner,
+                              String propertyName,
+                              String value,
+                              EncryptColumnRule rule,
+                              SensitiveLookupMeta lookupMeta) {
         Scope scope = current();
         if (scope == null || scope.returnSensitive || owner == null || propertyName == null || value == null) {
             return;
         }
-        scope.record(owner, propertyName, value, rule, SqlDialectContextHolder.currentDataSourceName());
+        scope.record(owner, propertyName, value, rule, SqlDialectContextHolder.currentDataSourceName(), lookupMeta);
     }
 
     /**
@@ -162,13 +179,15 @@ public final class SensitiveDataContext {
                             String propertyName,
                             String value,
                             EncryptColumnRule rule,
-                            String dataSourceName) {
+                            String dataSourceName,
+                            SensitiveLookupMeta lookupMeta) {
             Map<String, SensitiveRecord> ownerRecords = records.get(owner);
             if (ownerRecords == null) {
                 ownerRecords = new LinkedHashMap<String, SensitiveRecord>();
                 records.put(owner, ownerRecords);
             }
-            ownerRecords.put(propertyName, new SensitiveRecord(owner, propertyName, value, rule, dataSourceName));
+            ownerRecords.put(propertyName,
+                    new SensitiveRecord(owner, propertyName, value, rule, dataSourceName, lookupMeta));
         }
 
         private Collection<SensitiveRecord> records() {
@@ -211,17 +230,20 @@ public final class SensitiveDataContext {
         private final String value;
         private final EncryptColumnRule rule;
         private final String dataSourceName;
+        private final SensitiveLookupMeta lookupMeta;
 
         private SensitiveRecord(Object owner,
                                 String propertyName,
                                 String value,
                                 EncryptColumnRule rule,
-                                String dataSourceName) {
+                                String dataSourceName,
+                                SensitiveLookupMeta lookupMeta) {
             this.owner = owner;
             this.propertyName = propertyName;
             this.value = value;
             this.rule = rule;
             this.dataSourceName = dataSourceName;
+            this.lookupMeta = lookupMeta;
         }
 
         /**
@@ -267,6 +289,69 @@ public final class SensitiveDataContext {
          */
         public String dataSourceName() {
             return dataSourceName;
+        }
+
+        /**
+         * Returns best-effort lookup meta captured during decrypt.
+         *
+         * @return lookup meta, or {@code null} when unresolved
+         */
+        public SensitiveLookupMeta lookupMeta() {
+            return lookupMeta;
+        }
+    }
+
+    /**
+     * Best-effort lookup meta captured for a decrypted field.
+     */
+    public static final class SensitiveLookupMeta {
+
+        private final String sid;
+        private final String pid;
+        private final String vid;
+        private final String hash;
+
+        public SensitiveLookupMeta(String sid, String pid, String vid, String hash) {
+            this.sid = sid;
+            this.pid = pid;
+            this.vid = vid;
+            this.hash = hash;
+        }
+
+        /**
+         * Returns the source identifier.
+         *
+         * @return source identifier
+         */
+        public String sid() {
+            return sid;
+        }
+
+        /**
+         * Returns the property identifier.
+         *
+         * @return property identifier
+         */
+        public String pid() {
+            return pid;
+        }
+
+        /**
+         * Returns the business key value identifier.
+         *
+         * @return business key value
+         */
+        public String vid() {
+            return vid;
+        }
+
+        /**
+         * Returns the lookup hash.
+         *
+         * @return lookup hash
+         */
+        public String hash() {
+            return hash;
         }
     }
 }

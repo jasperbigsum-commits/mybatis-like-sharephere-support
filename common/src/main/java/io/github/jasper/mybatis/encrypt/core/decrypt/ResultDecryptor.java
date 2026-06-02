@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext.SensitiveLookupMeta;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptJsonFieldRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
@@ -115,8 +116,11 @@ public class ResultDecryptor {
             }
             String decrypted = algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt((String) value);
             if (propertyReference.setValue(decrypted) && SensitiveDataContext.isRecording()) {
+                // lookup meta is best-effort only; decrypt and normal recording must survive any resolution miss.
+                SensitiveLookupMeta lookupMeta =
+                        tryResolveLookupMeta(candidate, propertyReference.owner(), rule, decrypted);
                 SensitiveDataContext.record(propertyReference.owner(), propertyReference.propertyName(),
-                        decrypted, rule);
+                        decrypted, rule, lookupMeta);
             }
         }
     }
@@ -143,5 +147,61 @@ public class ResultDecryptor {
                 algorithmRegistry
         );
         propertyReference.setValue(restored);
+    }
+
+    private SensitiveLookupMeta tryResolveLookupMeta(Object rootOwner,
+                                                     Object leafOwner,
+                                                     EncryptColumnRule rule,
+                                                     String decrypted) {
+        if (rule == null || StringUtils.isBlank(decrypted)) {
+            return null;
+        }
+        if (StringUtils.isBlank(rule.sidCode()) || StringUtils.isBlank(rule.pidCode())
+                || !rule.hasResolvedLookupBusinessKey() || StringUtils.isBlank(rule.assistedQueryAlgorithm())) {
+            return null;
+        }
+        try {
+            String businessKeyValue = resolveLookupBusinessKeyValue(rootOwner, leafOwner, rule.lookupBusinessKey());
+            if (StringUtils.isBlank(businessKeyValue)) {
+                return null;
+            }
+            String hash = algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(decrypted);
+            if (StringUtils.isBlank(hash)) {
+                return null;
+            }
+            return new SensitiveLookupMeta(
+                    rule.sidCode(),
+                    rule.pidCode(),
+                    businessKeyValue,
+                    hash
+            );
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private String resolveLookupBusinessKeyValue(Object rootOwner, Object leafOwner, String lookupBusinessKey) {
+        String rootValue = readLookupBusinessKey(rootOwner, lookupBusinessKey);
+        if (StringUtils.isNotBlank(rootValue)) {
+            return rootValue;
+        }
+        return readLookupBusinessKey(leafOwner, lookupBusinessKey);
+    }
+
+    private String readLookupBusinessKey(Object owner, String lookupBusinessKey) {
+        if (owner == null || StringUtils.isBlank(lookupBusinessKey)) {
+            return null;
+        }
+        PropertyValueAccessor.PropertyReference businessKeyReference =
+                propertyValueAccessor.resolve(owner, lookupBusinessKey);
+        if (businessKeyReference == null) {
+            return null;
+        }
+        Object businessKeyValue = businessKeyReference.getValue();
+        if (businessKeyValue == null) {
+            return null;
+        }
+        String value = String.valueOf(businessKeyValue);
+        return StringUtils.isBlank(value) ? null : value;
     }
 }

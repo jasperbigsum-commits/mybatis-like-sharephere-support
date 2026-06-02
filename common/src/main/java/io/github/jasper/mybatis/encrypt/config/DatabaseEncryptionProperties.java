@@ -528,6 +528,21 @@ public class DatabaseEncryptionProperties {
         private String maskedAlgorithm = "normalizedLike";
 
         /**
+         * 敏感字段来源编码；省略时按表名生成稳定默认值。
+         */
+        private String sidCode;
+
+        /**
+         * 敏感字段属性编码；省略时按表名和属性名生成稳定默认值。
+         */
+        private String pidCode;
+
+        /**
+         * lookup meta 使用的业务主键属性名；省略时按实体主键注解和约定保守推断。
+         */
+        private String lookupBusinessKey;
+
+        /**
          * 迁移覆盖主表原列时使用的明文备份列。
          *
          * <p>全量 DDL 生成入口没有单实体 {@code backupColumn(...)} builder 上下文，

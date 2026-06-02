@@ -1,6 +1,8 @@
 package io.github.jasper.mybatis.encrypt.core.metadata;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -176,6 +178,125 @@ class EncryptMetadataRegistryTest {
         assertEquals("phone_cipher", archiveRule.storageColumn());
     }
 
+    @Test
+    void shouldResolveLookupMetaDefaultsFromAnnotatedField() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        registry.findByEntity(LookupMetaUserEntity.class).orElseThrow();
+        EncryptColumnRule rule = registry.findByTable("lookup_meta_user")
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertNotNull(rule.sidCode());
+        assertNotNull(rule.pidCode());
+        assertEquals("id", rule.lookupBusinessKey());
+        assertTrue(rule.hasResolvedLookupBusinessKey());
+    }
+
+    @Test
+    void shouldKeepSameSidCodeForSameTableWhenUsingDefaultLookupMeta() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        registry.findByEntity(LookupMetaUserEntity.class).orElseThrow();
+        EncryptTableRule tableRule = registry.findByTable("lookup_meta_user").orElseThrow();
+        EncryptColumnRule phoneRule = tableRule.findByProperty("phone").orElseThrow();
+        EncryptColumnRule emailRule = tableRule.findByProperty("email").orElseThrow();
+
+        assertEquals(phoneRule.sidCode(), emailRule.sidCode());
+    }
+
+    @Test
+    void shouldResolveLookupMetaDefaultsFromEntityAccess() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        EncryptColumnRule rule = registry.findByEntity(LookupMetaUserEntity.class)
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertNotNull(rule.sidCode());
+        assertNotNull(rule.pidCode());
+        assertEquals("id", rule.lookupBusinessKey());
+        assertTrue(rule.hasResolvedLookupBusinessKey());
+    }
+
+    @Test
+    void shouldAllowLookupMetaResolutionFailureWithoutBreakingRuleRegistration() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        EncryptColumnRule rule = registry.findByEntity(AmbiguousLookupKeyEntity.class)
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertFalse(rule.hasResolvedLookupBusinessKey());
+    }
+
+    @Test
+    void shouldPreferExplicitLookupMetaConfigurationFromAnnotation() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        registry.findByEntity(ExplicitLookupMetaEntity.class).orElseThrow();
+        EncryptColumnRule rule = registry.findByTable("explicit_lookup_meta_user")
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertEquals("custom-sid", rule.sidCode());
+        assertEquals("custom-pid", rule.pidCode());
+        assertEquals("tenantId", rule.lookupBusinessKey());
+        assertTrue(rule.hasResolvedLookupBusinessKey());
+    }
+
+    @Test
+    void shouldPreferExplicitLookupMetaConfigurationFromEntityAccess() {
+        EncryptMetadataRegistry registry =
+                new EncryptMetadataRegistry(new DatabaseEncryptionProperties(), new AnnotationEncryptMetadataLoader());
+
+        EncryptColumnRule rule = registry.findByEntity(ExplicitLookupMetaEntity.class)
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertEquals("custom-sid", rule.sidCode());
+        assertEquals("custom-pid", rule.pidCode());
+        assertEquals("tenantId", rule.lookupBusinessKey());
+        assertTrue(rule.hasResolvedLookupBusinessKey());
+    }
+
+    @Test
+    void shouldResolveConfiguredLookupBusinessKeyColumnAfterEntityRegistration() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        DatabaseEncryptionProperties.TableRuleProperties tableRule = new DatabaseEncryptionProperties.TableRuleProperties();
+        tableRule.setTable("custom_user_account");
+
+        DatabaseEncryptionProperties.FieldRuleProperties fieldRule = new DatabaseEncryptionProperties.FieldRuleProperties();
+        fieldRule.setProperty("phone");
+        fieldRule.setColumn("phone");
+        fieldRule.setAssistedQueryColumn("phone_hash");
+        fieldRule.setLookupBusinessKey("tenantId");
+        tableRule.getFields().add(fieldRule);
+        properties.getTables().add(tableRule);
+
+        EncryptMetadataRegistry registry = new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader());
+        registry.registerEntityType(ConfiguredLookupMetaEntity.class);
+
+        EncryptColumnRule rule = registry.findByTable("custom_user_account")
+                .orElseThrow()
+                .findByProperty("phone")
+                .orElseThrow();
+
+        assertEquals("tenantId", rule.lookupBusinessKey());
+        assertEquals("tenant_user_id", rule.lookupBusinessKeyColumn());
+        assertTrue(rule.hasResolvedLookupBusinessKey());
+    }
+
     /**
      * 测试目的：验证非法加密元数据配置会在加载阶段被明确拒绝。
      * 测试场景：构造缺失表名、缺失辅助列或算法冲突的规则，断言配置异常和错误码符合预期。
@@ -320,6 +441,57 @@ class EncryptMetadataRegistryTest {
         private String phone;
     }
 
+    @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("lookup_meta_user")
+    static class LookupMetaUserEntity {
+
+        @com.baomidou.mybatisplus.annotation.TableId
+        private String id;
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash"
+        )
+        private String phone;
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                column = "email",
+                storageColumn = "email_cipher",
+                assistedQueryColumn = "email_hash"
+        )
+        private String email;
+    }
+
+    @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("ambiguous_lookup_key_user")
+    static class AmbiguousLookupKeyEntity {
+
+        private String primaryId;
+        private String legacyId;
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash"
+        )
+        private String phone;
+    }
+
+    @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("explicit_lookup_meta_user")
+    static class ExplicitLookupMetaEntity {
+
+        private String tenantId;
+
+        @io.github.jasper.mybatis.encrypt.annotation.EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash",
+                sidCode = "custom-sid",
+                pidCode = "custom-pid",
+                lookupBusinessKey = "tenantId"
+        )
+        private String phone;
+    }
+
     @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("inherited_user_account")
     static class InheritedUserEntity extends BaseEncryptedEntity {
         private Long id;
@@ -328,5 +500,14 @@ class EncryptMetadataRegistryTest {
     @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("inherited_user_archive")
     static class InheritedArchiveEntity extends BaseEncryptedEntity {
         private Long id;
+    }
+
+    @io.github.jasper.mybatis.encrypt.annotation.EncryptTable("custom_user_account")
+    static class ConfiguredLookupMetaEntity {
+
+        @jakarta.persistence.Column(name = "tenant_user_id")
+        private String tenantId;
+
+        private String phone;
     }
 }

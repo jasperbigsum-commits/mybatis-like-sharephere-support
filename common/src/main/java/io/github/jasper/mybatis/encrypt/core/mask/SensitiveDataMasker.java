@@ -136,18 +136,20 @@ public final class SensitiveDataMasker {
         for (SensitiveDataContext.SensitiveRecord record : records) {
             String storedMaskedValue = resolvedStoredValues.get(record);
             if (StringUtils.isNotBlank(storedMaskedValue) && applyRecordedValue(record, storedMaskedValue)) {
+                attachLookupMeta(record);
                 continue;
             }
             EncryptColumnRule rule = record.rule();
             if (rule != null && rule.hasMaskedColumn() && algorithmRegistry != null) {
                 String fallbackMaskedValue = algorithmRegistry.like(rule.effectiveMaskedAlgorithm()).transform(record.value());
                 if (applyRecordedValue(record, fallbackMaskedValue)) {
+                    attachLookupMeta(record);
                     continue;
                 }
             }
             FieldBinding binding = binding(record.owner().getClass(), record.propertyName()).orElse(null);
-            if (binding != null) {
-                binding.setMasked(record.owner(), record.value(), algorithmRegistry, sensitiveFieldMaskers);
+            if (binding != null && binding.setMasked(record.owner(), record.value(), algorithmRegistry, sensitiveFieldMaskers)) {
+                attachLookupMeta(record);
             }
         }
     }
@@ -235,6 +237,21 @@ public final class SensitiveDataMasker {
         }
         Object currentValue = propertyReference.getValue();
         return (currentValue == null || currentValue instanceof String) && propertyReference.setValue(replacement);
+    }
+
+    private void attachLookupMeta(SensitiveDataContext.SensitiveRecord record) {
+        if (record == null || record.lookupMeta() == null) {
+            return;
+        }
+        if (!(record.owner() instanceof SensitiveExtraInfoSupport)) {
+            return;
+        }
+        FieldBinding binding = binding(record.owner().getClass(), record.propertyName()).orElse(null);
+        if (binding != null && !binding.shouldReturnLookupMeta()) {
+            return;
+        }
+        ((SensitiveExtraInfoSupport) record.owner()).sensitiveLookupMetaStorage()
+                .put(record.propertyName(), record.lookupMeta());
     }
 
     private List<FieldBinding> bindings(Class<?> type) {
@@ -343,14 +360,16 @@ public final class SensitiveDataMasker {
             }
         }
 
-        private void setMasked(Object owner,
-                               String value,
-                               AlgorithmRegistry algorithmRegistry,
-                               Map<String, SensitiveFieldMasker> sensitiveFieldMaskers) {
+        private boolean setMasked(Object owner,
+                                  String value,
+                                  AlgorithmRegistry algorithmRegistry,
+                                  Map<String, SensitiveFieldMasker> sensitiveFieldMaskers) {
             try {
                 field.set(owner, mask(owner, value, algorithmRegistry, sensitiveFieldMaskers));
+                return true;
             } catch (IllegalAccessException ignore) {
                 // Field accessibility was prepared when binding was built.
+                return false;
             }
         }
 
@@ -479,6 +498,10 @@ public final class SensitiveDataMasker {
                 builder.append(maskChar);
             }
             return builder.toString();
+        }
+
+        private boolean shouldReturnLookupMeta() {
+            return annotation.returnLookupMeta();
         }
     }
 }

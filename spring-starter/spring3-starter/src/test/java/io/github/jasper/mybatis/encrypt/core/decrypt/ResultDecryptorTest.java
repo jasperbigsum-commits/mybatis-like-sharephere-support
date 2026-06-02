@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.core.decrypt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -293,6 +294,47 @@ class ResultDecryptorTest {
         }
 
         assertEquals("*******8000", dto.rawPhone());
+    }
+
+    @Test
+    void shouldRecordLookupMetaForDecryptedFieldWhenResolutionSucceeds() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        LookupMetaUserEntity entity = new LookupMetaUserEntity();
+        entity.setId("U-100");
+        entity.setPhone(sm4.encrypt("13800138000"));
+
+        try (SensitiveDataContext.Scope ignored =
+                     SensitiveDataContext.open(false, SensitiveResponseStrategy.RECORDED_ONLY)) {
+            decrypt(decryptor, entityMappedStatement(LookupMetaUserEntity.class, "test.lookupMeta"), List.of(entity));
+
+            SensitiveDataContext.SensitiveRecord record = SensitiveDataContext.records().iterator().next();
+
+            assertEquals("13800138000", entity.getPhone());
+            assertEquals("U-100", record.lookupMeta().vid());
+            assertNotNull(record.lookupMeta().sid());
+            assertNotNull(record.lookupMeta().pid());
+            assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), record.lookupMeta().hash());
+        }
+    }
+
+    @Test
+    void shouldKeepDecryptingWhenLookupMetaResolutionFails() {
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        ResultDecryptor decryptor = createDecryptor(sm4, new DatabaseEncryptionProperties());
+        AmbiguousLookupKeyEntity entity = new AmbiguousLookupKeyEntity();
+        entity.setPhone(sm4.encrypt("13800138000"));
+
+        try (SensitiveDataContext.Scope ignored =
+                     SensitiveDataContext.open(false, SensitiveResponseStrategy.RECORDED_ONLY)) {
+            decrypt(decryptor, entityMappedStatement(AmbiguousLookupKeyEntity.class, "test.lookupMetaFallback"),
+                    List.of(entity));
+
+            SensitiveDataContext.SensitiveRecord record = SensitiveDataContext.records().iterator().next();
+
+            assertEquals("13800138000", entity.getPhone());
+            assertNull(record.lookupMeta());
+        }
     }
 
     /**
@@ -670,6 +712,74 @@ class ResultDecryptorTest {
 
         String rawPhone() {
             return phone;
+        }
+    }
+
+    @EncryptTable("lookup_meta_user")
+    static class LookupMetaUserEntity {
+
+        @com.baomidou.mybatisplus.annotation.TableId
+        private String id;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash"
+        )
+        private String phone;
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+    }
+
+    @EncryptTable("ambiguous_lookup_key_user")
+    static class AmbiguousLookupKeyEntity {
+
+        private String primaryId;
+        private String legacyId;
+
+        @EncryptField(
+                column = "phone",
+                storageColumn = "phone_cipher",
+                assistedQueryColumn = "phone_hash"
+        )
+        private String phone;
+
+        public String getPrimaryId() {
+            return primaryId;
+        }
+
+        public void setPrimaryId(String primaryId) {
+            this.primaryId = primaryId;
+        }
+
+        public String getLegacyId() {
+            return legacyId;
+        }
+
+        public void setLegacyId(String legacyId) {
+            this.legacyId = legacyId;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
         }
     }
 

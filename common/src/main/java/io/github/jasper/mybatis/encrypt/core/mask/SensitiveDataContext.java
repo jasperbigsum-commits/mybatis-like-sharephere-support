@@ -311,6 +311,13 @@ public final class SensitiveDataContext {
         private final String vid;
         private final String hash;
 
+        /***
+         * 创建 Meta信息
+         * @param sid 表id
+         * @param pid 字段属性id
+         * @param vid 业务键id
+         * @param hash 校验hash值
+         */
         public SensitiveLookupMeta(String sid, String pid, String vid, String hash) {
             this.sid = sid;
             this.pid = pid;

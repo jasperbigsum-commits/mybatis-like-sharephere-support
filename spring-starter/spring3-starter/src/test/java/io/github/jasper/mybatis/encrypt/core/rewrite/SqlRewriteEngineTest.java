@@ -1314,6 +1314,59 @@ class SqlRewriteEngineTest {
         assertEquals(1, result.maskedParameters().size());
     }
 
+    @Test
+    void shouldRewriteDerivedTablePredicateWhenProjectionAliasIsQuoted() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT t.borrowerName FROM (SELECT phone AS 'borrowerName' FROM user_account) t WHERE t.borrowerName = ?",
+                List.of(new ParameterMapping.Builder(configuration, "borrowerName", String.class).build()),
+                Map.of("borrowerName", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("__enc_assisted_borrowerName"));
+        assertFalse(result.sql().contains("__enc_assisted_'borrowerName'"));
+        assertTrue(result.sql().contains("WHERE t.`__enc_assisted_borrowerName` = ?")
+                || result.sql().contains("WHERE t.__enc_assisted_borrowerName = ?"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
+    @Test
+    void shouldRewriteDerivedTablePredicateWhenProjectionAliasContainsSymbols() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT t.borrower_name_id FROM (SELECT phone AS 'borrower name/id' FROM user_account) t WHERE t.borrower_name_id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "borrowerName", String.class).build()),
+                Map.of("borrowerName", "13800138000")
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("__enc_assisted_borrower_name_id"));
+        assertTrue(result.sql().contains("WHERE t.`__enc_assisted_borrower_name_id` = ?")
+                || result.sql().contains("WHERE t.__enc_assisted_borrower_name_id = ?"));
+        assertEquals(1, result.maskedParameters().size());
+    }
+
     /**
      * 测试目的：验证查询条件中的加密字段会改写为辅助查询列或独立表 EXISTS 谓词。
      * 测试场景：构造等值、LIKE、空值、嵌套括号和子查询条件，断言 SQL 谓词和参数顺序保持正确。

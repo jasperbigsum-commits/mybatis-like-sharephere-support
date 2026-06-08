@@ -452,7 +452,9 @@ public final class QueryResultPlanFactory {
                 String alias = item.getAlias() != null && StringUtils.isNotBlank(item.getAlias().getName())
                         ? item.getAlias().getName()
                         : projectedColumnLabel(expression);
-                if (alias != null && (alias.startsWith(HIDDEN_ASSISTED_PREFIX) || alias.startsWith(HIDDEN_LIKE_PREFIX))) {
+                String internalAlias = internalProjectedName(alias);
+                if (internalAlias != null
+                        && (internalAlias.startsWith(HIDDEN_ASSISTED_PREFIX) || internalAlias.startsWith(HIDDEN_LIKE_PREFIX))) {
                     continue;
                 }
                 Column column = projectedSourceColumn(expression);
@@ -464,7 +466,7 @@ public final class QueryResultPlanFactory {
                 if (rule == null) {
                     continue;
                 }
-                registerProjection(alias, rule);
+                registerProjection(internalAlias, rule);
             }
         }
 
@@ -580,14 +582,15 @@ public final class QueryResultPlanFactory {
                 String aliasName = item.getAlias() != null && StringUtils.isNotBlank(item.getAlias().getName())
                         ? item.getAlias().getName()
                         : column.getColumnName();
-                if (aliasName.startsWith(HIDDEN_ASSISTED_PREFIX) || aliasName.startsWith(HIDDEN_LIKE_PREFIX)) {
+                String internalAliasName = internalProjectedName(aliasName);
+                if (internalAliasName.startsWith(HIDDEN_ASSISTED_PREFIX) || internalAliasName.startsWith(HIDDEN_LIKE_PREFIX)) {
                     continue;
                 }
-                EncryptColumnRule sourceRule = tableContext.resolveProjected(column, aliasName).orElse(null);
+                EncryptColumnRule sourceRule = tableContext.resolveProjected(column, internalAliasName).orElse(null);
                 if (sourceRule == null) {
                     continue;
                 }
-                derivedRule.addColumnRule(projectDerivedRule(aliasName, sourceRule));
+                derivedRule.addColumnRule(projectDerivedRule(internalAliasName, sourceRule));
             }
             return derivedRule.getColumnRules().isEmpty() ? null : derivedRule;
         }
@@ -614,6 +617,10 @@ public final class QueryResultPlanFactory {
                     storedInSeparateTable ? sourceRule.storageColumn() : projectedColumn,
                     sourceRule.storageIdColumn()
             );
+        }
+
+        private String internalProjectedName(String projectedName) {
+            return projectedName == null ? null : NameUtils.internalAliasToken(projectedName);
         }
     }
 

@@ -4,6 +4,7 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.FieldStorageMode;
+import io.github.jasper.mybatis.encrypt.util.NameUtils;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
@@ -84,10 +85,11 @@ final class DerivedTableRuleBuilder {
                     && StringUtils.isNotBlank(item.getAlias().getName())
                     ? item.getAlias().getName()
                     : column.getColumnName();
-            if (aliasName.startsWith(HIDDEN_ASSISTED_PREFIX) || aliasName.startsWith(HIDDEN_LIKE_PREFIX)) {
+            String internalAliasName = internalProjectedName(aliasName);
+            if (internalAliasName.startsWith(HIDDEN_ASSISTED_PREFIX) || internalAliasName.startsWith(HIDDEN_LIKE_PREFIX)) {
                 continue;
             }
-            derivedRule.addColumnRule(projectDerivedRule(aliasName, sourceRule));
+            derivedRule.addColumnRule(projectDerivedRule(internalAliasName, sourceRule));
         }
         return derivedRule.getColumnRules().isEmpty() ? null : derivedRule;
     }
@@ -155,5 +157,9 @@ final class DerivedTableRuleBuilder {
             return;
         }
         tableContext.register(table.getName(), table.getAlias() != null ? table.getAlias().getName() : null, rule);
+    }
+
+    private String internalProjectedName(String projectedName) {
+        return NameUtils.internalAliasToken(projectedName);
     }
 }

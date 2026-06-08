@@ -147,6 +147,34 @@ class SqlSelectProjectionRewriterTest {
         assertTrue(plainSelect.toString().contains("__enc_like_phone"));
     }
 
+    @Test
+    void shouldSanitizeQuotedAliasWhenAppendingDerivedHelperColumns() throws Exception {
+        PlainSelect plainSelect = parsePlainSelect("SELECT phone AS 'borrowerName' FROM user_account");
+
+        boolean changed = rewriter.rewrite(plainSelect, tableContext(), ProjectionMode.DERIVED);
+
+        assertTrue(changed);
+        assertTrue(plainSelect.toString().contains("phone_cipher AS 'borrowerName'")
+                || plainSelect.toString().contains("phone_cipher 'borrowerName'"));
+        assertTrue(plainSelect.toString().contains("__enc_assisted_borrowerName"));
+        assertFalse(plainSelect.toString().contains("__enc_assisted_'borrowerName'"));
+        assertTrue(plainSelect.toString().contains("__enc_like_borrowerName"));
+        assertFalse(plainSelect.toString().contains("__enc_like_'borrowerName'"));
+    }
+
+    @Test
+    void shouldSanitizeQuotedAndSymbolicAliasWhenAppendingDerivedHelperColumns() throws Exception {
+        assertHiddenAliasToken("SELECT phone AS \"borrowerName\" FROM user_account",
+                "__enc_assisted_borrowerName",
+                "__enc_like_borrowerName");
+        assertHiddenAliasToken("SELECT phone AS `borrowerName` FROM user_account",
+                "__enc_assisted_borrowerName",
+                "__enc_like_borrowerName");
+        assertHiddenAliasToken("SELECT phone AS 'borrower name/id' FROM user_account",
+                "__enc_assisted_borrower_name_id",
+                "__enc_like_borrower_name_id");
+    }
+
     /**
      * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
@@ -246,5 +274,15 @@ class SqlSelectProjectionRewriterTest {
             count++;
             fromIndex = index + segment.length();
         }
+    }
+
+    private void assertHiddenAliasToken(String sql, String expectedAssistedAlias, String expectedLikeAlias) throws Exception {
+        PlainSelect plainSelect = parsePlainSelect(sql);
+
+        boolean changed = rewriter.rewrite(plainSelect, tableContext(), ProjectionMode.DERIVED);
+
+        assertTrue(changed);
+        assertTrue(plainSelect.toString().contains(expectedAssistedAlias));
+        assertTrue(plainSelect.toString().contains(expectedLikeAlias));
     }
 }

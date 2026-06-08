@@ -292,7 +292,7 @@ final class SqlSelectProjectionRewriter {
     private void appendDerivedHelperSelectItems(List<SelectItem<?>> target,
                                                 SelectItem<?> originalItem,
                                                 ColumnResolution resolution) {
-        String logicalAlias = selectAliasName(originalItem, resolution);
+        String logicalAlias = hiddenAliasKey(originalItem, resolution);
         if (resolution.rule().hasAssistedQueryColumn()) {
             target.add(SelectItem.from(
                     columnBuilder.apply(resolution.column(), resolution.rule().assistedQueryColumn()),
@@ -326,6 +326,10 @@ final class SqlSelectProjectionRewriter {
         return item.getAlias() != null && item.getAlias().getName() != null && StringUtils.isNotBlank(item.getAlias().getName())
                 ? item.getAlias().getName()
                 : resolution.column().getColumnName();
+    }
+
+    private String hiddenAliasKey(SelectItem<?> item, ColumnResolution resolution) {
+        return NameUtils.internalAliasToken(selectAliasName(item, resolution));
     }
 
     private String hiddenAssistedAlias(String logicalAlias) {

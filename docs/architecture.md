@@ -79,6 +79,12 @@
 
 ### 5. 控制器边界脱敏层
 
+- `SensitiveRequestBodyAdvice`
+  - 仅在 controller 方法或类显式标注 `@SensitiveRequestHydration` 时启用，避免扩大请求处理范围
+  - 在 JSON 或 `application/x-www-form-urlencoded` 请求体绑定到 controller 入参前处理前端敏感字段提交规范
+  - 优先消费推荐的 `sensitiveSubmitMeta` 结构，把未修改的脱敏字段按 lookup meta 查回明文并补回原字段
+  - 兼容旧对象模式：`state=changed` 时直接使用当前 `value`，非 changed 时使用 `lookupMeta` 显式回查明文
+  - 处理完成后移除 `sensitiveSubmitMeta` 等前端辅助结构，controller 仍接收原有明文字段 DTO
 - `SensitiveResponseContextInterceptor`
   - 在命中 `@SensitiveResponse` 的 controller 方法前打开请求级别 `SensitiveDataContext`
 - `SensitiveResponseTriggerAspect`
@@ -94,12 +100,17 @@
 - `JdbcStoredSensitiveValueResolver`
   - 按数据源、表、规则批量查询 `maskedColumn`
 - `SensitivePlaintextLookupService`
-  - 为业务侧显式提供“lookup meta -> 明文”的查询入口
+  - 为业务侧显式提供“lookup meta -> 明文”的审计入口
+  - 为请求侧内部还原提供 `lookupInternal(...)`，该路径不触发审计；默认实现会优先复用当前线程 `SensitiveDataContext` 中已记录的同 meta 明文，未命中时再按数据库查询回查，不形成跨请求明文缓存
 - `SensitivePlaintextAuditRecorder`
-  - 为显式明文回查提供审计钩子，默认 no-op，可由业务自定义落库或上报
+  - 为显式明文回查提供结构化审计钩子，默认 no-op；事件包含标准表名、属性名、字段名、原始 lookup meta、成功明文或失败错误码，并允许业务实现补充自定义属性后落库或上报
 
 边界补充：
 
+- 请求侧明文还原是 controller 显式 opt-in 能力，必须在方法或类上标注 `@SensitiveRequestHydration` 才会触发。
+- 请求侧明文还原只处理 JSON 或 `application/x-www-form-urlencoded` 请求体中具备完整 `sid/pid/vid/hash` 的显式元数据；缺失元数据的字段不会猜测，不会输出明文或密文诊断。
+- 前端标准表单推荐使用 `sensitiveSubmitMode=meta`。默认 `omit` 只适合“不需要后端自动还原未修改敏感字段”的提交链路。
+- 如果同一个字段同时出现 `sensitiveSubmitMeta` 和旧对象模式，`sensitiveSubmitMeta` 优先，避免同一字段被重复回查或互相覆盖。
 - 脱敏是 controller 边界的最终输出决策，不回写数据库，也不反向影响 SQL 改写与结果解密。
 - `RECORDED_ONLY` 是标准查询接口的首选策略，因为它只处理真正被解密过的对象引用。
 - `ANNOTATED_FIELDS` / `RECORDED_THEN_ANNOTATED` 仅作为手工组装 DTO 的补充，不替代 MyBatis 结果映射。
@@ -144,16 +155,17 @@
 ## 执行链路
 
 1. 应用启动时读取 `application.yml` 和实体注解，注册加密规则。
-2. SQL 执行前，插件解析 SQL 并定位命中的表与字段。
-3. 对主业务 `INSERT/UPDATE`，若存在写前参数预处理器，先原地补齐审计字段、租户字段或敏感更新保护后的参数值。
-4. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
-5. 若命中 `@EncryptJsonField`，则整列 JSON 字符串中的精确 path 明文会替换为 hash，并把密文写入各自绑定的独立表。
-6. 查询条件遇到等值、LIKE、`FIND_IN_SET` 精确候选列表、精确静态 `json_extract(...)`，或显式放宽的单边范围比较时，改写到对应辅助列或 JSON path hash，并对参数做算法转换。
-7. 查询结果返回后，按实体字段规则解密成业务可读值；`@EncryptJsonField` 会把 hash JSON 再回填成明文 JSON。
-8. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
-9. 如果返回 DTO 继承 `SensitiveExtraInfoSupport`，且某个敏感字段成功脱敏并具备 lookup meta，则响应会附加按属性名分组的 `sensitiveLookupMeta`。
-10. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
-11. 业务如果需要显式查回明文，可调用 `SensitivePlaintextLookupService.lookup(...)`，并通过 `SensitivePlaintextAuditRecorder` 记录审计事件。
+2. 标注 `@SensitiveRequestHydration` 的 JSON 或表单请求进入 Spring MVC 时，`SensitiveRequestBodyAdvice` 会先按 `sensitiveSubmitMeta` 或兼容对象模式把敏感字段还原成 controller 入参期望的明文 `String`。
+3. SQL 执行前，插件解析 SQL 并定位命中的表与字段。
+4. 对主业务 `INSERT/UPDATE`，若存在写前参数预处理器，先原地补齐审计字段、租户字段或敏感更新保护后的参数值。
+5. 写操作时主字段写入密文，同时追加辅助查询列或模糊查询列。
+6. 若命中 `@EncryptJsonField`，则整列 JSON 字符串中的精确 path 明文会替换为 hash，并把密文写入各自绑定的独立表。
+7. 查询条件遇到等值、LIKE、`FIND_IN_SET` 精确候选列表、精确静态 `json_extract(...)`，或显式放宽的单边范围比较时，改写到对应辅助列或 JSON path hash，并对参数做算法转换。
+8. 查询结果返回后，按实体字段规则解密成业务可读值；`@EncryptJsonField` 会把 hash JSON 再回填成明文 JSON。
+9. 如果 controller 开启了 `@SensitiveResponse`，则在响应写回前基于上下文和存储态脱敏值做最终替换。
+10. 如果返回 DTO 继承 `SensitiveExtraInfoSupport`，且某个敏感字段成功脱敏并具备 lookup meta，则响应会附加按属性名分组的 `sensitiveLookupMeta`。
+11. 如果 service、装配器或导出构建方法标注了 `@SensitiveResponseTrigger`，则只会在 controller 已经打开上下文的前提下，对该方法返回值额外做一次脱敏；否则保持透传。
+12. 业务如果需要显式查回明文，可调用 `SensitivePlaintextLookupService.lookup(...)`，并通过 `SensitivePlaintextAuditRecorder` 记录审计事件；请求侧内部还原则调用 `lookupInternal(...)`，不记录审计。
 
 ## 风险控制
 

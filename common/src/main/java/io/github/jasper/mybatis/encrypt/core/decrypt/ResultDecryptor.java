@@ -31,6 +31,7 @@ public class ResultDecryptor {
     private final QueryResultPlanFactory queryResultPlanFactory;
     private final PropertyValueAccessor propertyValueAccessor = new PropertyValueAccessor();
     private final EncryptJsonRuntimeSupport encryptJsonRuntimeSupport = new EncryptJsonRuntimeSupport();
+    private final SensitiveLookupMetaResolver sensitiveLookupMetaResolver;
 
     /**
      * 结果解密器
@@ -44,6 +45,7 @@ public class ResultDecryptor {
         this.algorithmRegistry = algorithmRegistry;
         this.separateTableEncryptionManager = separateTableEncryptionManager;
         this.queryResultPlanFactory = new QueryResultPlanFactory(metadataRegistry);
+        this.sensitiveLookupMetaResolver = new SensitiveLookupMetaResolver(algorithmRegistry);
     }
 
     /**
@@ -117,8 +119,8 @@ public class ResultDecryptor {
             String decrypted = algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt((String) value);
             if (propertyReference.setValue(decrypted) && SensitiveDataContext.isRecording()) {
                 // lookup meta is best-effort only; decrypt and normal recording must survive any resolution miss.
-                SensitiveLookupMeta lookupMeta =
-                        tryResolveLookupMeta(candidate, propertyReference.owner(), rule, decrypted);
+                SensitiveLookupMeta lookupMeta = sensitiveLookupMetaResolver.tryResolve(
+                        candidate, propertyReference.owner(), rule, decrypted);
                 SensitiveDataContext.record(propertyReference.owner(), propertyReference.propertyName(),
                         decrypted, rule, lookupMeta);
             }
@@ -149,59 +151,4 @@ public class ResultDecryptor {
         propertyReference.setValue(restored);
     }
 
-    private SensitiveLookupMeta tryResolveLookupMeta(Object rootOwner,
-                                                     Object leafOwner,
-                                                     EncryptColumnRule rule,
-                                                     String decrypted) {
-        if (rule == null || StringUtils.isBlank(decrypted)) {
-            return null;
-        }
-        if (StringUtils.isBlank(rule.sidCode()) || StringUtils.isBlank(rule.pidCode())
-                || !rule.hasResolvedLookupBusinessKey() || StringUtils.isBlank(rule.assistedQueryAlgorithm())) {
-            return null;
-        }
-        try {
-            String businessKeyValue = resolveLookupBusinessKeyValue(rootOwner, leafOwner, rule.lookupBusinessKey());
-            if (StringUtils.isBlank(businessKeyValue)) {
-                return null;
-            }
-            String hash = algorithmRegistry.assisted(rule.assistedQueryAlgorithm()).transform(decrypted);
-            if (StringUtils.isBlank(hash)) {
-                return null;
-            }
-            return new SensitiveLookupMeta(
-                    rule.sidCode(),
-                    rule.pidCode(),
-                    businessKeyValue,
-                    hash
-            );
-        } catch (RuntimeException ex) {
-            return null;
-        }
-    }
-
-    private String resolveLookupBusinessKeyValue(Object rootOwner, Object leafOwner, String lookupBusinessKey) {
-        String rootValue = readLookupBusinessKey(rootOwner, lookupBusinessKey);
-        if (StringUtils.isNotBlank(rootValue)) {
-            return rootValue;
-        }
-        return readLookupBusinessKey(leafOwner, lookupBusinessKey);
-    }
-
-    private String readLookupBusinessKey(Object owner, String lookupBusinessKey) {
-        if (owner == null || StringUtils.isBlank(lookupBusinessKey)) {
-            return null;
-        }
-        PropertyValueAccessor.PropertyReference businessKeyReference =
-                propertyValueAccessor.resolve(owner, lookupBusinessKey);
-        if (businessKeyReference == null) {
-            return null;
-        }
-        Object businessKeyValue = businessKeyReference.getValue();
-        if (businessKeyValue == null) {
-            return null;
-        }
-        String value = String.valueOf(businessKeyValue);
-        return StringUtils.isBlank(value) ? null : value;
-    }
 }

@@ -67,6 +67,10 @@ import io.github.jasper.mybatis.encrypt.annotation.EncryptField;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint;
 import io.github.jasper.mybatis.encrypt.annotation.EncryptTable;
 import io.github.jasper.mybatis.encrypt.core.decrypt.ResultDecryptor;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveExtraInfoSupport;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
 import io.github.jasper.mybatis.encrypt.plugin.DatabaseEncryptionInterceptor;
 import javax.sql.DataSource;
 
@@ -181,6 +185,47 @@ class MybatisEncryptionIntegrationTest {
         assertNotNull(referenceId);
         assertFalse(referenceId.isBlank());
         assertSeparateTableStorage(referenceId, "320101199001011234");
+    }
+
+    @Test
+    void shouldRecordLookupMetaForSeparateTableHydratedField() throws Exception {
+        UserRecord user = user(2026L, "MetaBob", "13900132026", "320101199001012026");
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            assertEquals(1, mapper.insertUser(user));
+        }
+
+        UserRecord loaded;
+        try (SensitiveDataContext.Scope ignored =
+                     SensitiveDataContext.open(false, SensitiveResponseStrategy.RECORDED_ONLY);
+             SqlSession session = sqlSessionFactory.openSession(true)) {
+            UserMapper mapper = session.getMapper(UserMapper.class);
+            loaded = mapper.selectById(2026L);
+
+            assertNotNull(loaded);
+            assertEquals("320101199001012026", loaded.getIdCard());
+            SensitiveDataContext.SensitiveRecord idCardRecord = SensitiveDataContext.records().stream()
+                    .filter(record -> "idCard".equals(record.propertyName()))
+                    .findFirst()
+                    .orElseThrow();
+            assertNotNull(idCardRecord.lookupMeta());
+            assertEquals("2026", idCardRecord.lookupMeta().getVid());
+            assertEquals(new Sm3AssistedQueryAlgorithm().transform("320101199001012026"),
+                    idCardRecord.lookupMeta().getHash());
+
+            new SensitiveDataMasker(null, new AlgorithmRegistry(
+                    Map.of("sm4", new Sm4CipherAlgorithm("integration-test-key")),
+                    Map.of("sm3", new Sm3AssistedQueryAlgorithm()),
+                    Map.of(
+                            "phoneMaskLike", new PhoneNumberMaskLikeQueryAlgorithm(),
+                            "idCardMaskLike", new IdCardMaskLikeQueryAlgorithm()
+                    )
+            )).mask(loaded);
+        }
+
+        assertEquals(new IdCardMaskLikeQueryAlgorithm().transform("320101199001012026"), loaded.getIdCard());
+        assertNotNull(loaded.getSensitiveLookupMeta());
+        assertNotNull(loaded.getSensitiveLookupMeta().get("idCard"));
     }
 
     /**
@@ -2460,7 +2505,7 @@ class MybatisEncryptionIntegrationTest {
     }
 
     @EncryptTable("user_account")
-    static class UserRecord {
+    static class UserRecord extends SensitiveExtraInfoSupport {
 
         private Long id;
         private String name;

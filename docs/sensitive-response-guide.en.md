@@ -38,8 +38,10 @@ Design constraints:
 4. Stored `maskedColumn` values are preferred, then `maskedAlgorithm`, then `@SensitiveField`.
 5. If the response DTO extends `SensitiveExtraInfoSupport`, masked fields may also return `sensitiveLookupMeta`.
 6. `sensitiveLookupMeta` is a map keyed by property name, and each value contains `sid`, `pid`, `vid`, and `hash`.
-7. Explicit plaintext retrieval is provided by `SensitivePlaintextLookupService`.
+7. Explicit plaintext retrieval is provided by `SensitivePlaintextLookupService.lookup(...)`.
 8. Plaintext lookup auditing is delegated to `SensitivePlaintextAuditRecorder`, whose default implementation is a no-op.
+9. For edit-form submission, the recommended frontend mode is `sensitiveSubmitMode=meta`; save endpoints must opt in with `@SensitiveRequestHydration` on the controller method or class before the backend restores unchanged masked fields to plaintext before controller argument binding.
+10. Request-side hydration uses the internal `lookupInternal(...)` path, which is framework-only and does not trigger audit events.
 
 ## Runtime layers
 
@@ -65,6 +67,8 @@ Responsibilities:
 
 ### 3. Response masking layer
 
+- `SensitiveRequestBodyAdvice`
+  consumes frontend sensitive-submit metadata before controller argument binding, only when the controller method or class is annotated with `@SensitiveRequestHydration`
 - `SensitiveResponseContextInterceptor`
 - `SensitiveResponseTriggerAspect`
 - `SensitiveResponseBodyAdvice`
@@ -75,10 +79,12 @@ Responsibilities:
 
 Responsibilities:
 
+- restore sensitive request fields from JSON or `application/x-www-form-urlencoded` `sensitiveSubmitMeta` payloads, or legacy sensitive-input objects, before controller binding
 - open one request-scoped masking context at the controller boundary
 - reuse that context inside `@SensitiveResponseTrigger`
 - replace the final response value before it is written
 - attach response lookup metadata to DTOs that opt in through `SensitiveExtraInfoSupport`
+- provide a no-audit plaintext conversion path for internal request hydration
 
 ### 4. Explicit plaintext lookup layer
 
@@ -92,6 +98,122 @@ Responsibilities:
 - provide an audit hook for success and failure events
 
 ## Response lookup metadata
+
+## Frontend Submit Contract And Request Hydration
+
+Request hydration is an explicit opt-in capability, not a global controller behavior. Add `@SensitiveRequestHydration` to the save method or controller class before relying on automatic request rewriting:
+
+```java
+@SensitiveRequestHydration
+@PostMapping("/users")
+public void save(@RequestBody UserSaveRequest request) {
+    userService.save(request);
+}
+```
+
+The built-in request advice supports `application/json` and `application/x-www-form-urlencoded`. Multipart forms are outside the current automatic hydration scope.
+
+### Preferred shape: `sensitiveSubmitMeta`
+
+When an edit form is hydrated from a masked response, the frontend may initialize `JSensitiveInput` from `sensitiveLookupMeta`. On submit, unchanged sensitive fields should be removed from the normal payload and sent under `sensitiveSubmitMeta`:
+
+```json
+{
+  "name": "Alice",
+  "sensitiveSubmitMeta": {
+    "phone": {
+      "sid": "user_account",
+      "pid": "phone",
+      "vid": "U-100",
+      "hash": "7f8c...",
+      "state": "unchangedMasked"
+    }
+  }
+}
+```
+
+After the endpoint opts in with `@SensitiveRequestHydration`, before Spring MVC binds the controller argument, the backend:
+
+1. validates that `sid`, `pid`, `vid`, and `hash` are present
+2. calls `SensitivePlaintextLookupService.lookupInternal(...)`
+3. writes the resolved plaintext back to the original field such as `phone`
+4. removes `sensitiveSubmitMeta` from the JSON body
+
+The controller DTO can keep its original `String` field:
+
+```java
+public class UserSaveRequest {
+
+    private String phone;
+}
+```
+
+For `application/x-www-form-urlencoded`, use the same bracketed field structure:
+
+```text
+name=Alice&sensitiveSubmitMeta[phone][sid]=user_account&sensitiveSubmitMeta[phone][pid]=phone&sensitiveSubmitMeta[phone][vid]=U-100&sensitiveSubmitMeta[phone][hash]=7f8c...&sensitiveSubmitMeta[phone][state]=unchangedMasked
+```
+
+After internal hydration, controller binding sees the equivalent of `name=Alice&phone=<plaintext>`.
+
+### Compatibility shape: field object mode
+
+If a non-standard path submits the `JSensitiveInput` object directly, the backend accepts it as a fallback:
+
+```json
+{
+  "phone": {
+    "value": "138****8000",
+    "maskedValue": "138****8000",
+    "lookupMeta": {
+      "sid": "user_account",
+      "pid": "phone",
+      "vid": "U-100",
+      "hash": "7f8c..."
+    },
+    "state": "masked"
+  }
+}
+```
+
+Rules:
+
+| Frontend state | Backend behavior |
+| --- | --- |
+| `changed` | uses the current `value` as new plaintext and does not use the old `lookupMeta` |
+| `masked` / `revealed` | uses `lookupMeta` to resolve plaintext and replace the original field |
+| both `sensitiveSubmitMeta` and object mode appear for the same field | `sensitiveSubmitMeta` wins |
+
+### Shape not recommended for automatic hydration: `omit`
+
+Some historical `BasicForm` configurations may default to `sensitiveSubmitMode=omit`. In that mode, unchanged sensitive fields are removed and no lookup metadata is submitted:
+
+```json
+{
+  "name": "Alice"
+}
+```
+
+That shape is only suitable for endpoints that do not need the backend to restore unchanged sensitive fields. For edit-save flows, overwrite-style updates, or controllers that expect complete plaintext DTO fields, use `sensitiveSubmitMode=meta`.
+
+### Frontend rules
+
+- Standard `BasicForm` / `JSensitiveInput` submissions should set `sensitiveSubmitMode="meta"`.
+- If the user changes a sensitive field, submit the field itself as a plaintext string.
+- If the user does not change a sensitive field, remove the field itself and submit `sensitiveSubmitMeta[field]`.
+- Do not send response-side `sensitiveLookupMeta` back to save endpoints as-is; save endpoints use `sensitiveSubmitMeta`.
+- Direct field-object submission is accepted only as a compatibility fallback, not the preferred protocol.
+
+### Vue / JEECG `JSensitiveInput` Integration Example
+
+The `crm-vue`-style frontend implementation now lives in [Vue `JSensitiveInput` Example](examples/sensitive-vue-jsensitive-input.en.md). The copyable source is kept in the Chinese example and includes `JSensitiveInput.vue`, `transform.ts`, plain form usage, JEECG `BasicForm` integration points, and `application/x-www-form-urlencoded` submit handling.
+
+The core contract remains:
+
+- The reveal icon is an explicit plaintext-view action. It should call a controlled endpoint such as `/sensitive/plaintext/lookup`, where the application can perform authorization and audit.
+- After the save endpoint is annotated with `@SensitiveRequestHydration`, requests that contain `sensitiveSubmitMeta` are hydrated internally by `SensitiveRequestBodyAdvice`. This conversion does not return plaintext to the caller and does not trigger plaintext-view auditing.
+- `sensitiveLookupMeta` is response-side metadata for component hydration. Do not send it back to save endpoints as-is.
+- If a page does not use centralized submit preprocessing, directly submitting the `JSensitiveInput` object is still accepted as a compatibility fallback. New pages should prefer `sensitiveSubmitMode='meta'`.
 
 ### DTO opt-in
 
@@ -196,6 +318,8 @@ The explicit lookup contract is:
 public interface SensitivePlaintextLookupService {
 
     String lookup(SensitiveLookupMeta lookupMeta);
+
+    String lookupInternal(SensitiveLookupMeta lookupMeta);
 }
 ```
 
@@ -212,6 +336,8 @@ Current behavior:
 - validates the main-table row by `vid + hash` before decrypting
 - decrypts the resolved ciphertext with the field's configured cipher algorithm
 
+In the built-in default implementation, `lookupInternal(...)` uses the same query logic but skips audit recording. It is intended for request-body hydration only. If a custom `SensitivePlaintextLookupService` records audit events inside `lookup(...)`, it should override `lookupInternal(...)` as well so internal request hydration stays non-audited.
+
 Current boundaries:
 
 - incomplete `sid / pid / vid / hash` fails fast
@@ -226,9 +352,7 @@ The starter exposes this interface:
 ```java
 public interface SensitivePlaintextAuditRecorder {
 
-    void recordSuccess(SensitiveLookupMeta lookupMeta);
-
-    void recordFailure(SensitiveLookupMeta lookupMeta, String errorCode);
+    void record(SensitivePlaintextAuditEvent event);
 }
 ```
 
@@ -236,13 +360,18 @@ Default behavior:
 
 - the auto-configuration registers a no-op implementation
 
-Recommended custom audit fields:
+Built-in event fields:
 
-- `sid / pid / vid / hash`
-- caller or tenant identity
-- success or failure status
-- stable error code
-- timestamp and request correlation id
+- `tableName`: normalized physical table name resolved from `sid`
+- `propertyName`: entity property name resolved from `pid`
+- `columnName`: business column name resolved from `pid`
+- `lookupMeta`: original `sid / pid / vid / hash`
+- `success`: success or failure status
+- `plaintext`: plaintext returned by a successful lookup
+- `errorCode`: stable error code for failed lookup
+- `attributes`: custom application attributes passed to `lookup(meta, attributes)`
+
+Pass caller, tenant, ticket, permission source, trace id, or other application context from the business code that triggers plaintext lookup by calling `lookup(meta, attributes)`. `SensitivePlaintextAuditRecorder` only receives the final event and persists or reports it.
 
 ## `@SensitiveResponse` strategies
 
@@ -318,7 +447,8 @@ Do this:
 ## Boundaries and recommendations
 
 - treat `sensitiveLookupMeta` as an index payload, not as sensitive plaintext
-- keep plaintext lookup explicit and audited
+- keep `lookup(...)` explicit and audited
+- use `lookupInternal(...)` only for framework-side request hydration
 - do not rely on lookup metadata for unsupported many-to-one or many-to-many retrievals
 - if you need multi-datasource lookup routing, extend the rule model first instead of guessing at runtime
 - if a field is display-only, set `@SensitiveField(returnLookupMeta = false)` on the response DTO field

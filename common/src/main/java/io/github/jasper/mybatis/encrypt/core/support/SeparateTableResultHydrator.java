@@ -3,7 +3,9 @@ package io.github.jasper.mybatis.encrypt.core.support;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.decrypt.QueryResultPlan;
+import io.github.jasper.mybatis.encrypt.core.decrypt.SensitiveLookupMetaResolver;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext.SensitiveLookupMeta;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule;
@@ -43,6 +45,7 @@ final class SeparateTableResultHydrator {
     private final SeparateTableRuleSupport ruleSupport;
     private final int hydrationBatchSize;
     private final PropertyValueAccessor propertyValueAccessor = new PropertyValueAccessor();
+    private final SensitiveLookupMetaResolver sensitiveLookupMetaResolver;
 
     SeparateTableResultHydrator(DataSource dataSource,
                                 EncryptMetadataRegistry metadataRegistry,
@@ -54,13 +57,14 @@ final class SeparateTableResultHydrator {
         this.algorithmRegistry = algorithmRegistry;
         this.ruleSupport = ruleSupport;
         this.hydrationBatchSize = resolveHydrationBatchSize(properties);
+        this.sensitiveLookupMetaResolver = new SensitiveLookupMetaResolver(algorithmRegistry);
     }
 
     void hydrateResults(Object resultObject) {
         if (resultObject == null) {
             return;
         }
-        Map<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped =
+        Map<EncryptColumnRule, Map<Object, List<HydrationReference>>> grouped =
                 new LinkedHashMap<>();
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         collectFallbackHydrationReferences(resultObject, grouped, visited);
@@ -79,7 +83,7 @@ final class SeparateTableResultHydrator {
     }
 
     private void collectFallbackHydrationReferences(Object candidate,
-                                                    Map<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped,
+                                                    Map<EncryptColumnRule, Map<Object, List<HydrationReference>>> grouped,
                                                     Set<Object> visited) {
         if (candidate == null || ObjectTraversalUtils.isSimpleValueType(candidate.getClass())) {
             return;
@@ -118,7 +122,7 @@ final class SeparateTableResultHydrator {
     }
 
     private void collectEntityHydrationReferences(Object candidate,
-                                                  Map<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped) {
+                                                  Map<EncryptColumnRule, Map<Object, List<HydrationReference>>> grouped) {
         EncryptTableRule tableRule = metadataRegistry.findByEntity(candidate.getClass()).orElse(null);
         if (tableRule == null) {
             return;
@@ -134,14 +138,14 @@ final class SeparateTableResultHydrator {
             }
             Object referenceId = propertyReference.getValue();
             if (referenceId != null) {
-                addHydrationReference(grouped, rule, referenceId, propertyReference);
+                addHydrationReference(grouped, rule, referenceId, new HydrationReference(candidate, propertyReference));
             }
         }
     }
 
     private boolean hydrateWithPlan(Object resultObject, QueryResultPlan queryResultPlan) {
         boolean handled = false;
-        Map<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped =
+        Map<EncryptColumnRule, Map<Object, List<HydrationReference>>> grouped =
                 new LinkedHashMap<>();
         for (Object candidate : ObjectTraversalUtils.topLevelResults(resultObject)) {
             if (candidate == null || ObjectTraversalUtils.isSimpleValueType(candidate.getClass())) {
@@ -171,47 +175,50 @@ final class SeparateTableResultHydrator {
                     continue;
                 }
                 // Same storage rule may appear at different nested paths; batch them together.
-                addHydrationReference(grouped, rule, referenceId, propertyReference);
+                addHydrationReference(grouped, rule, referenceId, new HydrationReference(candidate, propertyReference));
             }
         }
         hydrateGroupedRules(grouped);
         return handled;
     }
 
-    private void addHydrationReference(Map<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped,
+    private void addHydrationReference(Map<EncryptColumnRule, Map<Object, List<HydrationReference>>> grouped,
                                        EncryptColumnRule rule,
                                        Object referenceId,
-                                       PropertyValueAccessor.PropertyReference propertyReference) {
-        Map<Object, List<PropertyValueAccessor.PropertyReference>> metaById =
+                                       HydrationReference hydrationReference) {
+        Map<Object, List<HydrationReference>> metaById =
                 grouped.computeIfAbsent(rule, k -> new LinkedHashMap<>());
         Object normalizedReferenceId = ruleSupport.normalizeReferenceId(referenceId);
-        List<PropertyValueAccessor.PropertyReference> propertyReferences =
+        List<HydrationReference> propertyReferences =
                 metaById.computeIfAbsent(normalizedReferenceId, k -> new ArrayList<>());
-        propertyReferences.add(propertyReference);
+        propertyReferences.add(hydrationReference);
     }
 
-    private void hydrateGroupedRules(Map<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> grouped) {
-        for (Map.Entry<EncryptColumnRule, Map<Object, List<PropertyValueAccessor.PropertyReference>>> entry : grouped.entrySet()) {
+    private void hydrateGroupedRules(Map<EncryptColumnRule, Map<Object, List<HydrationReference>>> grouped) {
+        for (Map.Entry<EncryptColumnRule, Map<Object, List<HydrationReference>>> entry : grouped.entrySet()) {
             hydrateRuleReferences(entry.getKey(), entry.getValue());
         }
     }
 
     private void hydrateRuleReferences(EncryptColumnRule rule,
-                                       Map<Object, List<PropertyValueAccessor.PropertyReference>> propertyById) {
+                                       Map<Object, List<HydrationReference>> propertyById) {
         if (propertyById.isEmpty()) {
             return;
         }
         Map<Object, String> cipherById = loadCipherValues(rule, new ArrayList<>(propertyById.keySet()));
         for (Map.Entry<Object, String> entry : cipherById.entrySet()) {
-            List<PropertyValueAccessor.PropertyReference> propertyReferences = propertyById.get(entry.getKey());
-            if (propertyReferences == null || entry.getValue() == null) {
+            List<HydrationReference> hydrationReferences = propertyById.get(entry.getKey());
+            if (hydrationReferences == null || entry.getValue() == null) {
                 continue;
             }
             String plainText = algorithmRegistry.cipher(rule.cipherAlgorithm()).decrypt(entry.getValue());
-            for (PropertyValueAccessor.PropertyReference propertyReference : propertyReferences) {
+            for (HydrationReference hydrationReference : hydrationReferences) {
+                PropertyValueAccessor.PropertyReference propertyReference = hydrationReference.propertyReference;
                 if (propertyReference.setValue(plainText) && SensitiveDataContext.isRecording()) {
+                    SensitiveLookupMeta lookupMeta = sensitiveLookupMetaResolver.tryResolve(
+                            hydrationReference.rootOwner, propertyReference.owner(), rule, plainText);
                     SensitiveDataContext.record(propertyReference.owner(), propertyReference.propertyName(),
-                            plainText, rule);
+                            plainText, rule, lookupMeta);
                 }
             }
         }
@@ -270,6 +277,17 @@ final class SeparateTableResultHydrator {
     private void bind(PreparedStatement statement, List<Object> values) throws SQLException {
         for (int index = 0; index < values.size(); index++) {
             statement.setObject(index + 1, values.get(index));
+        }
+    }
+
+    private static final class HydrationReference {
+
+        private final Object rootOwner;
+        private final PropertyValueAccessor.PropertyReference propertyReference;
+
+        private HydrationReference(Object rootOwner, PropertyValueAccessor.PropertyReference propertyReference) {
+            this.rootOwner = rootOwner;
+            this.propertyReference = propertyReference;
         }
     }
 }

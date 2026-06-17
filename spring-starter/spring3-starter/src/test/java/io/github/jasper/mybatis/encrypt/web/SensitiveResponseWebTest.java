@@ -1,5 +1,6 @@
 package io.github.jasper.mybatis.encrypt.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.algorithm.support.PhoneNumberMaskLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.annotation.SensitiveField;
@@ -20,9 +21,11 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.method.HandlerMethod;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.lang.reflect.Method;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -122,10 +125,12 @@ class SensitiveResponseWebTest {
         interceptor.afterCompletion(request, response, handlerMethod, null);
 
         assertEquals("*******8000", dto.phone);
-        assertEquals("SID-1", dto.getSensitiveLookupMeta().get("phone").sid());
-        assertEquals("PID-1", dto.getSensitiveLookupMeta().get("phone").pid());
-        assertEquals("U-100", dto.getSensitiveLookupMeta().get("phone").vid());
-        assertEquals("HASH-1", dto.getSensitiveLookupMeta().get("phone").hash());
+        assertEquals("SID-1", dto.getSensitiveLookupMeta().get("phone").getSid());
+        assertEquals("PID-1", dto.getSensitiveLookupMeta().get("phone").getPid());
+        assertEquals("U-100", dto.getSensitiveLookupMeta().get("phone").getVid());
+        assertEquals("HASH-1", dto.getSensitiveLookupMeta().get("phone").getHash());
+        String json = assertDoesNotThrow(() -> new ObjectMapper().writeValueAsString(dto));
+        assertTrue(json.contains("\"sid\":\"SID-1\""));
         assertFalse(SensitiveDataContext.isActive());
     }
 
@@ -148,8 +153,8 @@ class SensitiveResponseWebTest {
         interceptor.afterCompletion(request, response, handlerMethod, null);
 
         assertEquals("138****8000", dto.phone);
-        assertEquals("SID-NA", dto.getSensitiveLookupMeta().get("phone").sid());
-        assertEquals("PID-NA", dto.getSensitiveLookupMeta().get("phone").pid());
+        assertEquals("SID-NA", dto.getSensitiveLookupMeta().get("phone").getSid());
+        assertEquals("PID-NA", dto.getSensitiveLookupMeta().get("phone").getPid());
         assertFalse(SensitiveDataContext.isActive());
     }
 
@@ -214,7 +219,60 @@ class SensitiveResponseWebTest {
         interceptor.afterCompletion(request, response, handlerMethod, null);
 
         assertEquals("*******8000", dto.phone);
-        assertEquals("SID-2", dto.getSensitiveLookupMeta().get("phone").sid());
+        assertEquals("SID-2", dto.getSensitiveLookupMeta().get("phone").getSid());
+    }
+
+    @Test
+    void shouldMaskCopiedMapResponseWhenAopReplacesRecordedObject() throws Exception {
+        SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
+        SensitiveResponseBodyAdvice advice = new SensitiveResponseBodyAdvice(new SensitiveDataMasker());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        DemoController controller = new DemoController();
+        HandlerMethod handlerMethod = handlerMethod(controller, "masked");
+        DemoDto dto = new DemoDto("13800138000");
+        Map<String, Object> copiedBody = new LinkedHashMap<>();
+        copiedBody.put("phone", "13800138000");
+        copiedBody.put("backupPhone", "13800138000");
+
+        assertTrue(interceptor.preHandle(request, response, handlerMethod));
+        SensitiveDataContext.record(dto, "phone", "13800138000", null);
+        assertTrue(advice.supports(null, null));
+        advice.beforeBodyWrite(copiedBody, null, null, null, null, null);
+        interceptor.afterCompletion(request, response, handlerMethod, null);
+
+        assertEquals("*******8000", copiedBody.get("phone"));
+        assertEquals("13800138000", copiedBody.get("backupPhone"));
+        assertFalse(SensitiveDataContext.isActive());
+    }
+
+    @Test
+    void shouldAttachLookupMetaToCopiedMapResponseWhenRecordedObjectIsReplaced() throws Exception {
+        SensitiveResponseContextInterceptor interceptor = new SensitiveResponseContextInterceptor();
+        SensitiveResponseBodyAdvice advice = new SensitiveResponseBodyAdvice(new SensitiveDataMasker());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        DemoController controller = new DemoController();
+        HandlerMethod handlerMethod = handlerMethod(controller, "maskedLookupMeta");
+        LookupMetaDto dto = new LookupMetaDto("13800138000");
+        Map<String, Object> copiedBody = new LinkedHashMap<>();
+        copiedBody.put("phone", "13800138000");
+
+        assertTrue(interceptor.preHandle(request, response, handlerMethod));
+        SensitiveDataContext.record(dto, "phone", "13800138000", null,
+                new SensitiveLookupMeta("SID-COPY", "PID-COPY", "U-COPY", "HASH-COPY"));
+        assertTrue(advice.supports(null, null));
+        advice.beforeBodyWrite(copiedBody, null, null, null, null, null);
+        interceptor.afterCompletion(request, response, handlerMethod, null);
+
+        assertEquals("*******8000", copiedBody.get("phone"));
+        @SuppressWarnings("unchecked")
+        Map<String, SensitiveLookupMeta> metaByProperty =
+                (Map<String, SensitiveLookupMeta>) copiedBody.get("sensitiveLookupMeta");
+        assertEquals("SID-COPY", metaByProperty.get("phone").getSid());
+        String json = assertDoesNotThrow(() -> new ObjectMapper().writeValueAsString(copiedBody));
+        assertTrue(json.contains("\"sid\":\"SID-COPY\""));
+        assertFalse(SensitiveDataContext.isActive());
     }
 
     /**

@@ -29,13 +29,26 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
     private final DatabaseEncryptionProperties properties;
     private final SensitivePlaintextAuditRecorder auditRecorder;
 
+    /**
+     * Creates the default lookup service.
+     *
+     * <p>The current implementation intentionally supports a single datasource only. Multiple
+     * datasource routing is rejected at lookup time instead of guessing which datasource owns a
+     * lookup meta payload.</p>
+     *
+     * @param dataSources datasource beans keyed by bean name
+     * @param metadataRegistry encryption metadata used to resolve {@code sid/pid} to a field rule
+     * @param algorithmRegistry algorithm registry used to decrypt the resolved ciphertext
+     * @param properties encryption properties, including SQL dialect quoting rules
+     * @param auditRecorder audit hook for explicit {@link #lookup(SensitiveDataContext.SensitiveLookupMeta)} calls
+     */
     public DefaultSensitivePlaintextLookupService(Map<String, DataSource> dataSources,
                                                   EncryptMetadataRegistry metadataRegistry,
                                                   AlgorithmRegistry algorithmRegistry,
                                                   DatabaseEncryptionProperties properties,
                                                   SensitivePlaintextAuditRecorder auditRecorder) {
-        this.dataSources = dataSources == null ? Collections.<String, DataSource>emptyMap()
-                : new LinkedHashMap<String, DataSource>(dataSources);
+        this.dataSources = dataSources == null ? Collections.emptyMap()
+                : new LinkedHashMap<>(dataSources);
         this.metadataRegistry = metadataRegistry;
         this.algorithmRegistry = algorithmRegistry;
         this.properties = properties == null ? new DatabaseEncryptionProperties() : properties;
@@ -44,25 +57,50 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
 
     @Override
     public String lookup(SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
+        return lookup(lookupMeta, Collections.emptyMap());
+    }
+
+    @Override
+    public String lookup(SensitiveDataContext.SensitiveLookupMeta lookupMeta, Map<String, Object> attributes) {
+        EncryptColumnRule rule = null;
         try {
             validateLookupMeta(lookupMeta);
+            rule = resolveRule(lookupMeta);
             requireSingleDataSource();
-            EncryptColumnRule rule = resolveRule(lookupMeta);
             String plaintext = queryAndDecrypt(rule, lookupMeta);
-            auditRecorder.recordSuccess(lookupMeta);
+            recordAudit(buildAuditEvent(true, lookupMeta, rule, plaintext, null, attributes));
             return plaintext;
         } catch (EncryptionException ex) {
-            auditRecorder.recordFailure(lookupMeta, ex.getErrorCode().name());
+            recordAudit(buildAuditEvent(false, lookupMeta, rule, null, ex.getErrorCode().name(), attributes));
             throw ex;
         }
     }
 
+    @Override
+    public String lookupInternal(SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
+        validateLookupMeta(lookupMeta);
+        String recordedPlaintext = SensitiveDataContext.findRecordedPlaintext(lookupMeta);
+        if (recordedPlaintext != null) {
+            return recordedPlaintext;
+        }
+        requireSingleDataSource();
+        EncryptColumnRule rule = resolveRule(lookupMeta);
+        return queryAndDecrypt(rule, lookupMeta);
+    }
+
+    private String lookupPlaintext(SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
+        validateLookupMeta(lookupMeta);
+        requireSingleDataSource();
+        EncryptColumnRule rule = resolveRule(lookupMeta);
+        return queryAndDecrypt(rule, lookupMeta);
+    }
+
     private void validateLookupMeta(SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
         if (lookupMeta == null
-                || StringUtils.isBlank(lookupMeta.sid())
-                || StringUtils.isBlank(lookupMeta.pid())
-                || StringUtils.isBlank(lookupMeta.vid())
-                || StringUtils.isBlank(lookupMeta.hash())) {
+                || StringUtils.isBlank(lookupMeta.getSid())
+                || StringUtils.isBlank(lookupMeta.getPid())
+                || StringUtils.isBlank(lookupMeta.getVid())
+                || StringUtils.isBlank(lookupMeta.getHash())) {
             throw new EncryptionException(EncryptionErrorCode.INVALID_FIELD_RULE,
                     "Incomplete sensitive lookup meta.");
         }
@@ -73,7 +111,7 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
             io.github.jasper.mybatis.encrypt.core.metadata.EncryptTableRule tableRule =
                     metadataRegistry.findByTable(tableName).orElse(null);
             EncryptColumnRule matched = tableRule == null ? null : tableRule.getColumnRules().stream()
-                    .filter(rule -> lookupMeta.sid().equals(rule.sidCode()) && lookupMeta.pid().equals(rule.pidCode()))
+                    .filter(rule -> lookupMeta.getSid().equals(rule.sidCode()) && lookupMeta.getPid().equals(rule.pidCode()))
                     .findFirst()
                     .orElse(null);
             if (matched != null) {
@@ -82,6 +120,30 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
         }
         throw new EncryptionException(EncryptionErrorCode.INVALID_FIELD_RULE,
                 "No encryption rule matched the provided lookup meta.");
+    }
+
+    private void recordAudit(SensitivePlaintextAuditEvent baseEvent) {
+        auditRecorder.record(baseEvent);
+    }
+
+    private SensitivePlaintextAuditEvent buildAuditEvent(boolean success,
+                                                         SensitiveDataContext.SensitiveLookupMeta lookupMeta,
+                                                         EncryptColumnRule rule,
+                                                         String plaintext,
+                                                         String errorCode,
+                                                         Map<String, Object> attributes) {
+        SensitivePlaintextAuditEvent.Builder builder = SensitivePlaintextAuditEvent.builder()
+                .success(success)
+                .lookupMeta(lookupMeta)
+                .plaintext(plaintext)
+                .errorCode(errorCode)
+                .attributes(attributes);
+        if (rule != null) {
+            builder.tableName(rule.table())
+                    .propertyName(rule.property())
+                    .columnName(rule.column());
+        }
+        return builder.build();
     }
 
     private String queryAndDecrypt(EncryptColumnRule rule, SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
@@ -99,8 +161,8 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
                 + " and " + quote(businessColumn) + " = ?";
         try (Connection connection = resolveDataSource().getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, lookupMeta.hash());
-            statement.setObject(2, lookupMeta.vid());
+            statement.setString(1, lookupMeta.getHash());
+            statement.setObject(2, lookupMeta.getVid());
             return readSingleCipherAndDecrypt(rule, statement);
         } catch (SQLException ex) {
             throw new EncryptionException(EncryptionErrorCode.GENERAL_FAILURE,
@@ -116,8 +178,8 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
                 + " and " + quote(rule.column()) + " = ?";
         try (Connection connection = resolveDataSource().getConnection();
              PreparedStatement mainStatement = connection.prepareStatement(mainSql)) {
-            mainStatement.setObject(1, lookupMeta.vid());
-            mainStatement.setString(2, lookupMeta.hash());
+            mainStatement.setObject(1, lookupMeta.getVid());
+            mainStatement.setString(2, lookupMeta.getHash());
             try (ResultSet mainResultSet = mainStatement.executeQuery()) {
                 if (!mainResultSet.next()) {
                     throw new EncryptionException(EncryptionErrorCode.GENERAL_FAILURE,
@@ -132,7 +194,7 @@ public class DefaultSensitivePlaintextLookupService implements SensitivePlaintex
                     + " from " + quote(rule.storageTable())
                     + " where " + quote(rule.assistedQueryColumn()) + " = ?";
             try (PreparedStatement separateStatement = connection.prepareStatement(separateSql)) {
-                separateStatement.setString(1, lookupMeta.hash());
+                separateStatement.setString(1, lookupMeta.getHash());
                 return readSingleCipherAndDecrypt(rule, separateStatement);
             }
         } catch (SQLException ex) {

@@ -2,6 +2,7 @@ package io.github.jasper.mybatis.encrypt.core.mask;
 
 import io.github.jasper.mybatis.encrypt.config.SqlDialectContextHolder;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import lombok.Data;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -11,6 +12,7 @@ import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Thread-bound response masking context opened by the web adapter around a controller invocation.
@@ -44,7 +46,7 @@ public final class SensitiveDataContext {
                 strategy == null ? SensitiveResponseStrategy.RECORDED_ONLY : strategy);
         Deque<Scope> scopes = SCOPES.get();
         if (scopes == null) {
-            scopes = new ArrayDeque<Scope>();
+            scopes = new ArrayDeque<>();
             SCOPES.set(scopes);
         }
         scopes.push(scope);
@@ -133,6 +135,29 @@ public final class SensitiveDataContext {
         return scope == null ? Collections.<SensitiveRecord>emptyList() : scope.records();
     }
 
+    /**
+     * Finds a plaintext value already recorded in the current response scope by lookup metadata.
+     *
+     * <p>This is intentionally limited to the active thread scope. It avoids a duplicate
+     * lookup/decrypt cycle when request-side framework hydration sees metadata produced by the same
+     * response flow, but it does not create a durable plaintext cache.</p>
+     *
+     * @param lookupMeta lookup metadata to match
+     * @return recorded plaintext, or {@code null} when no current-scope record matches
+     */
+    public static String findRecordedPlaintext(SensitiveLookupMeta lookupMeta) {
+        if (lookupMeta == null) {
+            return null;
+        }
+        for (SensitiveRecord record : records()) {
+            SensitiveLookupMeta recordedMeta = record.lookupMeta();
+            if (recordedMeta != null && recordedMeta.matches(lookupMeta)) {
+                return record.value();
+            }
+        }
+        return null;
+    }
+
     private static Scope current() {
         Deque<Scope> scopes = SCOPES.get();
         return scopes == null || scopes.isEmpty() ? null : scopes.peek();
@@ -181,11 +206,8 @@ public final class SensitiveDataContext {
                             EncryptColumnRule rule,
                             String dataSourceName,
                             SensitiveLookupMeta lookupMeta) {
-            Map<String, SensitiveRecord> ownerRecords = records.get(owner);
-            if (ownerRecords == null) {
-                ownerRecords = new LinkedHashMap<String, SensitiveRecord>();
-                records.put(owner, ownerRecords);
-            }
+            Map<String, SensitiveRecord> ownerRecords =
+                    records.computeIfAbsent(owner, k -> new LinkedHashMap<>());
             ownerRecords.put(propertyName,
                     new SensitiveRecord(owner, propertyName, value, rule, dataSourceName, lookupMeta));
         }
@@ -304,7 +326,8 @@ public final class SensitiveDataContext {
     /**
      * Best-effort lookup meta captured for a decrypted field.
      */
-    public static final class SensitiveLookupMeta {
+    @Data
+    public static class SensitiveLookupMeta {
 
         private final String sid;
         private final String pid;
@@ -325,40 +348,16 @@ public final class SensitiveDataContext {
             this.hash = hash;
         }
 
-        /**
-         * Returns the source identifier.
-         *
-         * @return source identifier
-         */
-        public String sid() {
-            return sid;
+        private boolean matches(SensitiveLookupMeta other) {
+            return other != null
+                    && equalsNullable(sid, other.sid)
+                    && equalsNullable(pid, other.pid)
+                    && equalsNullable(vid, other.vid)
+                    && equalsNullable(hash, other.hash);
         }
 
-        /**
-         * Returns the property identifier.
-         *
-         * @return property identifier
-         */
-        public String pid() {
-            return pid;
-        }
-
-        /**
-         * Returns the business key value identifier.
-         *
-         * @return business key value
-         */
-        public String vid() {
-            return vid;
-        }
-
-        /**
-         * Returns the lookup hash.
-         *
-         * @return lookup hash
-         */
-        public String hash() {
-            return hash;
+        private boolean equalsNullable(String left, String right) {
+            return Objects.equals(left, right);
         }
     }
 }

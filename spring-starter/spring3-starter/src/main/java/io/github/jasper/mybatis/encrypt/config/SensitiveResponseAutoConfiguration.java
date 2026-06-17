@@ -1,10 +1,15 @@
 package io.github.jasper.mybatis.encrypt.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.jasper.mybatis.encrypt.core.lookup.SensitivePlaintextLookupService;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker;
+import io.github.jasper.mybatis.encrypt.web.SensitiveRequestBodyAdvice;
+import io.github.jasper.mybatis.encrypt.web.SensitiveRequestPayloadResolver;
 import io.github.jasper.mybatis.encrypt.web.SensitiveResponseBodyAdvice;
 import io.github.jasper.mybatis.encrypt.web.SensitiveResponseContextInterceptor;
 import io.github.jasper.mybatis.encrypt.web.SensitiveResponseWebMvcConfigurer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -12,6 +17,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.web.servlet.mvc.method.annotation.RequestBodyAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
 /**
@@ -23,7 +29,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
  */
 @AutoConfiguration(after = MybatisEncryptionAutoConfiguration.class)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@ConditionalOnClass({HandlerInterceptor.class, ResponseBodyAdvice.class, WebMvcConfigurer.class})
+@ConditionalOnClass({HandlerInterceptor.class, ResponseBodyAdvice.class, RequestBodyAdvice.class, WebMvcConfigurer.class})
 @ConditionalOnProperty(prefix = "mybatis.encrypt.sensitive-response", name = "enabled",
         havingValue = "true", matchIfMissing = true)
 public class SensitiveResponseAutoConfiguration {
@@ -49,6 +55,36 @@ public class SensitiveResponseAutoConfiguration {
     @ConditionalOnMissingBean
     public SensitiveResponseBodyAdvice sensitiveResponseBodyAdvice(SensitiveDataMasker sensitiveDataMasker) {
         return new SensitiveResponseBodyAdvice(sensitiveDataMasker);
+    }
+
+    /**
+     * Creates the shared request payload resolver for opt-in sensitive request hydration.
+     *
+     * @param objectMapper JSON mapper used for request body rewriting
+     * @param sensitivePlaintextLookupService plaintext lookup service used through its internal path
+     * @return request payload resolver for JSON and form-urlencoded sensitive submit metadata
+     */
+    @Bean
+    @ConditionalOnBean({ObjectMapper.class, SensitivePlaintextLookupService.class})
+    @ConditionalOnMissingBean
+    public SensitiveRequestPayloadResolver sensitiveRequestPayloadResolver(
+            ObjectMapper objectMapper,
+            SensitivePlaintextLookupService sensitivePlaintextLookupService) {
+        return new SensitiveRequestPayloadResolver(objectMapper, sensitivePlaintextLookupService);
+    }
+
+    /**
+     * Creates request body advice that rewrites sensitive submit metadata before MVC binding.
+     *
+     * @param sensitiveRequestPayloadResolver shared payload resolver
+     * @return request body advice for endpoints annotated with sensitive request hydration
+     */
+    @Bean
+    @ConditionalOnBean(SensitiveRequestPayloadResolver.class)
+    @ConditionalOnMissingBean
+    public SensitiveRequestBodyAdvice sensitiveRequestBodyAdvice(
+            SensitiveRequestPayloadResolver sensitiveRequestPayloadResolver) {
+        return new SensitiveRequestBodyAdvice(sensitiveRequestPayloadResolver);
     }
 
     /**

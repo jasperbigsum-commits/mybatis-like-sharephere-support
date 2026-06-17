@@ -311,10 +311,10 @@ class ResultDecryptorTest {
             SensitiveDataContext.SensitiveRecord record = SensitiveDataContext.records().iterator().next();
 
             assertEquals("13800138000", entity.getPhone());
-            assertEquals("U-100", record.lookupMeta().vid());
-            assertNotNull(record.lookupMeta().sid());
-            assertNotNull(record.lookupMeta().pid());
-            assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), record.lookupMeta().hash());
+            assertEquals("U-100", record.lookupMeta().getVid());
+            assertNotNull(record.lookupMeta().getSid());
+            assertNotNull(record.lookupMeta().getPid());
+            assertEquals(new Sm3AssistedQueryAlgorithm().transform("13800138000"), record.lookupMeta().getHash());
         }
     }
 

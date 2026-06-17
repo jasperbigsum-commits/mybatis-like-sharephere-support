@@ -1,26 +1,16 @@
 package io.github.jasper.mybatis.encrypt.core.lookup;
 
-import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
-
 /**
  * Audit hook for explicit plaintext lookup operations.
  */
 public interface SensitivePlaintextAuditRecorder {
 
     /**
-     * Record a successful plaintext lookup.
+     * Records a plaintext lookup audit event.
      *
-     * @param lookupMeta lookup meta used for the query
+     * @param event structured audit event
      */
-    void recordSuccess(SensitiveDataContext.SensitiveLookupMeta lookupMeta);
-
-    /**
-     * Record a failed plaintext lookup.
-     *
-     * @param lookupMeta lookup meta used for the query
-     * @param errorCode stable error code
-     */
-    void recordFailure(SensitiveDataContext.SensitiveLookupMeta lookupMeta, String errorCode);
+    void record(SensitivePlaintextAuditEvent event);
 
     /**
      * No-op recorder.
@@ -30,11 +20,7 @@ public interface SensitivePlaintextAuditRecorder {
     static SensitivePlaintextAuditRecorder noOp() {
         return new SensitivePlaintextAuditRecorder() {
             @Override
-            public void recordSuccess(SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
-            }
-
-            @Override
-            public void recordFailure(SensitiveDataContext.SensitiveLookupMeta lookupMeta, String errorCode) {
+            public void record(SensitivePlaintextAuditEvent event) {
             }
         };
     }

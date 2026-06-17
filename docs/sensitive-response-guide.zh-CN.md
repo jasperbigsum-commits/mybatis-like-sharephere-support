@@ -37,7 +37,9 @@
 5. `@SensitiveResponseTrigger` 只能消费已经打开的上下文；没有上下文时不做任何操作。
 6. 响应层优先从数据库存储态脱敏列回填；取不到时才回退到算法脱敏；再不满足时才落到 `@SensitiveField` 的对象图脱敏。
 7. 如果返回 DTO 继承 `SensitiveExtraInfoSupport`，框架可以把每个脱敏字段的 `sid/pid/vid/hash` 以 `Map<String, SensitiveLookupMeta>` 的形式附加到响应中。
-8. 显式明文回查通过 `SensitivePlaintextLookupService` 完成，支持同表和独立表字段；默认只考虑单实体 1:1 场景，并可通过 `SensitivePlaintextAuditRecorder` 记录审计。
+8. 显式明文回查通过 `SensitivePlaintextLookupService.lookup(...)` 完成，支持同表和独立表字段；默认只考虑单实体 1:1 场景，并可通过 `SensitivePlaintextAuditRecorder` 记录审计。
+9. 编辑表单再次提交时，推荐前端使用 `sensitiveSubmitMode=meta`；保存接口需要在 controller 方法或类上标注 `@SensitiveRequestHydration`，后端才会在参数绑定前把未修改的脱敏字段自动还原成明文字段。
+10. 请求侧自动还原使用内部 `lookupInternal(...)`，它属于框架内部转换，不触发审计事件。
 
 ## 适用边界
 
@@ -94,6 +96,11 @@
 
 ### 4. 响应脱敏层
 
+- `SensitiveRequestBodyAdvice`
+  - 仅在 controller 方法或类显式标注 `@SensitiveRequestHydration` 时启用
+  - 在 JSON 或 `application/x-www-form-urlencoded` 请求体绑定 controller 入参前消费前端敏感字段提交结构
+  - 优先支持 `sensitiveSubmitMeta` 推荐模式
+  - 兼容 `JSensitiveInput` 字段对象原样提交模式
 - `SensitiveResponseContextInterceptor`
 - `SensitiveResponseBodyAdvice`
 - `SensitiveDataContext`
@@ -107,10 +114,12 @@
 职责：
 
 - 在 controller 入口打开一次请求级脱敏上下文
+- 在 controller 参数绑定前，把前端提交的敏感字段元数据还原成原 DTO 字段明文
 - 在命中 `@SensitiveResponseTrigger` 的 service / 装配方法上复用当前线程里已打开的脱敏上下文
 - 在响应写回前根据上下文与注解做最终脱敏替换
 - 在字段成功脱敏后，按属性把 best-effort lookup meta 附加到 `SensitiveExtraInfoSupport`
 - 为业务显式提供“lookup meta -> 明文”的查询与审计挂点
+- 为框架内部请求还原提供不触发审计的明文转换入口
 
 ## 组件关系图
 
@@ -210,6 +219,124 @@ sequenceDiagram
 - 标准查询接口用 `RECORDED_ONLY`
 - 手工组装 DTO、无 MyBatis 解密记录的接口用 `ANNOTATED_FIELDS`
 - 混合场景用 `RECORDED_THEN_ANNOTATED`
+
+## 前端提交规范与请求侧还原
+
+请求侧还原是显式 opt-in 能力，不会对所有 controller 全局触发。只有保存接口的方法或 controller 类标注 `@SensitiveRequestHydration` 时，`SensitiveRequestBodyAdvice` 才会处理请求体：
+
+```java
+@SensitiveRequestHydration
+@PostMapping("/users")
+public void save(@RequestBody UserSaveRequest request) {
+    userService.save(request);
+}
+```
+
+该能力支持 `application/json` 和 `application/x-www-form-urlencoded`。multipart 表单不在当前自动还原范围内。
+
+### 1. 推荐提交形态：`sensitiveSubmitMeta`
+
+编辑表单回显时，前端可以先用响应里的 `sensitiveLookupMeta` 把 `JSensitiveInput` 初始化成脱敏态。再次提交时，推荐把未修改的敏感字段从主 payload 中移除，并把元数据集中放到 `sensitiveSubmitMeta`：
+
+```json
+{
+  "name": "Alice",
+  "sensitiveSubmitMeta": {
+    "phone": {
+      "sid": "user_account",
+      "pid": "phone",
+      "vid": "U-100",
+      "hash": "7f8c...",
+      "state": "unchangedMasked"
+    }
+  }
+}
+```
+
+标注 `@SensitiveRequestHydration` 后，后端在 Spring MVC 绑定 controller 入参前会：
+
+1. 校验 `sid / pid / vid / hash` 是否齐全。
+2. 调用 `SensitivePlaintextLookupService.lookupInternal(...)` 查回明文。
+3. 把明文补回原字段，例如 `phone`。
+4. 移除 `sensitiveSubmitMeta`，controller 仍接收原来的 DTO 结构。
+
+也就是说 controller 不需要把字段类型改成对象，仍可继续使用：
+
+```java
+public class UserSaveRequest {
+
+    private String phone;
+}
+```
+
+如果提交类型是 `application/x-www-form-urlencoded`，推荐使用同名 bracket 结构：
+
+```text
+name=Alice&sensitiveSubmitMeta[phone][sid]=user_account&sensitiveSubmitMeta[phone][pid]=phone&sensitiveSubmitMeta[phone][vid]=U-100&sensitiveSubmitMeta[phone][hash]=7f8c...&sensitiveSubmitMeta[phone][state]=unchangedMasked
+```
+
+后端内部还原后，controller 绑定时等价于收到 `name=Alice&phone=<明文>`。
+
+### 2. 兼容提交形态：字段对象模式
+
+如果某些非标准入口没有经过表单预处理，直接把 `JSensitiveInput` 的对象值提交到后端，后端也会做兼容处理：
+
+```json
+{
+  "phone": {
+    "value": "138****8000",
+    "maskedValue": "138****8000",
+    "lookupMeta": {
+      "sid": "user_account",
+      "pid": "phone",
+      "vid": "U-100",
+      "hash": "7f8c..."
+    },
+    "state": "masked"
+  }
+}
+```
+
+处理规则：
+
+| 前端状态 | 后端处理 |
+| --- | --- |
+| `changed` | 直接取当前 `value` 作为新明文，不再按旧 `lookupMeta` 回查 |
+| `masked` / `revealed` | 使用 `lookupMeta` 查回明文并替换原字段 |
+| 同一字段同时出现 `sensitiveSubmitMeta` 和对象模式 | `sensitiveSubmitMeta` 优先 |
+
+### 3. 不推荐用于自动还原的形态：`omit`
+
+`BasicForm` 的历史默认值可能是 `sensitiveSubmitMode=omit`。这种模式会在未修改敏感字段时直接删除字段，且不提交元数据：
+
+```json
+{
+  "name": "Alice"
+}
+```
+
+这种提交只适合“后端不需要自动还原未修改敏感字段”的接口。对于编辑保存、覆盖式更新、需要 controller 入参保留完整明文字段的场景，应改用 `sensitiveSubmitMode=meta`。
+
+### 4. 前端约定
+
+前端表单建议按下面规则实现：
+
+- 标准 `BasicForm` / `JSensitiveInput` 提交：设置 `sensitiveSubmitMode="meta"`。
+- 用户修改敏感字段：提交字段本身为新明文字符串。
+- 用户未修改敏感字段：删除字段本身，提交到 `sensitiveSubmitMeta[field]`。
+- 不要把 `sensitiveLookupMeta` 原样带回保存接口；保存接口使用 `sensitiveSubmitMeta`。
+- 对确实绕过表单预处理的入口，可以提交字段对象模式，但它只是兼容兜底，不是首选协议。
+
+### 5. Vue / JEECG `JSensitiveInput` 接入示例
+
+`crm-vue` 风格的前端接入示例已经独立到 [Vue `JSensitiveInput` 接入示例](examples/sensitive-vue-jsensitive-input.zh-CN.md)。该示例包含可以复制使用的 `JSensitiveInput.vue`、`transform.ts`、普通表单用法、JEECG `BasicForm` 改造点，以及 `application/x-www-form-urlencoded` 提交写法。
+
+核心约定保持不变：
+
+- 点击“查看原文”属于前端显式明文查看，应走独立受控接口，例如 `/sensitive/plaintext/lookup`，该接口可以按业务要求做权限和审计。
+- 保存接口需要标注 `@SensitiveRequestHydration` 后，`sensitiveSubmitMeta` 才会由后端 `SensitiveRequestBodyAdvice` 内部还原为明文字段；这个内部转换不把明文返回给外部调用方，也不触发明文查看审计。
+- `sensitiveLookupMeta` 是响应侧给前端初始化组件用的元数据，不要原样提交到保存接口。
+- 如果项目没有统一表单预处理，直接提交 `JSensitiveInput` 对象也能被后端兼容，但这只是迁移期兜底；新页面优先使用 `sensitiveSubmitMode='meta'`。
 
 ## 响应补充信息与明文回查
 
@@ -327,6 +454,10 @@ private String phone;
 public interface SensitivePlaintextLookupService {
 
     String lookup(SensitiveLookupMeta lookupMeta);
+
+    String lookup(SensitiveLookupMeta lookupMeta, Map<String, Object> attributes);
+
+    String lookupInternal(SensitiveLookupMeta lookupMeta);
 }
 ```
 
@@ -336,12 +467,23 @@ public interface SensitivePlaintextLookupService {
 String plaintext = sensitivePlaintextLookupService.lookup(meta);
 ```
 
+如果调用侧需要把调用人、租户、工单号、权限来源或 trace id 写入审计事件，可以在显式回查时传入扩展属性：
+
+```java
+Map<String, Object> attributes = new LinkedHashMap<>();
+attributes.put("ticketNo", "T-001");
+attributes.put("operator", currentUserId);
+String plaintext = sensitivePlaintextLookupService.lookup(meta, attributes);
+```
+
 当前实现行为：
 
 - 支持同表加密字段回查
 - 支持独立表加密字段回查
 - 主表会按 `vid + hash` 做一致性校验
 - 回查成功后再按字段加密算法解密真实明文
+
+内置默认实现中，`lookupInternal(...)` 复用同一套查询逻辑，但不会触发审计记录，供请求体自动还原使用。若业务自定义了 `SensitivePlaintextLookupService` 并在 `lookup(...)` 内自行审计，应同时覆写 `lookupInternal(...)`，保持请求侧内部还原不审计。
 
 失败边界：
 
@@ -356,28 +498,32 @@ String plaintext = sensitivePlaintextLookupService.lookup(meta);
 ```java
 public interface SensitivePlaintextAuditRecorder {
 
-    void recordSuccess(SensitiveLookupMeta lookupMeta);
-
-    void recordFailure(SensitiveLookupMeta lookupMeta, String errorCode);
+    void record(SensitivePlaintextAuditEvent event);
 }
 ```
 
 你可以自定义这个 Bean，把回查成功 / 失败事件写入审计表、消息队列或安全平台。
 
-推荐记录内容：
+事件内置字段：
 
-- `sid / pid / vid / hash`
-- 调用时间
-- 调用人或租户
-- 成功 / 失败状态
-- 稳定错误码
+- `tableName`：由 `sid` 解析出的标准物理表名
+- `propertyName`：由 `pid` 解析出的实体属性名
+- `columnName`：由 `pid` 解析出的业务列名
+- `lookupMeta`：原始 `sid / pid / vid / hash`
+- `success`：成功 / 失败状态
+- `plaintext`：回查成功时的明文
+- `errorCode`：回查失败时的稳定错误码
+- `attributes`：调用 `lookup(meta, attributes)` 时传入的业务自定义扩展属性
+
+如果需要补充调用人、租户、工单号、权限来源或 trace id，应由触发显式明文回查的业务代码调用 `lookup(meta, attributes)` 传入；`SensitivePlaintextAuditRecorder` 只负责接收最终事件并落库或上报。
 
 ### 7. 使用建议
 
 - 对需要返回扩展信息的接口，优先让返回 DTO 继承 `SensitiveExtraInfoSupport`
 - 对纯展示字段或不允许任何回查能力的字段，在响应 DTO 上显式配置 `@SensitiveField(returnLookupMeta = false)`
 - 若业务需要更稳定的 `vid` 解析，优先显式配置 `lookupBusinessKey`
-- 把 `SensitivePlaintextLookupService` 当成显式受控入口，不要在普通 controller 出口隐式触发明文回查
+- 把 `SensitivePlaintextLookupService.lookup(...)` 当成显式受控入口，不要在普通 controller 出口隐式触发明文回查
+- 请求侧自动还原只应该走 `lookupInternal(...)`，不要在这里复用显式审计入口
 - 若未来存在多数据源或一对多明文回查需求，建议先显式扩展规则模型和审计模型，再放开能力边界
 
 ## DTO 映射与复杂 SQL 一致性

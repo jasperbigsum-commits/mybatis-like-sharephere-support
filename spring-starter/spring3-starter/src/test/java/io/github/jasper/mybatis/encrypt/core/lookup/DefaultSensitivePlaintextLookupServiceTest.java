@@ -7,6 +7,7 @@ import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgori
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm4CipherAlgorithm;
 import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataContext;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy;
 import io.github.jasper.mybatis.encrypt.core.metadata.AnnotationEncryptMetadataLoader;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptMetadataRegistry;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionException;
@@ -75,30 +76,267 @@ class DefaultSensitivePlaintextLookupServiceTest {
     }
 
     @Test
-    void shouldRejectLookupWhenLookupMetaIsIncompleteAndRecordFailure() {
-        AtomicReference<String> failureCode = new AtomicReference<String>();
+    void shouldRecordSuccessWhenExplicitLookupSucceeds() throws Exception {
+        DataSource dataSource = dataSource("lookup_plaintext_success_audit");
+        String plainValue = "13800138010";
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        String cipherValue = sm4.encrypt(plainValue);
+        String lookupHash = new Sm3AssistedQueryAlgorithm().transform(plainValue);
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("create table user_account (" +
+                    "id varchar(64) primary key," +
+                    "phone varchar(255)," +
+                    "phone_hash varchar(255)," +
+                    "name varchar(64))");
+        }
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "insert into user_account (id, phone, phone_hash, name) values (?, ?, ?, ?)")) {
+            statement.setString(1, "U-110");
+            statement.setString(2, cipherValue);
+            statement.setString(3, lookupHash);
+            statement.setString(4, "alice");
+            statement.executeUpdate();
+        }
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Map.of("dataSource", dataSource),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
+        );
+
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid_09d8fcbf4d87731eb9ce135bf183957be0b2d5c7f04258dfcaadbe7619d3c755",
+                        "pid_12790c679f20d3fef946e2f8b815e3f63f93d5e0dc94a7bea0f8f5d8c0b9fcd7",
+                        "U-110",
+                        lookupHash);
+
+        assertEquals(plainValue, service.lookup(lookupMeta));
+        assertEquals(true, auditEvent.get().isSuccess());
+        assertEquals("user_account", auditEvent.get().getTableName());
+        assertEquals("phone", auditEvent.get().getPropertyName());
+        assertEquals("phone", auditEvent.get().getColumnName());
+        assertEquals(lookupMeta, auditEvent.get().getLookupMeta());
+        assertEquals(plainValue, auditEvent.get().getPlaintext());
+        assertEquals(null, auditEvent.get().getErrorCode());
+    }
+
+    @Test
+    void shouldNotRecordAuditWhenInternalLookupSucceeds() throws Exception {
+        DataSource dataSource = dataSource("lookup_plaintext_internal_no_audit");
+        String plainValue = "13800138011";
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        String cipherValue = sm4.encrypt(plainValue);
+        String lookupHash = new Sm3AssistedQueryAlgorithm().transform(plainValue);
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("create table user_account (" +
+                    "id varchar(64) primary key," +
+                    "phone varchar(255)," +
+                    "phone_hash varchar(255)," +
+                    "name varchar(64))");
+        }
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "insert into user_account (id, phone, phone_hash, name) values (?, ?, ?, ?)")) {
+            statement.setString(1, "U-111");
+            statement.setString(2, cipherValue);
+            statement.setString(3, lookupHash);
+            statement.setString(4, "alice");
+            statement.executeUpdate();
+        }
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Map.of("dataSource", dataSource),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
+        );
+
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid_09d8fcbf4d87731eb9ce135bf183957be0b2d5c7f04258dfcaadbe7619d3c755",
+                        "pid_12790c679f20d3fef946e2f8b815e3f63f93d5e0dc94a7bea0f8f5d8c0b9fcd7",
+                        "U-111",
+                        lookupHash);
+
+        assertEquals(plainValue, service.lookupInternal(lookupMeta));
+        assertEquals(null, auditEvent.get());
+    }
+
+    @Test
+    void shouldReuseCurrentSensitiveContextWhenInternalLookupMetaAlreadyRecorded() {
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
         DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
                 Collections.<String, DataSource>emptyMap(),
                 metadataRegistry(),
                 algorithms(),
                 properties(),
-                new SensitivePlaintextAuditRecorder() {
-                    @Override
-                    public void recordSuccess(SensitiveDataContext.SensitiveLookupMeta lookupMeta) {
-                    }
+                auditEvent::set
+        );
 
-                    @Override
-                    public void recordFailure(SensitiveDataContext.SensitiveLookupMeta lookupMeta, String errorCode) {
-                        failureCode.set(errorCode);
-                    }
-                }
+        String plainValue = "13800138012";
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid_09d8fcbf4d87731eb9ce135bf183957be0b2d5c7f04258dfcaadbe7619d3c755",
+                        "pid_12790c679f20d3fef946e2f8b815e3f63f93d5e0dc94a7bea0f8f5d8c0b9fcd7",
+                        "U-112",
+                        new Sm3AssistedQueryAlgorithm().transform(plainValue));
+
+        try (SensitiveDataContext.Scope ignored = SensitiveDataContext.open(false, SensitiveResponseStrategy.RECORDED_ONLY)) {
+            SensitiveDataContext.record(new Object(), "phone", plainValue, null, lookupMeta);
+
+            assertEquals(plainValue, service.lookupInternal(lookupMeta));
+        }
+        assertEquals(null, auditEvent.get());
+    }
+
+    @Test
+    void shouldKeepExplicitLookupDatabaseBackedEvenWhenCurrentContextHasPlaintext() {
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Collections.<String, DataSource>emptyMap(),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
+        );
+
+        String plainValue = "13800138013";
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid_09d8fcbf4d87731eb9ce135bf183957be0b2d5c7f04258dfcaadbe7619d3c755",
+                        "pid_12790c679f20d3fef946e2f8b815e3f63f93d5e0dc94a7bea0f8f5d8c0b9fcd7",
+                        "U-113",
+                        new Sm3AssistedQueryAlgorithm().transform(plainValue));
+
+        try (SensitiveDataContext.Scope ignored = SensitiveDataContext.open(false, SensitiveResponseStrategy.RECORDED_ONLY)) {
+            SensitiveDataContext.record(new Object(), "phone", plainValue, null, lookupMeta);
+
+            assertThrows(EncryptionException.class, () -> service.lookup(lookupMeta));
+        }
+        assertEquals(false, auditEvent.get().isSuccess());
+        assertEquals("GENERAL_FAILURE", auditEvent.get().getErrorCode());
+        assertEquals("user_account", auditEvent.get().getTableName());
+        assertEquals("phone", auditEvent.get().getPropertyName());
+        assertEquals("phone", auditEvent.get().getColumnName());
+        assertEquals(null, auditEvent.get().getPlaintext());
+    }
+
+    @Test
+    void shouldNotRecordAuditWhenInternalLookupFails() {
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Collections.<String, DataSource>emptyMap(),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
+        );
+
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid", "pid", null, "hash");
+
+        assertThrows(EncryptionException.class, () -> service.lookupInternal(lookupMeta));
+        assertEquals(null, auditEvent.get());
+    }
+
+    @Test
+    void shouldRejectLookupWhenLookupMetaIsIncompleteAndRecordFailure() {
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Collections.<String, DataSource>emptyMap(),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
         );
 
         SensitiveDataContext.SensitiveLookupMeta lookupMeta =
                 new SensitiveDataContext.SensitiveLookupMeta("sid", "pid", null, "hash");
 
         assertThrows(EncryptionException.class, () -> service.lookup(lookupMeta));
-        assertEquals("INVALID_FIELD_RULE", failureCode.get());
+        assertEquals(false, auditEvent.get().isSuccess());
+        assertEquals("INVALID_FIELD_RULE", auditEvent.get().getErrorCode());
+        assertEquals(lookupMeta, auditEvent.get().getLookupMeta());
+        assertEquals(null, auditEvent.get().getTableName());
+        assertEquals(null, auditEvent.get().getPropertyName());
+        assertEquals(null, auditEvent.get().getColumnName());
+    }
+
+    @Test
+    void shouldRecordCallerProvidedAuditAttributesWhenExplicitLookupSucceeds() throws Exception {
+        DataSource dataSource = dataSource("lookup_plaintext_custom_audit_attributes");
+        String plainValue = "13800138014";
+        Sm4CipherAlgorithm sm4 = new Sm4CipherAlgorithm("unit-test-key");
+        String cipherValue = sm4.encrypt(plainValue);
+        String lookupHash = new Sm3AssistedQueryAlgorithm().transform(plainValue);
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("create table user_account (" +
+                    "id varchar(64) primary key," +
+                    "phone varchar(255)," +
+                    "phone_hash varchar(255)," +
+                    "name varchar(64))");
+        }
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "insert into user_account (id, phone, phone_hash, name) values (?, ?, ?, ?)")) {
+            statement.setString(1, "U-114");
+            statement.setString(2, cipherValue);
+            statement.setString(3, lookupHash);
+            statement.setString(4, "alice");
+            statement.executeUpdate();
+        }
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Map.of("dataSource", dataSource),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
+        );
+
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid_09d8fcbf4d87731eb9ce135bf183957be0b2d5c7f04258dfcaadbe7619d3c755",
+                        "pid_12790c679f20d3fef946e2f8b815e3f63f93d5e0dc94a7bea0f8f5d8c0b9fcd7",
+                        "U-114",
+                        lookupHash);
+
+        assertEquals(plainValue, service.lookup(lookupMeta,
+                Collections.<String, Object>singletonMap("ticketNo", "T-001")));
+        assertEquals("T-001", auditEvent.get().getAttributes().get("ticketNo"));
+    }
+
+    @Test
+    void shouldRecordCallerProvidedAuditAttributesWhenExplicitLookupFails() {
+        AtomicReference<SensitivePlaintextAuditEvent> auditEvent = new AtomicReference<SensitivePlaintextAuditEvent>();
+        DefaultSensitivePlaintextLookupService service = new DefaultSensitivePlaintextLookupService(
+                Collections.<String, DataSource>emptyMap(),
+                metadataRegistry(),
+                algorithms(),
+                properties(),
+                auditEvent::set
+        );
+
+        SensitiveDataContext.SensitiveLookupMeta lookupMeta =
+                new SensitiveDataContext.SensitiveLookupMeta("sid_09d8fcbf4d87731eb9ce135bf183957be0b2d5c7f04258dfcaadbe7619d3c755",
+                        "pid_12790c679f20d3fef946e2f8b815e3f63f93d5e0dc94a7bea0f8f5d8c0b9fcd7",
+                        "U-115",
+                        "hash");
+
+        assertThrows(EncryptionException.class, () -> service.lookup(lookupMeta,
+                Collections.<String, Object>singletonMap("ticketNo", "T-002")));
+
+        assertEquals(false, auditEvent.get().isSuccess());
+        assertEquals("T-002", auditEvent.get().getAttributes().get("ticketNo"));
     }
 
     @Test

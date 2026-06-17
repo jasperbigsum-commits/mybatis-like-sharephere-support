@@ -25,12 +25,31 @@ import java.util.Map;
 @ConditionalOnProperty(prefix = "mybatis.encrypt", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SensitiveLookupMetaAutoConfiguration {
 
+    /**
+     * Registers the default no-op plaintext lookup audit recorder.
+     *
+     * @return no-op audit recorder used when the application does not provide one
+     */
     @Bean
     @ConditionalOnMissingBean
     public SensitivePlaintextAuditRecorder sensitivePlaintextAuditRecorder() {
         return SensitivePlaintextAuditRecorder.noOp();
     }
 
+    /**
+     * Registers the default sensitive plaintext lookup service.
+     *
+     * <p>The service is used by explicit business plaintext lookup and by internal request
+     * hydration. Internal request hydration calls {@code lookupInternal(...)} and does not emit
+     * plaintext-view audit events.</p>
+     *
+     * @param dataSources available datasource beans
+     * @param encryptMetadataRegistry encryption metadata registry
+     * @param algorithmRegistry algorithm registry for decrypting resolved ciphertext
+     * @param properties encryption properties, including SQL dialect quoting
+     * @param auditRecorder audit recorder for explicit plaintext lookup
+     * @return default plaintext lookup service
+     */
     @Bean
     @ConditionalOnBean(DataSource.class)
     @ConditionalOnMissingBean(SensitivePlaintextLookupService.class)

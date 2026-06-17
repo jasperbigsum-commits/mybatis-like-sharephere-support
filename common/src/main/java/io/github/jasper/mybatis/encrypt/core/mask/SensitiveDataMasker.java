@@ -111,7 +111,7 @@ public final class SensitiveDataMasker {
         SensitiveResponseStrategy strategy = SensitiveDataContext.strategy();
         if (strategy == SensitiveResponseStrategy.RECORDED_ONLY
                 || strategy == SensitiveResponseStrategy.RECORDED_THEN_ANNOTATED) {
-            maskRecordedReferences();
+            maskRecordedReferences(body);
         }
         if (strategy == SensitiveResponseStrategy.ANNOTATED_FIELDS
                 || strategy == SensitiveResponseStrategy.RECORDED_THEN_ANNOTATED) {
@@ -128,29 +128,24 @@ public final class SensitiveDataMasker {
      * the plugin.</p>
      */
     public void maskRecordedReferences() {
+        maskRecordedReferences(null);
+    }
+
+    private void maskRecordedReferences(Object body) {
         Collection<SensitiveDataContext.SensitiveRecord> records = SensitiveDataContext.records();
         Map<SensitiveDataContext.SensitiveRecord, String> resolvedStoredValues =
                 storedSensitiveValueResolver == null
                         ? Collections.<SensitiveDataContext.SensitiveRecord, String>emptyMap()
                         : storedSensitiveValueResolver.resolve(records);
         for (SensitiveDataContext.SensitiveRecord record : records) {
-            String storedMaskedValue = resolvedStoredValues.get(record);
-            if (StringUtils.isNotBlank(storedMaskedValue) && applyRecordedValue(record, storedMaskedValue)) {
-                attachLookupMeta(record);
+            String replacement = resolveRecordedReplacement(record, resolvedStoredValues);
+            if (StringUtils.isBlank(replacement)) {
                 continue;
             }
-            EncryptColumnRule rule = record.rule();
-            if (rule != null && rule.hasMaskedColumn() && algorithmRegistry != null) {
-                String fallbackMaskedValue = algorithmRegistry.like(rule.effectiveMaskedAlgorithm()).transform(record.value());
-                if (applyRecordedValue(record, fallbackMaskedValue)) {
-                    attachLookupMeta(record);
-                    continue;
-                }
-            }
-            FieldBinding binding = binding(record.owner().getClass(), record.propertyName()).orElse(null);
-            if (binding != null && binding.setMasked(record.owner(), record.value(), algorithmRegistry, sensitiveFieldMaskers)) {
+            if (applyRecordedValue(record, replacement)) {
                 attachLookupMeta(record);
             }
+            applyCopiedRecordedValue(body, record, replacement);
         }
     }
 
@@ -239,6 +234,121 @@ public final class SensitiveDataMasker {
         return (currentValue == null || currentValue instanceof String) && propertyReference.setValue(replacement);
     }
 
+    private String resolveRecordedReplacement(SensitiveDataContext.SensitiveRecord record,
+                                              Map<SensitiveDataContext.SensitiveRecord, String> resolvedStoredValues) {
+        String storedMaskedValue = resolvedStoredValues.get(record);
+        if (StringUtils.isNotBlank(storedMaskedValue)) {
+            return storedMaskedValue;
+        }
+        EncryptColumnRule rule = record.rule();
+        if (rule != null && rule.hasMaskedColumn() && algorithmRegistry != null) {
+            return algorithmRegistry.like(rule.effectiveMaskedAlgorithm()).transform(record.value());
+        }
+        FieldBinding binding = binding(record.owner().getClass(), record.propertyName()).orElse(null);
+        return binding == null
+                ? null
+                : binding.mask(record.owner(), record.value(), algorithmRegistry, sensitiveFieldMaskers);
+    }
+
+    private boolean applyCopiedRecordedValue(Object body,
+                                             SensitiveDataContext.SensitiveRecord record,
+                                             String replacement) {
+        if (body == null || record == null || StringUtils.isBlank(replacement)) {
+            return false;
+        }
+        IdentityHashMap<Object, Boolean> visited = new IdentityHashMap<Object, Boolean>();
+        return applyCopiedRecordedValue(body, record, replacement, visited);
+    }
+
+    private boolean applyCopiedRecordedValue(Object value,
+                                             SensitiveDataContext.SensitiveRecord record,
+                                             String replacement,
+                                             IdentityHashMap<Object, Boolean> visited) {
+        if (value == null || ObjectTraversalUtils.isSimpleValueType(value.getClass())) {
+            return false;
+        }
+        if (visited.put(value, Boolean.TRUE) != null) {
+            return false;
+        }
+        Class<?> type = value.getClass();
+        if (type.isArray()) {
+            boolean changed = false;
+            int length = Array.getLength(value);
+            for (int index = 0; index < length; index++) {
+                changed |= applyCopiedRecordedValue(Array.get(value, index), record, replacement, visited);
+            }
+            return changed;
+        }
+        if (value instanceof Iterable<?>) {
+            boolean changed = false;
+            for (Object item : (Iterable<?>) value) {
+                changed |= applyCopiedRecordedValue(item, record, replacement, visited);
+            }
+            return changed;
+        }
+        if (value instanceof Map<?, ?>) {
+            return applyCopiedMapRecordedValue((Map<?, ?>) value, record, replacement, visited);
+        }
+        if (type.getName().startsWith("java.")) {
+            return false;
+        }
+        return applyCopiedObjectRecordedValue(value, record, replacement, visited);
+    }
+
+    private boolean applyCopiedMapRecordedValue(Map<?, ?> map,
+                                                SensitiveDataContext.SensitiveRecord record,
+                                                String replacement,
+                                                IdentityHashMap<Object, Boolean> visited) {
+        boolean changed = false;
+        boolean shouldAttachLookupMeta = false;
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            Object key = entry.getKey();
+            Object value = entry.getValue();
+            if (record.propertyName().equals(key) && record.value().equals(value)) {
+                @SuppressWarnings("unchecked")
+                Map<Object, Object> writable = (Map<Object, Object>) map;
+                writable.put(key, replacement);
+                shouldAttachLookupMeta = true;
+                changed = true;
+                continue;
+            }
+            changed |= applyCopiedRecordedValue(value, record, replacement, visited);
+        }
+        if (shouldAttachLookupMeta) {
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> writable = (Map<Object, Object>) map;
+            attachLookupMetaToCopiedMap(writable, record);
+        }
+        return changed;
+    }
+
+    private boolean applyCopiedObjectRecordedValue(Object owner,
+                                                   SensitiveDataContext.SensitiveRecord record,
+                                                   String replacement,
+                                                   IdentityHashMap<Object, Boolean> visited) {
+        boolean changed = false;
+        for (Field field : allFields(owner.getClass())) {
+            if (Modifier.isStatic(field.getModifiers())) {
+                continue;
+            }
+            try {
+                field.setAccessible(true);
+                Object fieldValue = field.get(owner);
+                if (field.getName().equals(record.propertyName()) && record.value().equals(fieldValue)
+                        && String.class.equals(field.getType()) && !Modifier.isFinal(field.getModifiers())) {
+                    field.set(owner, replacement);
+                    attachLookupMetaToCopiedOwner(owner, record);
+                    changed = true;
+                    continue;
+                }
+                changed |= applyCopiedRecordedValue(fieldValue, record, replacement, visited);
+            } catch (IllegalAccessException ignore) {
+                // Best-effort fallback for copied response objects; inaccessible fields are skipped.
+            }
+        }
+        return changed;
+    }
+
     private void attachLookupMeta(SensitiveDataContext.SensitiveRecord record) {
         if (record == null || record.lookupMeta() == null) {
             return;
@@ -252,6 +362,31 @@ public final class SensitiveDataMasker {
         }
         ((SensitiveExtraInfoSupport) record.owner()).sensitiveLookupMetaStorage()
                 .put(record.propertyName(), record.lookupMeta());
+    }
+
+    private void attachLookupMetaToCopiedOwner(Object owner, SensitiveDataContext.SensitiveRecord record) {
+        if (owner instanceof SensitiveExtraInfoSupport) {
+            ((SensitiveExtraInfoSupport) owner).sensitiveLookupMetaStorage()
+                    .put(record.propertyName(), record.lookupMeta());
+        }
+    }
+
+    private void attachLookupMetaToCopiedMap(Map<Object, Object> map, SensitiveDataContext.SensitiveRecord record) {
+        if (record.lookupMeta() == null) {
+            return;
+        }
+        Object existing = map.get("sensitiveLookupMeta");
+        Map<String, SensitiveDataContext.SensitiveLookupMeta> metaByProperty;
+        if (existing instanceof Map<?, ?>) {
+            @SuppressWarnings("unchecked")
+            Map<String, SensitiveDataContext.SensitiveLookupMeta> cast =
+                    (Map<String, SensitiveDataContext.SensitiveLookupMeta>) existing;
+            metaByProperty = cast;
+        } else {
+            metaByProperty = new LinkedHashMap<String, SensitiveDataContext.SensitiveLookupMeta>();
+            map.put("sensitiveLookupMeta", metaByProperty);
+        }
+        metaByProperty.put(record.propertyName(), record.lookupMeta());
     }
 
     private List<FieldBinding> bindings(Class<?> type) {

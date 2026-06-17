@@ -48,6 +48,7 @@ public final class EncryptColumnRule {
      * @param sidCode 敏感字段来源编码
      * @param pidCode 敏感字段属性编码
      * @param lookupBusinessKey lookup meta 使用的业务主键属性名
+     * @param lookupBusinessKeyColumn lookup meta 使用的业务主键物理列名
      * @param resolvedLookupBusinessKey 业务主键是否已成功解析
      */
     public EncryptColumnRule(String property,

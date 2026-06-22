@@ -1,6 +1,7 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
+import io.github.jasper.mybatis.encrypt.algorithm.LikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.NormalizedLikeQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.algorithm.support.Sm3AssistedQueryAlgorithm;
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
@@ -282,6 +283,36 @@ class SqlConditionRewriterTest {
     }
 
     @Test
+    void shouldPreserveDirectLikeParameterWildcardPatternAroundTransformedSegment() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>(), new PrefixLikeQueryAlgorithm());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+
+        assertDirectLikeParameterPattern(rewriter, tableContext, "%AbC%", "%like:AbC%",
+                new Sm3AssistedQueryAlgorithm().transform("AbC"));
+        assertDirectLikeParameterPattern(rewriter, tableContext, "AbC%", "like:AbC%",
+                new Sm3AssistedQueryAlgorithm().transform("AbC"));
+        assertDirectLikeParameterPattern(rewriter, tableContext, "%AbC", "%like:AbC",
+                new Sm3AssistedQueryAlgorithm().transform("AbC"));
+    }
+
+    @Test
+    void shouldKeepConcatLikePatternOnExistingComposablePath() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<>(), new PrefixLikeQueryAlgorithm());
+        SqlTableContext tableContext = tableContext(sameTableRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE CONCAT('%', ?, '%')",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "segment", String.class).build()),
+                Collections.<String, Object>singletonMap("segment", "AbC"));
+
+        Expression rewritten = rewriter.rewrite(parseWhere("SELECT id FROM user_account WHERE phone LIKE CONCAT('%', ?, '%')"),
+                tableContext, context);
+
+        assertTrue(rewritten.toString().contains("`phone_like` LIKE ?"));
+        assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
+        assertEquals("like:%AbC%", context.originalValue(0));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("AbC"), context.originalValue(1));
+    }
+
+    @Test
     void shouldDegradeLikeToAssistedEqualityWhenLikeColumnIsMissing() throws Exception {
         SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>());
         SqlTableContext tableContext = tableContext(sameTableRuleWithoutLikeColumn());
@@ -342,6 +373,29 @@ class SqlConditionRewriterTest {
         assertTrue(rewritten.toString().contains(" OR "));
         assertEquals(2, context.parameterMappings().size());
         assertEquals("%abc%", context.originalValue(0));
+        assertEquals(new Sm3AssistedQueryAlgorithm().transform("AbC"), context.originalValue(1));
+    }
+
+    @Test
+    void shouldPreserveDirectLikeParameterWildcardPatternForSeparateTableLikeExists() throws Exception {
+        SqlConditionRewriter rewriter = newRewriter(new ArrayList<ProjectionMode>(), new PrefixLikeQueryAlgorithm());
+        SqlTableContext tableContext = tableContext(separateTableRule());
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", "%AbC%"));
+
+        Expression rewritten = rewriter.rewrite(
+                parseWhere("SELECT id FROM user_account WHERE phone LIKE ?"),
+                tableContext,
+                context
+        );
+
+        assertTrue(rewritten.toString().contains("EXISTS"));
+        assertTrue(rewritten.toString().contains("`phone_like` LIKE ?"));
+        assertTrue(rewritten.toString().contains("`phone` = ?"));
+        assertTrue(rewritten.toString().contains(" OR "));
+        assertEquals(2, context.parameterMappings().size());
+        assertEquals("%like:AbC%", context.originalValue(0));
         assertEquals(new Sm3AssistedQueryAlgorithm().transform("AbC"), context.originalValue(1));
     }
 
@@ -697,10 +751,14 @@ class SqlConditionRewriterTest {
     }
 
     private SqlConditionRewriter newRewriter(List<ProjectionMode> dispatchedModes) {
+        return newRewriter(dispatchedModes, new NormalizedLikeQueryAlgorithm());
+    }
+
+    private SqlConditionRewriter newRewriter(List<ProjectionMode> dispatchedModes, LikeQueryAlgorithm likeQueryAlgorithm) {
         EncryptionValueTransformer transformer = new EncryptionValueTransformer(new AlgorithmRegistry(
                 Collections.emptyMap(),
                 Collections.singletonMap("sm3", new Sm3AssistedQueryAlgorithm()),
-                Collections.singletonMap("like", new NormalizedLikeQueryAlgorithm())
+                Collections.singletonMap("like", likeQueryAlgorithm)
         ));
         return new SqlConditionRewriter(
                 transformer,
@@ -730,6 +788,24 @@ class SqlConditionRewriterTest {
         Select select = (Select) statement;
         PlainSelect plainSelect = (PlainSelect) select;
         return plainSelect.getHaving();
+    }
+
+    private void assertDirectLikeParameterPattern(SqlConditionRewriter rewriter,
+                                                  SqlTableContext tableContext,
+                                                  String input,
+                                                  String expectedLikeValue,
+                                                  String expectedAssistedValue) throws Exception {
+        SqlRewriteContext context = rewriteContext("SELECT id FROM user_account WHERE phone LIKE ?",
+                Collections.singletonList(new ParameterMapping.Builder(new Configuration(), "phone", String.class).build()),
+                Collections.<String, Object>singletonMap("phone", input));
+
+        Expression rewritten = rewriter.rewrite(parseWhere("SELECT id FROM user_account WHERE phone LIKE ?"),
+                tableContext, context);
+
+        assertTrue(rewritten.toString().contains("`phone_like` LIKE ?"));
+        assertTrue(rewritten.toString().contains("`phone_hash` = ?"));
+        assertEquals(expectedLikeValue, context.originalValue(0));
+        assertEquals(expectedAssistedValue, context.originalValue(1));
     }
 
     private SqlTableContext tableContext(EncryptColumnRule... rules) {
@@ -854,5 +930,13 @@ class SqlConditionRewriterTest {
 
     private String quote(String identifier) {
         return "`" + identifier + "`";
+    }
+
+    private static final class PrefixLikeQueryAlgorithm implements LikeQueryAlgorithm {
+
+        @Override
+        public String transform(String plainText) {
+            return plainText == null ? null : "like:" + plainText;
+        }
     }
 }

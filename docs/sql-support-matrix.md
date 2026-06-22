@@ -30,7 +30,7 @@ through real MyBatis execution tests.
 | Equality predicates `=` / `!=` | Supported | Same-table fields use assisted query columns when configured, otherwise `storageColumn`; separate-table fields rewrite directly to the main-table reference/hash column. |
 | Encrypted-column equality `a.phone = a.backup_phone` | Supported | Compares same-table assisted columns or separate-table main reference columns when both sides use the same assisted query algorithm, including aliased and parenthesized column references. |
 | `JOIN ... ON` predicates | Supported | Runs encrypted predicates through the same rewrite pipeline as `WHERE`, including nested `EXISTS` subqueries and separate-table encrypted-column equality. |
-| `LIKE` | Supported | Requires `likeQueryColumn`. |
+| `LIKE` | Supported | Requires `likeQueryColumn`. Direct `LIKE ?` parameters preserve leading/trailing `%` and `_` wildcards while transforming the inner text segment; `LIKE CONCAT(...)` keeps the existing composable-expression path. |
 | `LIKE` without `likeQueryColumn` | Supported as equality fallback | If `assistedQueryColumn` is configured, the condition is rewritten as assisted/hash equality. This is exact-match fallback only, not fuzzy matching. |
 | `COUNT(encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields rewrite to `assistedQueryColumn`; separate-table fields count the main-table reference column. |
 | `COUNT(DISTINCT encrypted_column)` | Supported with assisted/ref rewrite | Same-table fields use `assistedQueryColumn`; separate-table fields use the main-table reference column. |
@@ -68,7 +68,7 @@ Use these examples as low-cost templates during mapper review.
 | compare two encrypted fields | `where phone = backup_phone` | rewritten to assisted columns or separate-table reference columns |
 | lookup by multiple IDs / phones | `where phone in (...)` | each value can be transformed through the same helper path |
 | lookup by comma-separated IDs / phones | `where find_in_set(phone, #{phones})` | exact membership only; candidates are transformed to assisted/hash values one by one |
-| fuzzy lookup | `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm`; without `likeQueryColumn`, only assisted/hash exact fallback is available |
+| fuzzy lookup | `where phone like #{keyword}` or `where phone like concat('%', #{keyword}, '%')` | requires `likeQueryColumn` and `likeQueryAlgorithm`; direct `LIKE ?` parameters preserve `%` / `_` wildcards in the bound value, while `CONCAT(...)` keeps the existing composable-expression path |
 | return decrypted entity | `select id, phone from user_account` | logical projection can be mapped back to the entity property |
 | return flat DTO | explicit aliases plus `@EncryptResultHint` | keeps projected source columns traceable |
 | return only masked display value | select `maskedColumn` directly | avoids unnecessary decrypt-then-mask work |

@@ -190,13 +190,14 @@ This component keeps the core `crm-vue` behavior:
 - clicking the eye icon calls an explicit plaintext-view API
 - focusing a masked field enters `changed` state and clears the old masked text
 - `revealed` is only a frontend display state; saving still treats it as unchanged and submits `sensitiveSubmitMeta`
+- clicking the eye button must stop default focus, otherwise the input `focus` handler runs first and incorrectly turns the masked value into edit mode
 
 ```vue
 <template>
   <a-input v-bind="inputAttrs" v-model:value="inputValue" @focus="onFocus">
     <template #suffix>
       <a-tooltip v-if="showLookupButton" title="View plaintext">
-        <span class="sensitive-eye" @click.stop="onToggleEye">
+        <span class="sensitive-eye" @mousedown.prevent.stop @click.stop="onToggleEye">
           <EyeInvisibleOutlined v-if="isRevealed" />
           <EyeOutlined v-else />
         </span>
@@ -391,13 +392,6 @@ export default defineComponent({
 </style>
 ```
 
-For JEECG / Vben-style projects, replace these parts with project-local equivalents:
-
-- replace `axios.post(...)` with your `defHttp.post(...)`
-- replace `@/utils/sensitive/transform` with `'/@/utils/sensitive/transform'`
-- replace `@ant-design/icons-vue` with your existing `Icon` component if preferred
-- wire message feedback through `useMessage()` in `fetchPlainText()` if your project uses it
-
 ## 4. Plain Form Usage
 
 If you do not customize `BasicForm`, call the two transform helpers in the page:
@@ -484,9 +478,11 @@ async function setFieldsValue(values: Record<string, any>): Promise<void> {
 }
 ```
 
-### 5.4 Preprocess Before Submit
+### 5.4 Preprocess Once Before Submit
 
-In `validate()`, `getFieldsValue()`, and `handleSubmit()` paths that return form values, call:
+In `validate()`, `getFieldsValue()`, and `handleSubmit()` paths that return form values, call preprocessing only once.
+
+Recommended shape:
 
 ```ts
 import { preprocessSensitiveSubmitValues } from '@/utils/sensitive/transform';
@@ -495,7 +491,7 @@ const values = await formEl.validate();
 return preprocessSensitiveSubmitValues(values, unref(getSchema), unref(getProps).sensitiveSubmitMode);
 ```
 
-Avoid calling preprocessing multiple times in the same submit path. Put it as close as possible to the value returned to the business submit handler.
+Do not call preprocessing again inside `handleSubmit()` after `validate()` already returned a processed payload. That will drop `sensitiveSubmitMeta` a second time.
 
 ## 6. Form Schema Example
 
@@ -601,3 +597,25 @@ await axios.post('/users', params, {
 ```
 
 The backend hydrates the bracketed structure back into the original plaintext field before controller binding.
+
+
+## 9. `JSensitiveText` Read-only Display
+
+For a normal page that only needs to show a masked sensitive value and reveal plaintext on demand, use `JSensitiveText`. It does not enter edit mode and does not participate in submit preprocessing; it only manages its own reveal/hide state.
+
+```vue
+<script setup lang="ts">
+import JSensitiveText from '@/components/sensitive/JSensitiveText.vue';
+</script>
+
+<template>
+  <JSensitiveText :value="detail.phone" />
+</template>
+```
+
+The plaintext lookup request sends `sid`, `pid`, `vid`, and `hash`, plus:
+
+- `des`: the current masked value
+- `path`: the current route path
+
+If the value is a plain string, it only renders text and does not show the eye icon.

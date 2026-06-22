@@ -4,7 +4,9 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.JdbcParameter;
 import net.sf.jsqlparser.expression.StringValue;
+import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
 import net.sf.jsqlparser.schema.Column;
 
@@ -51,8 +53,15 @@ final class SqlLikeConditionRewriter {
         if (!rule.hasLikeQueryColumn()) {
             return rewriteLikeWithoutLikeColumn(expression, resolution, rule, queryOperand, assistedCandidate, context);
         }
+        // 只在原始右值就是 `?` / `( ? )` 时拆分绑定值里的 % / _ 模式；CONCAT 继续走既有可组合表达式路径。
+        LikePattern likePattern = isDirectLikeParameter(expression.getRightExpression())
+                ? directParameterLikePattern(queryOperand)
+                : null;
+        String likeValue = likePattern == null
+                ? valueTransformer.transformLike(rule, queryOperand.value())
+                : likePattern.wrap(valueTransformer.transformLike(rule, likePattern.segment()));
         Expression likeValueExpression = operandSupport.buildComposableQueryExpression(queryOperand, context,
-                valueTransformer.transformLike(rule, queryOperand.value()), MaskingMode.MASKED);
+                likeValue, MaskingMode.MASKED);
         Expression assistedFallbackExpression = buildAssistedFallbackExpression(
                 expression, rule, queryOperand, assistedCandidate, context);
         context.markChanged();
@@ -160,6 +169,64 @@ final class SqlLikeConditionRewriter {
 
     private boolean isLikeWildcard(char ch) {
         return ch == '%' || ch == '_';
+    }
+
+    private LikePattern directParameterLikePattern(QueryOperand queryOperand) {
+        if (!queryOperand.parameterized() || queryOperand.parameterIndexes().size() != 1 || queryOperand.value() == null) {
+            return null;
+        }
+        String value = String.valueOf(queryOperand.value());
+        int start = 0;
+        int end = value.length();
+        while (start < end && isLikeWildcard(value.charAt(start))) {
+            start++;
+        }
+        while (end > start && isLikeWildcard(value.charAt(end - 1))) {
+            end--;
+        }
+        if (start == 0 && end == value.length()) {
+            return null;
+        }
+        if (start >= end) {
+            return null;
+        }
+        for (int index = start; index < end; index++) {
+            if (isLikeWildcard(value.charAt(index))) {
+                return null;
+            }
+        }
+        return new LikePattern(value.substring(0, start), value.substring(start, end), value.substring(end));
+    }
+
+    private boolean isDirectLikeParameter(Expression expression) {
+        if (expression instanceof JdbcParameter) {
+            return true;
+        }
+        if (expression instanceof Parenthesis) {
+            return isDirectLikeParameter(((Parenthesis) expression).getExpression());
+        }
+        return false;
+    }
+
+    private static final class LikePattern {
+
+        private final String prefix;
+        private final String segment;
+        private final String suffix;
+
+        private LikePattern(String prefix, String segment, String suffix) {
+            this.prefix = prefix;
+            this.segment = segment;
+            this.suffix = suffix;
+        }
+
+        private String segment() {
+            return segment;
+        }
+
+        private String wrap(String transformedSegment) {
+            return transformedSegment == null ? null : prefix + transformedSegment + suffix;
+        }
     }
 
     private static final class AssistedCandidate {

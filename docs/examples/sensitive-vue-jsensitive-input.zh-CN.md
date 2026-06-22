@@ -190,13 +190,14 @@ function isLookupMeta(value: unknown): value is SensitiveLookupMeta {
 - 点击眼睛图标时调用显式明文查看接口
 - 聚焦脱敏态字段时进入 `changed`，清空旧脱敏值，避免用户误以为是在编辑明文
 - `revealed` 只是前端展示态，保存时仍按未修改字段提交 `sensitiveSubmitMeta`
+- 点击眼睛按钮时需要阻止默认聚焦，否则会先触发输入框 `focus`，把脱敏值误切成编辑态
 
 ```vue
 <template>
   <a-input v-bind="inputAttrs" v-model:value="inputValue" @focus="onFocus">
     <template #suffix>
       <a-tooltip v-if="showLookupButton" title="查看原文">
-        <span class="sensitive-eye" @click.stop="onToggleEye">
+        <span class="sensitive-eye" @mousedown.prevent.stop @click.stop="onToggleEye">
           <EyeInvisibleOutlined v-if="isRevealed" />
           <EyeOutlined v-else />
         </span>
@@ -391,16 +392,9 @@ export default defineComponent({
 </style>
 ```
 
-如果你的项目仍使用 JEECG / Vben 风格路径，可以把上面这些点替换回项目内实现：
+## 4. Plain Form Usage
 
-- `axios.post(...)` 换成项目自己的 `defHttp.post(...)`
-- `@/utils/sensitive/transform` 换成 `'/@/utils/sensitive/transform'`
-- `@ant-design/icons-vue` 换成项目已有的 `Icon` 组件
-- 消息提示可以接入 `useMessage()`，在 `fetchPlainText()` 失败时提示用户
-
-## 4. 普通表单页面用法
-
-不改造 `BasicForm` 时，可以在页面里手动调用两个工具函数：
+If you do not customize `BasicForm`, call the two transform helpers in the page:
 
 ```vue
 <script setup lang="ts">
@@ -432,21 +426,21 @@ async function save() {
 
 <template>
   <a-form :model="formModel">
-    <a-form-item label="手机号" name="phone">
+    <a-form-item label="Phone" name="phone">
       <JSensitiveInput v-model:value="formModel.phone" />
     </a-form-item>
-    <a-button type="primary" @click="save">保存</a-button>
+    <a-button type="primary" @click="save">Save</a-button>
   </a-form>
 </template>
 ```
 
-## 5. JEECG `BasicForm` 改造点
+## 5. JEECG `BasicForm` Integration Points
 
-如果你希望像 `crm-vue` 一样在 `BasicForm` 中统一处理，按下面 4 个位置接入。
+To handle this centrally like `crm-vue`, integrate at these four points.
 
-### 5.1 注册组件
+### 5.1 Register The Component
 
-在 `componentMap.ts` 中加入：
+Add this in `componentMap.ts`:
 
 ```ts
 import JSensitiveInput from '@/components/sensitive/JSensitiveInput.vue';
@@ -454,37 +448,41 @@ import JSensitiveInput from '@/components/sensitive/JSensitiveInput.vue';
 componentMap.set('JSensitiveInput', JSensitiveInput);
 ```
 
-如果你的项目有 `ComponentType` 联合类型，也把 `'JSensitiveInput'` 加进去。
+If your project has a `ComponentType` union, add `'JSensitiveInput'` there too.
 
-### 5.2 增加表单属性
+### 5.2 Add A Form Prop
 
-在 `props.ts` 或表单 props 定义中加入：
+Add this in `props.ts` or your form props definition:
 
 ```ts
+import type { PropType } from 'vue';
+
 sensitiveSubmitMode: {
   type: String as PropType<'omit' | 'meta'>,
   default: 'meta',
 },
 ```
 
-推荐默认值使用 `meta`。`omit` 只适合不需要后端自动还原未修改敏感字段的提交链路。
+Prefer `meta` as the default. `omit` is only suitable for submit paths that do not need backend hydration for unchanged sensitive fields.
 
-### 5.3 表单赋值时 hydrate
+### 5.3 Hydrate During Form Assignment
 
-在 `setFieldsValue` 入口处增加：
+Add this at the beginning of `setFieldsValue`:
 
 ```ts
 import { hydrateSensitiveFormValues } from '@/utils/sensitive/transform';
 
 async function setFieldsValue(values: Record<string, any>): Promise<void> {
   values = hydrateSensitiveFormValues(values, unref(getSchema));
-  // 原有 setFieldsValue 逻辑继续执行
+  // Continue with existing setFieldsValue logic.
 }
 ```
 
-### 5.4 表单提交前 preprocess
+### 5.4 Preprocess Once Before Submit
 
-在 `validate()`、`getFieldsValue()`、`handleSubmit()` 这些会返回表单值的位置，统一调用：
+In `validate()`, `getFieldsValue()`, and `handleSubmit()` paths that return form values, call preprocessing only once.
+
+Recommended shape:
 
 ```ts
 import { preprocessSensitiveSubmitValues } from '@/utils/sensitive/transform';
@@ -493,24 +491,24 @@ const values = await formEl.validate();
 return preprocessSensitiveSubmitValues(values, unref(getSchema), unref(getProps).sensitiveSubmitMode);
 ```
 
-注意不要在同一条提交链路重复调用多次。建议把预处理放在最靠近“返回给业务 submit handler”的位置。
+Do not call preprocessing again inside `handleSubmit()` after `validate()` already returned a processed payload. That will drop `sensitiveSubmitMeta` a second time.
 
-## 6. 表单 schema 示例
+## 6. Form Schema Example
 
 ```ts
 export const formSchema = [
   {
     field: 'phone',
-    label: '手机号',
+    label: 'Phone',
     component: 'JSensitiveInput',
     componentProps: {
-      placeholder: '请输入手机号',
+      placeholder: 'Enter phone number',
     },
   },
 ];
 ```
 
-使用 `BasicForm` 时：
+With `BasicForm`:
 
 ```ts
 const [registerForm, { setFieldsValue, validate }] = useForm({
@@ -529,9 +527,9 @@ async function handleSubmit() {
 }
 ```
 
-## 7. 响应数据要求
+## 7. Response Shape
 
-详情接口需要返回脱敏展示值和同名 `sensitiveLookupMeta`：
+The detail API should return the masked display value and same-field `sensitiveLookupMeta`:
 
 ```json
 {
@@ -549,7 +547,7 @@ async function handleSubmit() {
 }
 ```
 
-`hydrateSensitiveFormValues(...)` 会把它转换成 `JSensitiveInput` 需要的对象：
+`hydrateSensitiveFormValues(...)` converts it into the object expected by `JSensitiveInput`:
 
 ```ts
 {
@@ -567,9 +565,9 @@ async function handleSubmit() {
 }
 ```
 
-## 8. form-urlencoded 提交
+## 8. form-urlencoded Submit
 
-如果保存接口使用 `application/x-www-form-urlencoded`，`preprocessSensitiveSubmitValues(...)` 得到对象后可以这样转换：
+If the save endpoint uses `application/x-www-form-urlencoded`, convert the preprocessed object like this:
 
 ```ts
 const payload = preprocessSensitiveSubmitValues(values, formSchema, 'meta');
@@ -598,5 +596,26 @@ await axios.post('/users', params, {
 });
 ```
 
-后端会在 controller 绑定前把 bracket 结构内部还原为原字段明文。
+The backend hydrates the bracketed structure back into the original plaintext field before controller binding.
 
+
+## 9. `JSensitiveText` 只读展示
+
+如果普通页面只需要展示脱敏值，并在点击眼睛图标时按同一套 `lookupMeta` 查询明文，可以使用 `JSensitiveText`。它不会进入编辑态，也不会参与提交预处理，只维护自身的显示/隐藏状态。
+
+```vue
+<script setup lang="ts">
+import JSensitiveText from '@/components/sensitive/JSensitiveText.vue';
+</script>
+
+<template>
+  <JSensitiveText :value="detail.phone" />
+</template>
+```
+
+明文查询请求会在 `sid`、`pid`、`vid`、`hash` 之外，额外携带：
+
+- `des`：当前脱敏值
+- `path`：当前页面路由地址
+
+传入普通字符串时，只展示文本，不显示眼睛图标。

@@ -873,6 +873,21 @@ class SqlRewriteEngineTest {
         assertEquals(2, result.maskedParameters().size());
     }
 
+    @Test
+    void shouldRewriteDirectLikeParameterWildcardPatternToConsistentLikeAndAssistedValues() {
+        Configuration configuration = new Configuration();
+        DatabaseEncryptionProperties properties = sampleProperties();
+        SqlRewriteEngine engine = new SqlRewriteEngine(
+                new EncryptMetadataRegistry(properties, new AnnotationEncryptMetadataLoader()),
+                sampleAlgorithms(),
+                properties
+        );
+
+        assertDirectLikePattern(engine, configuration, "%AbC%", "%abc%", new Sm3AssistedQueryAlgorithm().transform("AbC"));
+        assertDirectLikePattern(engine, configuration, "AbC%", "abc%", new Sm3AssistedQueryAlgorithm().transform("AbC"));
+        assertDirectLikePattern(engine, configuration, "%AbC", "%abc", new Sm3AssistedQueryAlgorithm().transform("AbC"));
+    }
+
     /**
      * 测试目的：验证不支持或高风险的加密字段 SQL 会按安全策略快速失败。
      * 测试场景：构造 ORDER BY、聚合、范围条件、歧义列或非法操作数等 SQL，断言异常类型和错误码符合约束。
@@ -4137,5 +4152,27 @@ class SqlRewriteEngineTest {
             index += token.length();
         }
         return count;
+    }
+
+    private void assertDirectLikePattern(SqlRewriteEngine engine,
+                                         Configuration configuration,
+                                         String input,
+                                         String expectedLikeValue,
+                                         String expectedAssistedValue) {
+        BoundSql boundSql = new BoundSql(
+                configuration,
+                "SELECT u.id FROM user_account u WHERE u.phone LIKE ?",
+                List.of(new ParameterMapping.Builder(configuration, "phoneLike", String.class).build()),
+                Map.of("phoneLike", input)
+        );
+
+        RewriteResult result = engine.rewrite(mappedStatement(configuration, SqlCommandType.SELECT, Map.class), boundSql);
+
+        assertTrue(result.changed());
+        assertTrue(result.sql().contains("u.`phone_hash` = ?") || result.sql().contains("u.phone_hash = ?"));
+        assertTrue(result.sql().contains("u.`phone_like` LIKE ?") || result.sql().contains("u.phone_like LIKE ?"));
+        result.applyTo(boundSql);
+        assertEquals(expectedLikeValue, boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(0).getProperty()));
+        assertEquals(expectedAssistedValue, boundSql.getAdditionalParameter(boundSql.getParameterMappings().get(1).getProperty()));
     }
 }

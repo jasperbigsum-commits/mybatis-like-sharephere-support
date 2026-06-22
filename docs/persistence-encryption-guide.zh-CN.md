@@ -358,7 +358,7 @@ UserAccount selectById(@Param("id") Long id);
 - `SELECT`
 - 等值查询
 - `IN`
-- `LIKE`（配置 `likeQueryColumn` 时支持模糊查询；只有 `assistedQueryColumn` 时退化为精确 hash 等值查询）
+- `LIKE`（配置 `likeQueryColumn` 时支持模糊查询；直接 `LIKE ?` 会保留参数值首尾 `%` / `_` 通配符并只转换中间文本片段；只有 `assistedQueryColumn` 时退化为精确 hash 等值查询）
 - 加密字段最外层 `MAX` / `FIRST`（按技术值执行并输出警告）
 
 当前明确 fail-fast：

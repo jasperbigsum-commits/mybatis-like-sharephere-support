@@ -281,7 +281,7 @@ Main supported categories:
 - `SELECT`
 - equality lookup
 - `IN`
-- `LIKE` (`likeQueryColumn` for fuzzy matching; exact assisted/hash fallback when only `assistedQueryColumn` exists)
+- `LIKE` (`likeQueryColumn` for fuzzy matching; direct `LIKE ?` preserves leading/trailing `%` / `_` wildcards in the parameter value and transforms only the inner text segment; exact assisted/hash fallback when only `assistedQueryColumn` exists)
 - top-level `MAX` / `FIRST` on encrypted fields with technical-value warning behavior
 
 Intentional fail-fast categories:

@@ -50,7 +50,7 @@ Read this when you need to understand:
 
 ### 3. Response Masking
 
-- [Sensitive Response Guide](docs/sensitive-response-guide.zh-CN.md)
+- [Sensitive Response Guide](docs/sensitive-response-guide.en.md)
 
 Read this when you need:
 
@@ -60,32 +60,25 @@ Read this when you need:
 - custom field maskers or reuse of `likeAlgorithm`
 - annotation attribute reference, custom masker examples, and strategy selection
 
-### 3.1 Logsafe Extension
+### 4. Logsafe Extension
 
-The current version also adds a lightweight `logsafe` extension. Application code can call the
-static facade directly; the Spring Boot 3 starter installs the registered algorithms into the
-default log masker during startup:
+- [日志脱敏指南（中文）](docs/logsafe-guide.zh-CN.md)
+- [Logsafe Guide (English)](docs/logsafe-guide.en.md)
 
-- `SafeLog.of(obj)` creates a detached masked copy for logging and does not mutate the source object
-- `SafeLog.of(obj, hint)` accepts an explicit semantic hint
-- `SafeLog.kv(key, value)` applies fallback masking to common log keys such as `password`, `token`,
-  `phone`, `email`, `idCard`, and `bankCard`
-- `LogsafeTextMasker` provides a terminal text-masking SPI for third-party logs, exception messages,
-  gateway logs, or exception-reporting SDKs
-- Logback terminal injection: when the Spring Boot 3 starter detects Logback, it automatically
-  attaches a terminal masking filter to existing appenders
-- logsafe MDC context automatically writes and clears `traceId` / `requestId` for Spring MVC requests
-- logsafe async propagation reuses a `TaskDecorator` to copy MDC into async tasks and restore the
-  worker thread state afterward
+Read this when you need:
 
-This extension reuses existing `@SensitiveField` metadata and registered LIKE masking algorithms
-without changing controller-boundary response masking behavior. Outside Spring, `SafeLog` still
-uses built-in fallback rules for common sensitive fields.
-Automatic terminal injection currently supports Logback and can be disabled with
-`mybatis.encrypt.logsafe.terminal.enabled=false`. Log4j2, JUL, gateway logs, or exception-reporting
-SDKs can still call `LogsafeTextMasker` explicitly from a custom adapter.
+- `SafeLog.of(obj)` or `SafeLog.kv(key, value)` for explicit safe application logs
+- `LogsafeTextMasker` for third-party logs, exception messages, gateway logs, or reporting SDKs
+- Spring Boot starter behavior for the Logback terminal filter, MDC trace context, and async MDC propagation
+- configuration keys, code examples, boundaries, and troubleshooting guidance
 
-### 4. Historical Migration
+`logsafe` is an independent logging-safety extension. It reuses existing `@SensitiveField` metadata
+and registered LIKE masking algorithms without changing SQL rewrite, result decryption, or
+controller-boundary response masking. The Spring Boot 2 / 3 starters auto-configure the shared API;
+when Logback is detected, they attach a terminal safety-net filter that can be disabled with
+`mybatis.encrypt.logsafe.terminal.enabled=false`.
+
+### 5. Historical Migration
 
 - [存量迁移指南（中文）](docs/migration-guide.zh-CN.md)
 - [Migration Guide (English)](docs/migration-guide.en.md)
@@ -110,7 +103,8 @@ If you want to:
 
 - get started quickly: read [Quick Start (English)](docs/quick-start.en.md)
 - understand encrypted persistence and query rewrite: read [Persistence Encryption Guide (English)](docs/persistence-encryption-guide.en.md)
-- mask controller responses: read [Sensitive Response Guide](docs/sensitive-response-guide.zh-CN.md)
+- mask controller responses: read [Sensitive Response Guide](docs/sensitive-response-guide.en.md)
+- mask logs, exception messages, and third-party log output: read [Logsafe Guide (English)](docs/logsafe-guide.en.md)
 - migrate historical plaintext data: read [Migration Guide (English)](docs/migration-guide.en.md)
 - execute a migration during a production window: read [Migration Production Runbook (English)](docs/migration-production-runbook.en.md)
 - check SQL support boundaries: read [SQL Support Matrix](docs/sql-support-matrix.md)

@@ -61,25 +61,20 @@
 
 ### 4. 日志脱敏扩展
 
-`logsafe` 是独立的日志安全扩展，不影响 SQL 改写、结果解密或 controller 脱敏。
-业务代码可以直接通过静态门面调用；Spring Boot starter 会把已注册算法和末端兜底能力接进来：
+- [日志脱敏指南（中文）](docs/logsafe-guide.zh-CN.md)
+- [Logsafe Guide (English)](docs/logsafe-guide.en.md)
 
-- 主动脱敏入口：
-  - `SafeLog.of(obj)`：对对象日志做脱敏副本输出，不修改原对象
-  - `SafeLog.of(obj, hint)`：允许显式传入语义提示
-  - `SafeLog.kv(key, value)`：对 `password`、`token`、`phone`、`email`、`idCard`、`bankCard` 等常见日志键做兜底脱敏
-- 末端兜底 SPI：
-  - `LogsafeTextMasker`：用于第三方日志、异常消息、网关日志或异常上报 SDK
-  - Spring Boot 3 + Logback：检测到 Logback 时，会自动给现有 appender 挂载末端掩码 filter
-- 运行时上下文：
-  - `logsafe` MDC 上下文：对 Spring MVC 请求自动写入并清理 `traceId` / `requestId`
-  - `logsafe` 异步传播：通过 `TaskDecorator` 传播 MDC 到异步任务并在执行后恢复线程原状态
+适合：
 
-该扩展复用现有 `@SensitiveField` 和已注册的 LIKE 脱敏算法，不改变原有 controller 边界响应脱敏行为。
-在非 Spring 场景下，`SafeLog` 仍会使用内置兜底规则做常见字段脱敏。
-Spring Boot 2 可以直接使用 `SafeLog` 和 `LogsafeTextMasker` 的通用 API；当前自动末端注入先支持 Spring Boot 3 的 Logback 场景，且可通过 `mybatis.encrypt.logsafe.terminal.enabled=false` 关闭。Log4j2、JUL、网关日志或异常上报 SDK 可在自定义适配器中显式调用 `LogsafeTextMasker`。
+- 想用 `SafeLog.of(obj)`、`SafeLog.kv(key, value)` 主动输出脱敏日志
+- 想把 `LogsafeTextMasker` 接到第三方日志、异常消息、网关日志或异常上报 SDK
+- 想理解 Spring Boot starter 的 Logback 末端 filter、MDC trace context 和异步 MDC 传播
+- 需要配置项、示例代码、适用边界和排查建议
 
-### 4. 存量迁移
+`logsafe` 是独立的日志安全扩展，复用现有 `@SensitiveField` 和已注册的 LIKE 脱敏算法，不影响 SQL 改写、结果解密或 controller 边界响应脱敏。
+Spring Boot 2 / 3 starter 会自动装配通用 API；检测到 Logback 时会挂载末端兜底 filter，可通过 `mybatis.encrypt.logsafe.terminal.enabled=false` 关闭。
+
+### 5. 存量迁移
 
 - [存量迁移指南（中文）](docs/migration-guide.zh-CN.md)
 - [Migration Guide (English)](docs/migration-guide.en.md)
@@ -114,6 +109,7 @@ Spring Boot 2 可以直接使用 `SafeLog` 和 `LogsafeTextMasker` 的通用 API
 - 先跑通最小可用链路：看 [快速使用指南（中文）](docs/quick-start.zh-CN.md)
 - 理解字段如何落密文、如何支持查询：看 [持久层加密指南（中文）](docs/persistence-encryption-guide.zh-CN.md)
 - 让对外接口自动返回脱敏值：看 [脱敏响应指南](docs/sensitive-response-guide.zh-CN.md)
+- 让日志、异常消息和第三方日志出口脱敏：看 [日志脱敏指南（中文）](docs/logsafe-guide.zh-CN.md)
 - 处理历史数据：看 [存量迁移指南（中文）](docs/migration-guide.zh-CN.md)
 - 按生产窗口执行迁移：看 [迁移生产上线操作手册（中文）](docs/migration-production-runbook.zh-CN.md)
 - 判断某种 SQL 是否支持：看 [SQL Support Matrix](docs/sql-support-matrix.md)

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support</artifactId>
+        <version>1.0.4-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>mybatis-like-sharephere-support-bom</artifactId>
+    <packaging>pom</packaging>
+    <name>mybatis-like-sharephere-support-bom</name>
+    <description>BOM for mybatis-like-sharephere-support starter and migration modules.</description>
+    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
+
+    <properties>
+        <maven.compiler.release>8</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.github.jasperbigsum-commits</groupId>
+                <artifactId>mybatis-like-sharephere-support-migration</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.jasperbigsum-commits</groupId>
+                <artifactId>mybatis-like-sharephere-support-logsafe</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.jasperbigsum-commits</groupId>
+                <artifactId>mybatis-like-sharephere-support-spring-support</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.jasperbigsum-commits</groupId>
+                <artifactId>mybatis-like-sharephere-support-spring2-starter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.jasperbigsum-commits</groupId>
+                <artifactId>mybatis-like-sharephere-support-spring3-starter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

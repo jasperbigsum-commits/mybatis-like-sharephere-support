@@ -1,0 +1,287 @@
+package io.github.jasper.mybatis.encrypt.migration.jdbc;
+
+import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationColumnPlan;
+import io.github.jasper.mybatis.encrypt.migration.EntityMigrationPlan;
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursor;
+import io.github.jasper.mybatis.encrypt.migration.MigrationCursorException;
+import io.github.jasper.mybatis.encrypt.migration.MigrationErrorCode;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRange;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRangeReader;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecord;
+import io.github.jasper.mybatis.encrypt.migration.MigrationRecordReader;
+import io.github.jasper.mybatis.encrypt.config.SqlDialect;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * JDBC reader that pages source rows by ordered stable cursor columns.
+ */
+public class JdbcMigrationRecordReader implements MigrationRecordReader, MigrationRangeReader {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcMigrationRecordReader.class);
+
+    private final DatabaseEncryptionProperties properties;
+
+    /**
+     * jdbc迁移记录读取器
+     * @param properties 配置
+     */
+    public JdbcMigrationRecordReader(DatabaseEncryptionProperties properties) {
+        this.properties = properties;
+    }
+
+    @Override
+    public MigrationRange readRange(Connection connection, EntityMigrationPlan plan) throws SQLException {
+        long totalRows = countRows(connection, plan);
+        if (totalRows == 0L) {
+            return new MigrationRange(0L, null, null, java.util.Collections.<String>emptyList());
+        }
+        MigrationCursor rangeStart = loadBoundaryCursor(connection, plan, true);
+        MigrationCursor rangeEnd = loadBoundaryCursor(connection, plan, false);
+        List<String> cursorJavaTypes = resolveCursorJavaTypes(rangeStart, rangeEnd);
+        return new MigrationRange(totalRows, rangeStart, rangeEnd, cursorJavaTypes);
+    }
+
+    @Override
+    public List<MigrationRecord> readBatch(Connection connection,
+                                           EntityMigrationPlan plan,
+                                           MigrationCursor lastProcessedCursor)
+            throws SQLException {
+        Set<String> selectColumns = new LinkedHashSet<>(plan.getCursorColumns());
+        for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
+            selectColumns.add(columnPlan.getSourceColumn());
+        }
+        for (io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+            selectColumns.add(jsonFieldPlan.getSourceColumn());
+        }
+        String sql = buildSelectSql(plan, selectColumns, lastProcessedCursor != null);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            int parameterIndex = bindCheckpoint(statement, lastProcessedCursor);
+            statement.setInt(parameterIndex, plan.getBatchSize());
+            logCursorDebug("migration-read-batch", sql, lastProcessedCursor);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                List<MigrationRecord> records = new ArrayList<>();
+                while (resultSet.next()) {
+                    Map<String, Object> cursorValues = new LinkedHashMap<>();
+                    for (String cursorColumn : plan.getCursorColumns()) {
+                        Object cursorValue = resultSet.getObject(cursorColumn);
+                        if (cursorValue == null) {
+                            throw new MigrationCursorException(MigrationErrorCode.CURSOR_VALUE_MISSING,
+                                    "Cursor column must not be null during migration: " + cursorColumn);
+                        }
+                        cursorValues.put(cursorColumn, cursorValue);
+                    }
+                Map<String, Object> values = new LinkedHashMap<>();
+                for (EntityMigrationColumnPlan columnPlan : plan.getColumnPlans()) {
+                    values.put(columnPlan.getSourceColumn(), resultSet.getObject(columnPlan.getSourceColumn()));
+                }
+                for (io.github.jasper.mybatis.encrypt.migration.EntityMigrationJsonFieldPlan jsonFieldPlan : plan.getJsonFieldPlans()) {
+                    values.put(jsonFieldPlan.getSourceColumn(), resultSet.getObject(jsonFieldPlan.getSourceColumn()));
+                }
+                records.add(new MigrationRecord(new MigrationCursor(cursorValues), values));
+            }
+                return records;
+            }
+        }
+    }
+
+    /**
+     * Compatibility overload for callers that still pass one single cursor scalar.
+     *
+     * @param connection open JDBC connection
+     * @param plan migration plan
+     * @param lastProcessedCursor inclusive checkpoint boundary on the cursor
+     * @return next batch
+     * @throws SQLException when JDBC read fails
+     * @deprecated use {@link #readBatch(Connection, EntityMigrationPlan, MigrationCursor)}
+     */
+    @Deprecated
+    public List<MigrationRecord> readBatch(Connection connection, EntityMigrationPlan plan, Object lastProcessedCursor)
+            throws SQLException {
+        return readBatch(connection, plan, toCursor(plan, lastProcessedCursor));
+    }
+
+    private long countRows(Connection connection, EntityMigrationPlan plan) throws SQLException {
+        String sql = "select count(1) from " + quote(plan.getTableName());
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            resultSet.next();
+            return resultSet.getLong(1);
+        }
+    }
+
+    private MigrationCursor loadBoundaryCursor(Connection connection, EntityMigrationPlan plan, boolean ascending)
+            throws SQLException {
+        StringBuilder sql = new StringBuilder("select ");
+        appendColumnList(sql, plan.getCursorColumns());
+        sql.append(" from ").append(quote(plan.getTableName())).append(" order by ");
+        appendOrderBy(sql, plan.getCursorColumns(), ascending ? "asc" : "desc");
+        appendBatchClause(sql);
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            statement.setInt(1, 1);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
+                Map<String, Object> values = new LinkedHashMap<>();
+                for (String cursorColumn : plan.getCursorColumns()) {
+                    values.put(cursorColumn, resultSet.getObject(cursorColumn));
+                }
+                return new MigrationCursor(values);
+            }
+        }
+    }
+
+    private List<String> resolveCursorJavaTypes(MigrationCursor rangeStart, MigrationCursor rangeEnd) {
+        MigrationCursor typeSource = rangeEnd != null ? rangeEnd : rangeStart;
+        List<String> types = new ArrayList<>();
+        if (typeSource == null) {
+            return types;
+        }
+        for (Object value : typeSource.getValues().values()) {
+            types.add(value == null ? null : value.getClass().getName());
+        }
+        return types;
+    }
+
+    private MigrationCursor toCursor(EntityMigrationPlan plan, Object rawCursor) {
+        if (rawCursor == null) {
+            return null;
+        }
+        if (rawCursor instanceof MigrationCursor) {
+            return (MigrationCursor) rawCursor;
+        }
+        if (plan.getCursorColumns().size() == 1) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put(plan.getCursorColumn(), rawCursor);
+            return new MigrationCursor(values);
+        }
+        throw new MigrationCursorException(MigrationErrorCode.CURSOR_CHECKPOINT_INVALID,
+                "Composite cursor checkpoint must use MigrationCursor: " + plan.getCursorColumns());
+    }
+
+    private String buildSelectSql(EntityMigrationPlan plan, Set<String> selectColumns, boolean withCheckpoint) {
+        StringBuilder sql = new StringBuilder("select ");
+        appendColumnList(sql, selectColumns);
+        sql.append(" from ").append(quote(plan.getTableName()));
+        if (withCheckpoint) {
+            sql.append(" where ").append(buildSeekPredicate(plan.getCursorColumns()));
+        }
+        sql.append(" order by ");
+        appendOrderBy(sql, plan.getCursorColumns(), "asc");
+        appendBatchClause(sql);
+        return sql.toString();
+    }
+
+    private String buildSeekPredicate(List<String> cursorColumns) {
+        StringBuilder predicate = new StringBuilder();
+        for (int index = 0; index < cursorColumns.size(); index++) {
+            if (index > 0) {
+                predicate.append(" or ");
+            }
+            predicate.append("(");
+            for (int equalIndex = 0; equalIndex < index; equalIndex++) {
+                if (equalIndex > 0) {
+                    predicate.append(" and ");
+                }
+                predicate.append(quote(cursorColumns.get(equalIndex))).append(" = ?");
+            }
+            if (index > 0) {
+                predicate.append(" and ");
+            }
+            predicate.append(quote(cursorColumns.get(index))).append(" > ?");
+            predicate.append(")");
+        }
+        return predicate.toString();
+    }
+
+    private int bindCheckpoint(PreparedStatement statement, MigrationCursor checkpoint) throws SQLException {
+        int parameterIndex = 1;
+        if (checkpoint == null) {
+            return parameterIndex;
+        }
+        List<Object> values = new ArrayList<>(checkpoint.getValues().values());
+        for (int index = 0; index < values.size(); index++) {
+            for (int equalIndex = 0; equalIndex < index; equalIndex++) {
+                MigrationJdbcParameterBinder.bind(statement, parameterIndex++, values.get(equalIndex));
+            }
+            MigrationJdbcParameterBinder.bind(statement, parameterIndex++, values.get(index));
+        }
+        return parameterIndex;
+    }
+
+    private void appendColumnList(StringBuilder sql, java.util.Collection<String> columns) {
+        int index = 0;
+        for (String column : columns) {
+            if (index++ > 0) {
+                sql.append(", ");
+            }
+            sql.append(quote(column));
+        }
+    }
+
+    private void appendOrderBy(StringBuilder sql, List<String> columns, String direction) {
+        for (int index = 0; index < columns.size(); index++) {
+            if (index > 0) {
+                sql.append(", ");
+            }
+            sql.append(quote(columns.get(index))).append(" ").append(direction);
+        }
+    }
+
+    private void appendBatchClause(StringBuilder sql) {
+        SqlDialect dialect = properties.getSqlDialect();
+        if (dialect == SqlDialect.ORACLE12 || dialect == SqlDialect.DM) {
+            sql.append(" fetch first ? rows only");
+            return;
+        }
+        sql.append(" limit ?");
+    }
+
+    private String quote(String identifier) {
+        return properties.getSqlDialect().quote(identifier);
+    }
+
+    private void logCursorDebug(String stage, String sql, MigrationCursor cursor) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        log.debug("Migration cursor stage={} sql={} cursor={}", stage, compactSql(sql), describeCursor(cursor));
+    }
+
+    private String describeCursor(MigrationCursor cursor) {
+        if (cursor == null) {
+            return "<null>";
+        }
+        StringBuilder builder = new StringBuilder("{");
+        int index = 0;
+        for (Map.Entry<String, Object> entry : cursor.getValues().entrySet()) {
+            if (index++ > 0) {
+                builder.append(", ");
+            }
+            Object value = entry.getValue();
+            builder.append(entry.getKey()).append('=').append(value)
+                    .append('(')
+                    .append(value == null ? "null" : value.getClass().getSimpleName())
+                    .append(')');
+        }
+        builder.append('}');
+        return builder.toString();
+    }
+
+    private String compactSql(String sql) {
+        return sql == null ? null : sql.replaceAll("\\s+", " ").trim();
+    }
+}

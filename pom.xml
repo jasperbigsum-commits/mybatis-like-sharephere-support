@@ -1,0 +1,183 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.jasperbigsum-commits</groupId>
+  <artifactId>mybatis-like-sharephere-support</artifactId>
+  <version>1.0.4-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>mybatis-like-sharephere-support</name>
+  <description>MyBatis database field encryption plugin inspired by ShardingSphere.</description>
+  <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
+  <modules>
+    <module>common</module>
+    <module>logsafe</module>
+    <module>migration</module>
+    <module>spring-starter/spring-support</module>
+    <module>bom</module>
+    <module>spring-starter</module>
+    <module>spring-starter/spring2-starter</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>8</maven.compiler.release>
+    <mybatis.version>3.5.19</mybatis.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-common</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-migration</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-logsafe</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.jasperbigsum-commits</groupId>
+        <artifactId>mybatis-like-sharephere-support-spring-support</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mybatis</groupId>
+        <artifactId>mybatis</artifactId>
+        <version>${mybatis.version}</version>
+        <scope>provided</scope>
+        <optional>true</optional>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+        <configuration>
+          <argLine>-Dfile.encoding=UTF-8</argLine>
+          <includes>
+            <include>**/*Test.java</include>
+          </includes>
+          <systemPropertyVariables>
+            <file.encoding>UTF-8</file.encoding>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <!-- 1. 生成 Sources 和 Javadoc 包 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.3.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals><goal>jar-no-fork</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.11.2</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals><goal>jar</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <licenses>
+    <license>
+      <name>MIT LICENSE</name>
+      <url>https://opensource.org/licenses/MIT</url>
+    </license>
+  </licenses>
+
+  <!-- 源码管理信息 (必须) -->
+  <scm>
+    <connection>scm:git:git://github.com/jasperbigsum-commits/mybatis-like-sharephere-support.git</connection>
+    <developerConnection>scm:git:ssh://github.com/jasperbigsum-commits/mybatis-like-sharephere-support.git</developerConnection>
+    <url>https://github.com/jasperbigsum-commits/mybatis-like-sharephere-support</url>
+  </scm>
+
+  <developers>
+    <developer>
+      <id>jasperbigsum-commits</id>
+      <name>jasper</name>
+      <email>jasper.bigsum@gmail.com</email>
+    </developer>
+  </developers>
+
+  <profiles>
+    <profile>
+      <id>release-publish</id>
+      <activation>
+        <property>
+          <name>release.publish</name>
+          <value>true</value>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <!-- GPG 签名 -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.8</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals><goal>sign</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- 自动发布 -->
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.10.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <!-- 与 settings.xml 中配置的 server id 对应 -->
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>true</autoPublish>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <id>java17-plus</id>
+      <activation>
+        <jdk>[17,)</jdk>
+      </activation>
+      <modules>
+        <module>spring-starter/spring3-starter</module>
+      </modules>
+    </profile>
+  </profiles>
+
+</project>

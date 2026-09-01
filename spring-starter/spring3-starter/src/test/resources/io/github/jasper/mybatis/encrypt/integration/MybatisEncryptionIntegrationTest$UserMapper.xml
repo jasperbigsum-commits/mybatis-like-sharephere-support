@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.jasper.mybatis.encrypt.integration.MybatisEncryptionIntegrationTest$UserMapper">
+
+    <select id="selectPlainOrderJoinResultDtosByXmlWithTableHint"
+            resultType="io.github.jasper.mybatis.encrypt.integration.MybatisEncryptionIntegrationTest$XmlAliasedOrderJoinResultDto">
+        select o.id as order_id,
+               owner.name as captain_name,
+               owner.phone as captain_contact_token,
+               owner.id_card as captain_credential_token,
+               reviewer.name as vice_name,
+               reviewer.phone as vice_contact_token,
+               reviewer.id_card as vice_credential_token
+        from order_account o
+        join user_account owner on o.user_id = owner.id
+        join user_account reviewer on o.related_user_id = reviewer.id
+        where o.deleted = 0
+        order by o.id
+    </select>
+
+    <select id="selectPlainOrderJoinResultDtosByXmlWithoutHint"
+            resultType="io.github.jasper.mybatis.encrypt.integration.MybatisEncryptionIntegrationTest$XmlAliasedOrderJoinResultDto">
+        select o.id as order_id,
+               owner.name as captain_name,
+               owner.phone as captain_contact_token,
+               owner.id_card as captain_credential_token,
+               reviewer.name as vice_name,
+               reviewer.phone as vice_contact_token,
+               reviewer.id_card as vice_credential_token
+        from order_account o
+        join user_account owner on o.user_id = owner.id
+        join user_account reviewer on o.related_user_id = reviewer.id
+        where o.deleted = 0
+        order by o.id
+    </select>
+
+    <select id="selectPlainOrderJoinResultDtosByXmlWithEntityHint"
+            resultType="io.github.jasper.mybatis.encrypt.integration.MybatisEncryptionIntegrationTest$XmlAliasedOrderJoinResultDto">
+        select o.id as order_id,
+               owner.name as captain_name,
+               owner.phone as captain_contact_token,
+               owner.id_card as captain_credential_token,
+               reviewer.name as vice_name,
+               reviewer.phone as vice_contact_token,
+               reviewer.id_card as vice_credential_token
+        from order_account o
+        join user_account owner on o.user_id = owner.id
+        join user_account reviewer on o.related_user_id = reviewer.id
+        where o.deleted = 0
+        order by o.id
+    </select>
+
+</mapper>

@@ -1,0 +1,9 @@
+io.github.jasper.mybatis.encrypt.config.MybatisEncryptionAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.LogsafeAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.LogsafeLogbackAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.LogsafeContextAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.LogsafeAsyncContextAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.SensitiveMaskingAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.SensitiveLookupMetaAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.SensitiveResponseAutoConfiguration
+io.github.jasper.mybatis.encrypt.config.EncryptedJdbcAutoConfiguration

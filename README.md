@@ -154,7 +154,7 @@ Spring Boot 3 项目优先使用：
 <dependency>
   <groupId>io.github.jasperbigsum-commits</groupId>
   <artifactId>mybatis-like-sharephere-support-spring3-starter</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
 </dependency>
 ```
 
@@ -164,7 +164,7 @@ Spring Boot 2 项目使用：
 <dependency>
   <groupId>io.github.jasperbigsum-commits</groupId>
   <artifactId>mybatis-like-sharephere-support-spring2-starter</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
 </dependency>
 ```
 

@@ -5,7 +5,7 @@
 
   <groupId>io.github.jasperbigsum-commits</groupId>
   <artifactId>mybatis-like-sharephere-support</artifactId>
-  <version>1.0.4-SNAPSHOT</version>
+  <version>1.0.4</version>
   <packaging>pom</packaging>
   <name>mybatis-like-sharephere-support</name>
   <description>MyBatis database field encryption plugin inspired by ShardingSphere.</description>
@@ -139,35 +139,6 @@
           <value>true</value>
         </property>
       </activation>
-      <build>
-        <plugins>
-          <!-- GPG 签名 -->
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-gpg-plugin</artifactId>
-            <version>3.2.8</version>
-            <executions>
-              <execution>
-                <id>sign-artifacts</id>
-                <phase>verify</phase>
-                <goals><goal>sign</goal></goals>
-              </execution>
-            </executions>
-          </plugin>
-          <!-- 自动发布 -->
-          <plugin>
-            <groupId>org.sonatype.central</groupId>
-            <artifactId>central-publishing-maven-plugin</artifactId>
-            <version>0.10.0</version>
-            <extensions>true</extensions>
-            <configuration>
-              <!-- 与 settings.xml 中配置的 server id 对应 -->
-              <publishingServerId>central</publishingServerId>
-              <autoPublish>true</autoPublish>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
     </profile>
     <profile>
       <id>java17-plus</id>
@@ -179,5 +150,16 @@
       </modules>
     </profile>
   </profiles>
+
+  <distributionManagement>
+    <!-- 正式版本发布仓库 (Release) -->
+    <repository>
+      <!-- 注意：此处的 id 必须与 settings.xml 中的 <server><id> 严格保持一致 -->
+      <id>chang-x-maven</id>
+      <name>crm_release</name>
+      <!-- 替换为你私服对应的 Release 仓库真实 URL -->
+      <url>http://172.31.235.243:8081/repository/crm_release/</url>
+    </repository>
+  </distributionManagement>
 
 </project>

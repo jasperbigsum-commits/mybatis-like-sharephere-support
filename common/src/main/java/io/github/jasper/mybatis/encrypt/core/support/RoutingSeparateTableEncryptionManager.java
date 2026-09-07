@@ -59,6 +59,8 @@ public class RoutingSeparateTableEncryptionManager extends SeparateTableEncrypti
             if (manager != null) {
                 return manager;
             }
+            throw new IllegalStateException("Unknown separate-table datasource context: " + dataSourceName
+                    + ", available=" + managers.keySet());
         }
         return defaultManager;
     }

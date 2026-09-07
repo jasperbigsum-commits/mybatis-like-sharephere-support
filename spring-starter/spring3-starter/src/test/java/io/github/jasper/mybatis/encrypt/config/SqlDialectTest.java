@@ -26,6 +26,7 @@ class SqlDialectTest {
     @Test
     void shouldQuoteDmIdentifiers() {
         assertEquals("\"USER_ACCOUNT\"", SqlDialect.DM.quote("USER_ACCOUNT"));
+        assertEquals("\"APP\".\"USER_ACCOUNT\"", SqlDialect.DM.quote("APP.USER_ACCOUNT"));
     }
 
     /**
@@ -92,6 +93,21 @@ class SqlDialectTest {
     }
 
     @Test
+    void shouldRejectMysqlOnlyPluginFunctionsForDm() {
+        org.junit.jupiter.api.Assertions.assertTrue(SqlDialect.MYSQL.supportsPluginFunction("JSON_EXTRACT"));
+        org.junit.jupiter.api.Assertions.assertFalse(SqlDialect.DM.supportsPluginFunction("JSON_EXTRACT"));
+        org.junit.jupiter.api.Assertions.assertFalse(SqlDialect.DM.supportsPluginFunction("FIND_IN_SET"));
+        org.junit.jupiter.api.Assertions.assertTrue(SqlDialect.DM.supportsPluginFunction("LISTAGG"));
+    }
+
+    @Test
+    void shouldRenderDialectSpecificFetchSyntax() {
+        assertEquals(" fetch first ? rows only", SqlDialect.DM.renderFetchFirst("?"));
+        assertEquals(" fetch first ? rows only", SqlDialect.ORACLE12.renderFetchFirst("?"));
+        assertEquals(" limit ?", SqlDialect.MYSQL.renderFetchFirst("?"));
+    }
+
+    @Test
     void shouldUseContextDatasourceDialectWhenReadingGlobalDialect() {
         DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
         properties.setSqlDialect(SqlDialect.DM);
@@ -105,5 +121,24 @@ class SqlDialectTest {
             assertEquals(SqlDialect.CLICKHOUSE, properties.getSqlDialect());
         }
         assertEquals(SqlDialect.DM, properties.getSqlDialect());
+    }
+
+    @Test
+    void shouldRestoreOuterDatasourceDialectAfterNestedScope() {
+        DatabaseEncryptionProperties properties = new DatabaseEncryptionProperties();
+        properties.setSqlDialect(SqlDialect.MYSQL);
+        DatabaseEncryptionProperties.DataSourceDialectRuleProperties dmRule =
+                new DatabaseEncryptionProperties.DataSourceDialectRuleProperties();
+        dmRule.setDatasourceNamePattern("dm");
+        dmRule.setSqlDialect(SqlDialect.DM);
+        properties.getDatasourceDialects().add(dmRule);
+
+        try (SqlDialectContextHolder.Scope outer = SqlDialectContextHolder.open("dm")) {
+            assertEquals(SqlDialect.DM, properties.getSqlDialect());
+            try (SqlDialectContextHolder.Scope inner = SqlDialectContextHolder.open("mysql")) {
+                assertEquals(SqlDialect.MYSQL, properties.getSqlDialect());
+            }
+            assertEquals(SqlDialect.DM, properties.getSqlDialect());
+        }
     }
 }

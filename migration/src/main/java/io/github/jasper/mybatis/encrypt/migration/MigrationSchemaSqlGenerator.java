@@ -819,6 +819,11 @@ public final class MigrationSchemaSqlGenerator {
 
         private ColumnType toComparableType(SqlDialect dialect, int fallbackCharacterLength) {
             String family = typeFamily();
+            // LOB metadata often reports a huge COLUMN_SIZE. Do not turn CLOB into an
+            // impossible VARCHAR2(n) declaration on DM/Oracle; preserve the LOB family.
+            if (isLargeCharacterType()) {
+                return ColumnType.largeCharacter(dialect);
+            }
             if ("varchar".equals(family)) {
                 return ColumnType.variableCharacter(resolveCharacterLength(fallbackCharacterLength), dialect);
             }

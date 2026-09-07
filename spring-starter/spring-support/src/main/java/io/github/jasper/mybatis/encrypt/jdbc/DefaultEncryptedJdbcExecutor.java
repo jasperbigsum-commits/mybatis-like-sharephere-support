@@ -92,20 +92,25 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
     }
 
     private List<Map<String, Object>> executeQuery(String dataSourceName, String sql, Object[] args) {
-        ExecutionContext context = rewrite(dataSourceName, SqlCommandType.SELECT, sql, args);
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(resolveDataSource(context.dataSourceName));
-        List<Map<String, Object>> rows = jdbcTemplate.query(context.sql, context.arguments.toArray(), new MapRowMapper());
-        if (rows.isEmpty() || resultDecryptor == null) {
+        String resolvedDataSourceName = normalizeDataSourceName(dataSourceName);
+        // Keep the datasource dialect scope through hydration as well as rewrite. Separate-table
+        // lookups build SQL after the main query has returned and must see the same dialect.
+        try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolvedDataSourceName)) {
+            ExecutionContext context = rewriteInCurrentDialect(resolvedDataSourceName, SqlCommandType.SELECT, sql, args);
+            JdbcTemplate jdbcTemplate = new JdbcTemplate(resolveDataSource(context.dataSourceName));
+            List<Map<String, Object>> rows = jdbcTemplate.query(context.sql, context.arguments.toArray(), new MapRowMapper());
+            if (rows.isEmpty() || resultDecryptor == null) {
+                return rows;
+            }
+            MappedStatement mappedStatement = mappedStatement(
+                    context.dataSourceName, SqlCommandType.SELECT, context.sql, new Object[0]);
+            QueryResultPlan queryResultPlan = resultDecryptor.resolvePlan(mappedStatement, context.boundSql);
+            if (queryResultPlan.isEmpty()) {
+                return rows;
+            }
+            resultDecryptor.decrypt(rows, queryResultPlan);
             return rows;
         }
-        MappedStatement mappedStatement = mappedStatement(
-                context.dataSourceName, SqlCommandType.SELECT, context.sql, new Object[0]);
-        QueryResultPlan queryResultPlan = resultDecryptor.resolvePlan(mappedStatement, context.boundSql);
-        if (queryResultPlan.isEmpty()) {
-            return rows;
-        }
-        resultDecryptor.decrypt(rows, queryResultPlan);
-        return rows;
     }
 
     private int executeUpdate(String dataSourceName, SqlCommandType commandType, String sql, Object[] args) {
@@ -117,16 +122,23 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
     private ExecutionContext rewrite(String dataSourceName, SqlCommandType commandType, String sql, Object[] args) {
         String resolvedDataSourceName = normalizeDataSourceName(dataSourceName);
         try (SqlDialectContextHolder.Scope ignored = SqlDialectContextHolder.open(resolvedDataSourceName)) {
-            Object parameterObject = parameterObject(args);
-            MappedStatement mappedStatement = mappedStatement(resolvedDataSourceName, commandType, sql, args);
-            BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
-            RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
-            if (rewriteResult.changed()) {
-                rewriteResult.applyTo(boundSql);
-                sql = boundSql.getSql();
-            }
-            return new ExecutionContext(resolvedDataSourceName, sql, extractArguments(boundSql, parameterObject), boundSql);
+            return rewriteInCurrentDialect(resolvedDataSourceName, commandType, sql, args);
         }
+    }
+
+    private ExecutionContext rewriteInCurrentDialect(String dataSourceName,
+                                                      SqlCommandType commandType,
+                                                      String sql,
+                                                      Object[] args) {
+        Object parameterObject = parameterObject(args);
+        MappedStatement mappedStatement = mappedStatement(dataSourceName, commandType, sql, args);
+        BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
+        RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
+        if (rewriteResult.changed()) {
+            rewriteResult.applyTo(boundSql);
+            sql = boundSql.getSql();
+        }
+        return new ExecutionContext(dataSourceName, sql, extractArguments(boundSql, parameterObject), boundSql);
     }
 
     private DataSource resolveDataSource(String dataSourceName) {
@@ -146,7 +158,7 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
     }
 
     private String normalizeDataSourceName(String dataSourceName) {
-        if (StringUtils.isNotBlank(dataSourceName)) {
+        if (StringUtils.isNotBlank(dataSourceName) && dataSources.containsKey(dataSourceName)) {
             return dataSourceName;
         }
         return dataSourceNameResolver == null ? null : dataSourceNameResolver.getDefaultDataSourceName();

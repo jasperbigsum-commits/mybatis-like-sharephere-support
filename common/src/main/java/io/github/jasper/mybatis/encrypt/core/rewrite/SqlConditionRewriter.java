@@ -50,6 +50,7 @@ final class SqlConditionRewriter {
     private final BiFunction<Column, String, Column> columnBuilder;
     private final BiFunction<EncryptColumnRule, String, String> assistedQueryColumnProvider;
     private final Consumer<EncryptColumnRule> rangeWarningConsumer;
+    private final Consumer<String> functionValidator;
 
     SqlConditionRewriter(EncryptionValueTransformer valueTransformer,
                          BiFunction<Column, String, Column> columnBuilder,
@@ -59,6 +60,7 @@ final class SqlConditionRewriter {
                          SelectRewriteDispatcher selectRewriteDispatcher) {
         this(valueTransformer, columnBuilder, assistedQueryColumnProvider, likeQueryColumnProvider,
                 identifierQuoter, selectRewriteDispatcher, rule -> {
+                }, name -> {
                 });
     }
 
@@ -69,11 +71,25 @@ final class SqlConditionRewriter {
                          java.util.function.Function<String, String> identifierQuoter,
                          SelectRewriteDispatcher selectRewriteDispatcher,
                          Consumer<EncryptColumnRule> rangeWarningConsumer) {
+        this(valueTransformer, columnBuilder, assistedQueryColumnProvider, likeQueryColumnProvider,
+                identifierQuoter, selectRewriteDispatcher, rangeWarningConsumer, name -> {
+                });
+    }
+
+    SqlConditionRewriter(EncryptionValueTransformer valueTransformer,
+                         BiFunction<Column, String, Column> columnBuilder,
+                         BiFunction<EncryptColumnRule, String, String> assistedQueryColumnProvider,
+                         BiFunction<EncryptColumnRule, String, String> likeQueryColumnProvider,
+                         java.util.function.Function<String, String> identifierQuoter,
+                         SelectRewriteDispatcher selectRewriteDispatcher,
+                         Consumer<EncryptColumnRule> rangeWarningConsumer,
+                         Consumer<String> functionValidator) {
         this.valueTransformer = valueTransformer;
         this.columnBuilder = columnBuilder;
         this.assistedQueryColumnProvider = assistedQueryColumnProvider;
         this.selectRewriteDispatcher = selectRewriteDispatcher;
         this.rangeWarningConsumer = rangeWarningConsumer;
+        this.functionValidator = functionValidator;
         this.operandSupport = new SqlConditionOperandSupport();
         this.separateTableExistsConditionBuilder = new SqlSeparateTableExistsConditionBuilder(columnBuilder, identifierQuoter);
         this.sqlEqualityConditionRewriter = new SqlEqualityConditionRewriter(
@@ -213,6 +229,7 @@ final class SqlConditionRewriter {
                                           SqlTableContext tableContext,
                                           SqlRewriteContext context) {
         if (function.getName() != null && "find_in_set".equalsIgnoreCase(function.getName())) {
+            functionValidator.accept(function.getName());
             rewriteFindInSetCondition(function, tableContext, context);
             return;
         }
@@ -549,6 +566,7 @@ final class SqlConditionRewriter {
                 || function.getParameters().size() != 2) {
             return null;
         }
+        functionValidator.accept(function.getName());
         Object first = function.getParameters().get(0);
         Object second = function.getParameters().get(1);
         if (!(first instanceof Column) || !(second instanceof StringValue)) {

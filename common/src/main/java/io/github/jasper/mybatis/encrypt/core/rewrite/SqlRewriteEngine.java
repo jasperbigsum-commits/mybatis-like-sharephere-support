@@ -46,7 +46,7 @@ public class SqlRewriteEngine {
     private final SqlLogMasker sqlLogMasker = new SqlLogMasker();
     private final EncryptionValueTransformer valueTransformer;
     private final DerivedTableRuleBuilder derivedTableRuleBuilder;
-    private final SqlRewriteValidator sqlRewriteValidator = new SqlRewriteValidator();
+    private final SqlRewriteValidator sqlRewriteValidator;
     private final SqlConditionRewriter sqlConditionRewriter;
     private final SqlWriteExpressionRewriter sqlWriteExpressionRewriter;
     private final SqlSelectProjectionRewriter sqlSelectProjectionRewriter;
@@ -68,6 +68,7 @@ public class SqlRewriteEngine {
         this.metadataRegistry = metadataRegistry;
         this.properties = properties;
         this.algorithmRegistry = algorithmRegistry;
+        this.sqlRewriteValidator = new SqlRewriteValidator(properties);
         this.valueTransformer = new EncryptionValueTransformer(algorithmRegistry);
         this.derivedTableRuleBuilder = new DerivedTableRuleBuilder(metadataRegistry);
         this.sqlConditionRewriter = new SqlConditionRewriter(
@@ -77,7 +78,8 @@ public class SqlRewriteEngine {
                 this::requireLikeQueryColumn,
                 this::quote,
                 this::rewriteSelect,
-                this::warnEncryptedRangeComparison
+                this::warnEncryptedRangeComparison,
+                this::validateDialectFunction
         );
         this.sqlWriteExpressionRewriter = new SqlWriteExpressionRewriter(valueTransformer, sqlConditionRewriter);
         this.sqlSelectProjectionRewriter = new SqlSelectProjectionRewriter(
@@ -937,5 +939,14 @@ public class SqlRewriteEngine {
     private String quote(String identifier) {
         SqlDialect dialect = properties.getSqlDialect();
         return dialect == null ? identifier : dialect.quote(identifier);
+    }
+
+    private void validateDialectFunction(String functionName) {
+        SqlDialect dialect = properties.getSqlDialect();
+        if (dialect != null && !dialect.supportsPluginFunction(functionName)) {
+            throw new UnsupportedEncryptedOperationException(
+                    EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_OPERATION,
+                    "Function " + functionName + " is not supported by SQL dialect " + dialect + ".");
+        }
     }
 }

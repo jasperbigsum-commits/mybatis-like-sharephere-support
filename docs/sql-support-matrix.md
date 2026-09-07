@@ -41,6 +41,7 @@ through real MyBatis execution tests.
 | `json_extract(encrypted_json_column, '$.path') = ?` | Supported | Exact static path only; the right-side operand is rewritten to the path's assisted hash value stored in the JSON string. |
 | `json_extract(encrypted_json_column, '$.path') != ?` | Supported | Exact static path only; the right-side operand is rewritten to the path's assisted hash value stored in the JSON string. |
 | `json_extract(encrypted_json_column, '$.path') IN (...)` | Supported | Exact static path only; every operand is transformed to the path's assisted hash value. |
+| Dialect-specific plugin functions | Guarded | `sqlDialect=DM` / `ORACLE12` rejects MySQL-only `FIND_IN_SET`, `JSON_EXTRACT`, `GROUP_CONCAT`, and `REGEXP` during rewrite instead of emitting SQL that the database will reject. Use the target database's native function and an explicit supported rewrite shape. |
 | `IS NULL` / `IS NOT NULL` | Supported | Same-table fields check `storageColumn`; separate-table fields check the main-table reference/hash column directly. |
 | `IN (subquery)` | Supported | Rewrites the subquery projection into comparison mode. |
 | `NOT IN` | Supported | Uses the same rewrite path as `IN`, preserving `NOT`. |

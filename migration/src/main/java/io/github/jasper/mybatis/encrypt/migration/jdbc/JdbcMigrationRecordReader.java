@@ -243,11 +243,7 @@ public class JdbcMigrationRecordReader implements MigrationRecordReader, Migrati
 
     private void appendBatchClause(StringBuilder sql) {
         SqlDialect dialect = properties.getSqlDialect();
-        if (dialect == SqlDialect.ORACLE12 || dialect == SqlDialect.DM) {
-            sql.append(" fetch first ? rows only");
-            return;
-        }
-        sql.append(" limit ?");
+        sql.append(dialect.renderFetchFirst("?"));
     }
 
     private String quote(String identifier) {

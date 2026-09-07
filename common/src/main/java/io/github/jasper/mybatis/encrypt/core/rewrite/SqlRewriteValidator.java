@@ -1,6 +1,8 @@
 package io.github.jasper.mybatis.encrypt.core.rewrite;
 
 import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
+import io.github.jasper.mybatis.encrypt.config.DatabaseEncryptionProperties;
+import io.github.jasper.mybatis.encrypt.config.SqlDialect;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.exception.UnsupportedEncryptedOperationException;
 import net.sf.jsqlparser.expression.AnalyticExpression;
@@ -32,6 +34,16 @@ import java.util.Locale;
  * 从 {@link SqlRewriteEngine} 中拆出，避免改写逻辑与限制性规则判断混在一个类里。</p>
  */
 final class SqlRewriteValidator {
+
+    private final DatabaseEncryptionProperties properties;
+
+    SqlRewriteValidator() {
+        this(null);
+    }
+
+    SqlRewriteValidator(DatabaseEncryptionProperties properties) {
+        this.properties = properties;
+    }
 
     void validateSelect(PlainSelect plainSelect, SqlTableContext tableContext) {
         validateDistinct(plainSelect.getDistinct(), plainSelect.getSelectItems(), tableContext);
@@ -309,6 +321,7 @@ final class SqlRewriteValidator {
         }
         if (expression instanceof Function) {
             Function function = (Function) expression;
+            validateFunction(function);
             if (isAggregateFunction(function)) {
                 if (function.isAllColumns()) {
                     return false;
@@ -402,6 +415,18 @@ final class SqlRewriteValidator {
             return false;
         }
         return false;
+    }
+
+    private void validateFunction(Function function) {
+        if (properties == null || function == null) {
+            return;
+        }
+        SqlDialect dialect = properties.getSqlDialect();
+        String name = function.getName();
+        if (dialect != null && !dialect.supportsPluginFunction(name)) {
+            throw new UnsupportedEncryptedOperationException(EncryptionErrorCode.UNSUPPORTED_ENCRYPTED_OPERATION,
+                    "Function " + name + " is not supported by SQL dialect " + dialect + ".");
+        }
     }
 
     private boolean isAllowedAggregateOperand(Function function,

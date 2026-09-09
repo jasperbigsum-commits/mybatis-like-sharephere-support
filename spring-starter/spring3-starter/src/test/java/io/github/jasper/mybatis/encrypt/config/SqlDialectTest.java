@@ -93,10 +93,10 @@ class SqlDialectTest {
     }
 
     @Test
-    void shouldRejectMysqlOnlyPluginFunctionsForDm() {
+    void shouldAllowFindInSetForDmWhileRejectingOtherMysqlOnlyFunctions() {
         org.junit.jupiter.api.Assertions.assertTrue(SqlDialect.MYSQL.supportsPluginFunction("JSON_EXTRACT"));
         org.junit.jupiter.api.Assertions.assertFalse(SqlDialect.DM.supportsPluginFunction("JSON_EXTRACT"));
-        org.junit.jupiter.api.Assertions.assertFalse(SqlDialect.DM.supportsPluginFunction("FIND_IN_SET"));
+        org.junit.jupiter.api.Assertions.assertTrue(SqlDialect.DM.supportsPluginFunction("FIND_IN_SET"));
         org.junit.jupiter.api.Assertions.assertTrue(SqlDialect.DM.supportsPluginFunction("LISTAGG"));
     }
 

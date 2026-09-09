@@ -108,8 +108,10 @@ public enum SqlDialect {
             return true;
         }
         String name = functionName.trim().toUpperCase(java.util.Locale.ROOT);
-        if ("GROUP_CONCAT".equals(name) || "FIND_IN_SET".equals(name)
-                || "JSON_EXTRACT".equals(name) || "REGEXP".equals(name)) {
+        if ("FIND_IN_SET".equals(name)) {
+            return this == MYSQL || this == OCEANBASE || this == DM;
+        }
+        if ("GROUP_CONCAT".equals(name) || "JSON_EXTRACT".equals(name) || "REGEXP".equals(name)) {
             return this == MYSQL || this == OCEANBASE;
         }
         if ("LISTAGG".equals(name)) {

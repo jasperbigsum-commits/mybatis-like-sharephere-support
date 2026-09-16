@@ -452,3 +452,28 @@ Do this:
 - do not rely on lookup metadata for unsupported many-to-one or many-to-many retrievals
 - if you need multi-datasource lookup routing, extend the rule model first instead of guessing at runtime
 - if a field is display-only, set `@SensitiveField(returnLookupMeta = false)` on the response DTO field
+
+### Object graph traversal boundary (compatibility change)
+
+The masker no longer reflects into every reachable object. By default it handles exact recorded properties, classes declaring `@SensitiveField`, arrays, Iterables and Map values. Unknown objects are opaque. An annotated class authorizes its own declared fields, not third-party superclass internals. Ordinary wrappers, unannotated copied DTOs and business base classes require registration. This intentionally tightens the boundary: audit response wrappers and pagination during upgrades; database records alone do not cover copied data behind unknown wrappers.
+
+Provide a `SensitiveTraversalPolicy` bean in either Spring 2 or 3, or pass it to the masker's four-argument constructor:
+
+```java
+@Bean
+public SensitiveTraversalPolicy sensitiveTraversalPolicy() {
+    return SensitiveTraversalPolicy.builder()
+            .allowPackages("com.example.api.dto")
+            .allowTypes(MyResponseBase.class)
+            .adapt(MyPage.class, MyPage::getRecords)
+            .build();
+}
+```
+
+Register narrow data-only packages, never the application root, services/controllers or framework packages. `allowTypes` selects exact declaring classes. `adapt` supports implementations/subclasses and visits only the adapter's returned data, without reflecting into the wrapper. Nested DTOs in Maps/collections obey the same boundary. Registration permits traversal; it does not invent masking rules for ordinary fields.
+
+Recorded properties are still replaced directly by property path. Copies must match both property name and value within the approved DTO graph. Template callers may pass a model Map excluding BindingResult and other helpers; the same boundary applies to nested values.
+
+Bootstrap/platform/extension loader ownership identifies platform classes independently of package names, including `org.xml.sax` and `org.w3c.dom`. Platform superclass fields, synthetic links and known infrastructure are excluded. No JDK isolation bypass using `--add-opens` is introduced.
+
+When a selected business field cannot be accessed directly, the masker attempts public, type-compatible JavaBean getters/setters, not arbitrary methods. If neither access path works or an accessor fails, a configuration exception without field values stops the response. Access failures are never swallowed to return plaintext. Business modules without public accessors need accessible response DTOs or explicit module access design. This policy does not promise automatic sensitive-field discovery in arbitrary unknown objects.

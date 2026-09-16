@@ -6,7 +6,6 @@ import io.github.jasper.mybatis.encrypt.core.metadata.EncryptColumnRule;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionConfigurationException;
 import io.github.jasper.mybatis.encrypt.exception.EncryptionErrorCode;
 import io.github.jasper.mybatis.encrypt.util.ObjectTraversalUtils;
-import io.github.jasper.mybatis.encrypt.util.PropertyValueAccessor;
 import io.github.jasper.mybatis.encrypt.util.StringUtils;
 
 import java.lang.reflect.Array;
@@ -44,15 +43,21 @@ import java.util.concurrent.ConcurrentMap;
  * {@link SensitiveFieldMasker} bean has the highest priority, a referenced LIKE algorithm is next,
  * and the built-in type based mask is the default fallback.</p>
  *
+ * <p>Graph traversal follows container values and business fields, excluding synthetic links,
+ * platform implementation fields and runtime/web infrastructure (including their subclasses).
+ * Only classes declaring SensitiveField or selected by SensitiveTraversalPolicy contribute fields.
+ * Unknown objects are opaque; third-party wrappers require explicit data adapters.
+ * Explicit sensitive-field configuration errors still fail fast.</p>
+ *
  * <p>The class is thread-safe. Annotation bindings are cached by response class, while request
  * state is read only from {@link SensitiveDataContext}.</p>
  */
 public final class SensitiveDataMasker {
 
+    private final SensitiveTraversalPolicy traversalPolicy;
     private final StoredSensitiveValueResolver storedSensitiveValueResolver;
     private final AlgorithmRegistry algorithmRegistry;
     private final Map<String, SensitiveFieldMasker> sensitiveFieldMaskers;
-    private final PropertyValueAccessor propertyValueAccessor = new PropertyValueAccessor();
     private final ConcurrentMap<Class<?>, List<FieldBinding>> fieldBindings =
             new ConcurrentHashMap<Class<?>, List<FieldBinding>>();
 
@@ -88,6 +93,19 @@ public final class SensitiveDataMasker {
     public SensitiveDataMasker(StoredSensitiveValueResolver storedSensitiveValueResolver,
                                AlgorithmRegistry algorithmRegistry,
                                Map<String, SensitiveFieldMasker> sensitiveFieldMaskers) {
+        this(storedSensitiveValueResolver, algorithmRegistry, sensitiveFieldMaskers,
+                SensitiveTraversalPolicy.builder().build());
+    }
+
+    /**
+     * Creates a masker with an explicit DTO traversal boundary. Unknown objects are opaque;
+     * recorded references and SensitiveField-declaring classes remain supported by default.
+     */
+    public SensitiveDataMasker(StoredSensitiveValueResolver storedSensitiveValueResolver,
+                               AlgorithmRegistry algorithmRegistry,
+                               Map<String, SensitiveFieldMasker> sensitiveFieldMaskers,
+                               SensitiveTraversalPolicy traversalPolicy) {
+        this.traversalPolicy = java.util.Objects.requireNonNull(traversalPolicy, "traversalPolicy");
         this.storedSensitiveValueResolver = storedSensitiveValueResolver;
         this.algorithmRegistry = algorithmRegistry;
         this.sensitiveFieldMaskers = sensitiveFieldMaskers == null
@@ -150,7 +168,7 @@ public final class SensitiveDataMasker {
     }
 
     /**
-     * Traverses a returned object graph and masks annotated {@link SensitiveField} String fields.
+     * Traverses the explicitly approved DTO graph and masks annotated {@link SensitiveField} String fields.
      *
      * <p>This strategy is intended for manually assembled DTOs that were not recorded by
      * {@link SensitiveDataContext}. Object identity tracking prevents infinite recursion for cyclic
@@ -164,13 +182,19 @@ public final class SensitiveDataMasker {
     }
 
     private void maskObject(Object value, IdentityHashMap<Object, Boolean> visited) {
-        if (value == null || ObjectTraversalUtils.isSimpleValueType(value.getClass())) {
+        if (value == null || ObjectTraversalUtils.isSimpleValueType(value.getClass())
+                || isInfrastructureType(value.getClass())) {
             return;
         }
         if (visited.put(value, Boolean.TRUE) != null) {
             return;
         }
         Class<?> type = value.getClass();
+        java.util.function.Function<Object, Object> adapter = traversalPolicy.adapter(type);
+        if (adapter != null) {
+            maskObject(adapter.apply(value), visited);
+            return;
+        }
         if (type.isArray()) {
             int length = Array.getLength(value);
             for (int index = 0; index < length; index++) {
@@ -190,25 +214,20 @@ public final class SensitiveDataMasker {
             }
             return;
         }
-        if (type.getName().startsWith("java.")) {
+        if (isPlatformType(type)) {
             return;
         }
         for (FieldBinding binding : bindings(type)) {
             binding.maskCurrentValue(value, algorithmRegistry, sensitiveFieldMaskers);
         }
         for (Field field : allFields(type)) {
-            if (Modifier.isStatic(field.getModifiers()) || field.getAnnotation(SensitiveField.class) != null) {
+            if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic() || field.getAnnotation(SensitiveField.class) != null) {
                 continue;
             }
             if (ObjectTraversalUtils.isSimpleValueType(field.getType())) {
                 continue;
             }
-            try {
-                field.setAccessible(true);
-                maskObject(field.get(value), visited);
-            } catch (IllegalAccessException ignore) {
-                // Best-effort traversal; inaccessible non-sensitive fields do not block response masking.
-            }
+            maskObject(SensitiveFieldAccess.read(field, value), visited);
         }
     }
 
@@ -225,13 +244,49 @@ public final class SensitiveDataMasker {
         if (StringUtils.isBlank(replacement)) {
             return false;
         }
-        PropertyValueAccessor.PropertyReference propertyReference =
-                propertyValueAccessor.resolve(record.owner(), record.propertyName());
-        if (propertyReference == null || !propertyReference.canWrite()) {
-            return false;
+        Object owner = record.owner();
+        String[] path = record.propertyName().split("\\.");
+        for (int index = 0; index < path.length; index++) {
+            if (owner == null) return false;
+            boolean last = index == path.length - 1;
+            if (owner instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                Map<Object, Object> map = (Map<Object, Object>) owner;
+                if (last) {
+                    Object value = map.get(path[index]);
+                    if (value != null && !(value instanceof String)) return false;
+                    map.put(path[index], replacement);
+                    return true;
+                }
+                owner = map.get(path[index]);
+            } else {
+                Field field = recordedField(owner.getClass(), path[index]);
+                Object value = SensitiveFieldAccess.read(field, owner);
+                if (last) {
+                    if (value != null && !(value instanceof String)) return false;
+                    SensitiveFieldAccess.write(field, owner, replacement);
+                    return true;
+                }
+                owner = value;
+            }
         }
-        Object currentValue = propertyReference.getValue();
-        return (currentValue == null || currentValue instanceof String) && propertyReference.setValue(replacement);
+        return false;
+    }
+
+    // A decrypted record explicitly authorizes this property, not arbitrary sibling traversal.
+    private Field recordedField(Class<?> type, String name) {
+        for (Class<?> current = type; current != null && !isPlatformType(current)
+                && !isInfrastructureType(current); current = current.getSuperclass()) {
+            try {
+                Field field = current.getDeclaredField(name);
+                if (!Modifier.isStatic(field.getModifiers()) && !field.isSynthetic()) return field;
+                break;
+            } catch (NoSuchFieldException ignored) {
+                // Follow business inheritance for this exact recorded property only.
+            }
+        }
+        throw new EncryptionConfigurationException(EncryptionErrorCode.INVALID_FIELD_RULE,
+                "Cannot resolve recorded sensitive response field: " + type.getName() + "." + name);
     }
 
     private String resolveRecordedReplacement(SensitiveDataContext.SensitiveRecord record,
@@ -264,13 +319,18 @@ public final class SensitiveDataMasker {
                                              SensitiveDataContext.SensitiveRecord record,
                                              String replacement,
                                              IdentityHashMap<Object, Boolean> visited) {
-        if (value == null || ObjectTraversalUtils.isSimpleValueType(value.getClass())) {
+        if (value == null || ObjectTraversalUtils.isSimpleValueType(value.getClass())
+                || isInfrastructureType(value.getClass())) {
             return false;
         }
         if (visited.put(value, Boolean.TRUE) != null) {
             return false;
         }
         Class<?> type = value.getClass();
+        java.util.function.Function<Object, Object> adapter = traversalPolicy.adapter(type);
+        if (adapter != null) {
+            return applyCopiedRecordedValue(adapter.apply(value), record, replacement, visited);
+        }
         if (type.isArray()) {
             boolean changed = false;
             int length = Array.getLength(value);
@@ -289,7 +349,7 @@ public final class SensitiveDataMasker {
         if (value instanceof Map<?, ?>) {
             return applyCopiedMapRecordedValue((Map<?, ?>) value, record, replacement, visited);
         }
-        if (type.getName().startsWith("java.")) {
+        if (isPlatformType(type)) {
             return false;
         }
         return applyCopiedObjectRecordedValue(value, record, replacement, visited);
@@ -328,23 +388,20 @@ public final class SensitiveDataMasker {
                                                    IdentityHashMap<Object, Boolean> visited) {
         boolean changed = false;
         for (Field field : allFields(owner.getClass())) {
-            if (Modifier.isStatic(field.getModifiers())) {
+            if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
                 continue;
             }
-            try {
-                field.setAccessible(true);
-                Object fieldValue = field.get(owner);
-                if (field.getName().equals(record.propertyName()) && record.value().equals(fieldValue)
-                        && String.class.equals(field.getType()) && !Modifier.isFinal(field.getModifiers())) {
-                    field.set(owner, replacement);
-                    attachLookupMetaToCopiedOwner(owner, record);
-                    changed = true;
-                    continue;
-                }
-                changed |= applyCopiedRecordedValue(fieldValue, record, replacement, visited);
-            } catch (IllegalAccessException ignore) {
-                // Best-effort fallback for copied response objects; inaccessible fields are skipped.
+            boolean candidate = field.getName().equals(record.propertyName())
+                    && String.class.equals(field.getType());
+            if (!candidate && ObjectTraversalUtils.isSimpleValueType(field.getType())) continue;
+            Object fieldValue = SensitiveFieldAccess.read(field, owner);
+            if (candidate && record.value().equals(fieldValue)) {
+                SensitiveFieldAccess.write(field, owner, replacement);
+                attachLookupMetaToCopiedOwner(owner, record);
+                changed = true;
+                continue;
             }
+            changed |= applyCopiedRecordedValue(fieldValue, record, replacement, visited);
         }
         return changed;
     }
@@ -416,7 +473,6 @@ public final class SensitiveDataMasker {
                         "@SensitiveField cannot be used on static or final fields: "
                                 + field.getDeclaringClass().getName() + "." + field.getName());
             }
-            field.setAccessible(true);
             bindings.add(new FieldBinding(field, annotation, parseOptions(annotation, field)));
         }
         return Collections.unmodifiableList(bindings);
@@ -457,14 +513,82 @@ public final class SensitiveDataMasker {
         return Collections.unmodifiableMap(parsed);
     }
 
+    // Containers are traversed through their public APIs, never through JDK implementation fields.
+    private static boolean isPlatformType(Class<?> type) {
+        // JDK APIs also use org.xml.sax/org.w3c.dom and other non-java package names.
+        // Detect bootstrap and platform/extension loader ownership using Java 8 APIs.
+        // Check each declaring class separately so application subclasses retain business fields.
+        ClassLoader definingLoader = type.getClassLoader();
+        if (definingLoader == null) {
+            return true;
+        }
+        ClassLoader systemLoader = ClassLoader.getSystemClassLoader();
+        for (ClassLoader platformLoader = systemLoader == null ? null : systemLoader.getParent();
+             platformLoader != null; platformLoader = platformLoader.getParent()) {
+            if (definingLoader == platformLoader) {
+                return true;
+            }
+        }
+        String name = type.getName();
+        return name.startsWith("java.") || name.startsWith("javax.")
+                || name.startsWith("jakarta.") || name.startsWith("jdk.")
+                || name.startsWith("sun.") || name.startsWith("com.sun.");
+    }
+
+    // Check assignability, not just the concrete package: application/container class loaders
+    // inherit inaccessible JDK fields. Named framework contracts keep common dependency-free.
+    private static boolean isInfrastructureType(Class<?> type) {
+        if (type == null) {
+            return false;
+        }
+        if (ClassLoader.class.isAssignableFrom(type) || Thread.class.isAssignableFrom(type)
+                || java.lang.reflect.Member.class.isAssignableFrom(type)
+                || java.lang.reflect.AccessibleObject.class.isAssignableFrom(type)) {
+            return true;
+        }
+        String name = type.getName();
+        if (name.equals("org.springframework.validation.BindingResult")
+                || name.equals("org.springframework.beans.factory.BeanFactory")
+                || name.equals("org.springframework.web.servlet.support.RequestContext")
+                || name.equals("javax.servlet.ServletRequest")
+                || name.equals("jakarta.servlet.ServletRequest")
+                || name.equals("javax.servlet.ServletResponse")
+                || name.equals("jakarta.servlet.ServletResponse")
+                || name.equals("javax.servlet.ServletContext")
+                || name.equals("jakarta.servlet.ServletContext")
+                || name.equals("javax.servlet.http.HttpSession")
+                || name.equals("jakarta.servlet.http.HttpSession")) {
+            return true;
+        }
+        for (Class<?> contract : type.getInterfaces()) {
+            if (isInfrastructureType(contract)) {
+                return true;
+            }
+        }
+        return isInfrastructureType(type.getSuperclass());
+    }
+
     private List<Field> allFields(Class<?> type) {
         if (type == null || type == Object.class) {
             return Collections.emptyList();
         }
         List<Field> fields = new ArrayList<Field>();
         Class<?> current = type;
-        while (current != null && current != Object.class) {
-            Collections.addAll(fields, current.getDeclaredFields());
+        while (current != null && current != Object.class && !isPlatformType(current)
+                && !isInfrastructureType(current)) {
+            // Authorize each declaring class, not the whole hierarchy. A DTO subclass cannot
+            // grant reflection access to an unrelated library superclass.
+            Field[] declared = current.getDeclaredFields();
+            boolean selected = traversalPolicy.allows(current);
+            if (!selected) {
+                for (Field field : declared) {
+                    if (field.getAnnotation(SensitiveField.class) != null) {
+                        selected = true;
+                        break;
+                    }
+                }
+            }
+            if (selected) Collections.addAll(fields, declared);
             current = current.getSuperclass();
         }
         return fields;
@@ -485,26 +609,10 @@ public final class SensitiveDataMasker {
         private void maskCurrentValue(Object owner,
                                       AlgorithmRegistry algorithmRegistry,
                                       Map<String, SensitiveFieldMasker> sensitiveFieldMaskers) {
-            try {
-                Object value = field.get(owner);
-                if (value instanceof String) {
-                    field.set(owner, mask(owner, (String) value, algorithmRegistry, sensitiveFieldMaskers));
-                }
-            } catch (IllegalAccessException ignore) {
-                // Field accessibility was prepared when binding was built.
-            }
-        }
-
-        private boolean setMasked(Object owner,
-                                  String value,
-                                  AlgorithmRegistry algorithmRegistry,
-                                  Map<String, SensitiveFieldMasker> sensitiveFieldMaskers) {
-            try {
-                field.set(owner, mask(owner, value, algorithmRegistry, sensitiveFieldMaskers));
-                return true;
-            } catch (IllegalAccessException ignore) {
-                // Field accessibility was prepared when binding was built.
-                return false;
+            Object value = SensitiveFieldAccess.read(field, owner);
+            if (value instanceof String) {
+                SensitiveFieldAccess.write(field, owner,
+                        mask(owner, (String) value, algorithmRegistry, sensitiveFieldMaskers));
             }
         }
 

@@ -189,3 +189,7 @@ mvn -Dmaven.repo.local=.m2repo -pl spring-starter/spring3-starter -am test
 如果你的代码路径通过 `JdbcTemplate` 或原生 JDBC 直接访问数据库，`EncryptedJdbcExecutor`
 可以作为显式 Spring Bean 使用。它接收配置里的 `dataSourceName`，复用现有 SQL 重写和
 结果解密能力，但不会改变正常的 MyBatis 拦截器链。
+
+### Sensitive response traversal boundary / 响应遍历边界
+
+响应脱敏现在只展开敏感注解声明类和显式登记的 DTO；包装及分页类型请提供 `SensitiveTraversalPolicy` Bean。Unknown wrappers are opaque; register DTO types/packages or public payload adapters when upgrading. See [中文指南](docs/sensitive-response-guide.zh-CN.md#对象图遍历边界兼容性变更) / [English guide](docs/sensitive-response-guide.en.md#object-graph-traversal-boundary-compatibility-change).

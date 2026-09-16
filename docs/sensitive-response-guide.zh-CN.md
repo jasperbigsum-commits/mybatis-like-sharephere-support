@@ -1262,3 +1262,28 @@ Configure the same algorithm for both roles.
   - `SensitiveResponseTriggerAspect`
   - `SensitiveResponseContextInterceptor`
   - `SensitiveResponseBodyAdvice`
+
+### 对象图遍历边界（兼容性变更）
+
+脱敏器不再对任意可达对象递归反射。默认只处理已记录的精确属性、声明 `@SensitiveField` 的类以及数组、Iterable、Map 值。未知对象保持不展开；有敏感注解的类只授权自己的声明字段，不授权第三方父类内部字段。普通包装 DTO、无注解复制 DTO、业务父类需要显式登记，否则不会被扫描。这是有意收紧的边界，升级时必须检查响应包装和分页结构，不能仅依赖已有数据库记录覆盖复制数据。
+
+在 Spring 2/3 中提供一个 `SensitiveTraversalPolicy` Bean 即可覆盖默认策略；手动创建脱敏器时使用四参数构造器：
+
+```java
+@Bean
+public SensitiveTraversalPolicy sensitiveTraversalPolicy() {
+    return SensitiveTraversalPolicy.builder()
+            .allowPackages("com.example.api.dto")
+            .allowTypes(MyResponseBase.class)
+            .adapt(MyPage.class, MyPage::getRecords)
+            .build();
+}
+```
+
+只登记纯数据包，不要登记整个应用根包、service/controller 包或第三方框架包。`allowTypes` 只登记精确声明类；`adapt` 支持对应类型及实现/子类，并只访问适配器返回的数据，不扫描包装对象私有字段。业务模型中的 Map/集合也受相同的嵌套 DTO 边界约束。登记仅授权遍历，不会给无敏感规则的普通字段新增脱敏规则。
+
+已记录字段仍按属性路径直接替换；复制对象仍须同时满足属性名和值匹配，并且位于批准的 DTO 图中。模板调用可以传入去掉 BindingResult 等辅助属性的模型 Map，插件边界同样适用于其所有嵌套值。
+
+平台类型按 bootstrap/platform/extension 类加载来源识别，包名前缀仅作补充，覆盖 `org.xml.sax`、`org.w3c.dom` 等。平台父类、合成字段及已知基础设施不参与反射。这里没有通过 `--add-opens` 绕过 JDK 隔离。
+
+对于显式选中的业务字段，如果模块不允许直接访问，尝试公开且类型匹配的 JavaBean getter/setter；不调用其他任意方法。两种访问均不可用或访问器失败时抛出不含字段值的配置异常并阻止输出。禁止吞掉访问异常后继续返回明文；没有公开访问器的业务模块需要可访问的响应 DTO 或精确的模块访问设计。此策略不承诺为任意未知对象自动发现敏感字段。

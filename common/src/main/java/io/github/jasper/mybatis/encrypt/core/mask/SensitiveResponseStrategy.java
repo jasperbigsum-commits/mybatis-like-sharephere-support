@@ -5,22 +5,22 @@ package io.github.jasper.mybatis.encrypt.core.mask;
  *
  * <p>The strategy affects only how the response body is inspected after controller execution. It
  * does not change query rewriting or decryption rules. {@link #RECORDED_ONLY} is the preferred
- * default because it touches only DTO instances actually produced by MyBatis result handling.
+ * default because recorded MyBatis properties determine which values may be replaced.
  * Annotation-based traversal is available as an explicit fallback for manually assembled response
  * graphs.</p>
  */
 public enum SensitiveResponseStrategy {
 
     /**
-     * Masks only object references recorded by SQL result decryption.
+     * Masks recorded references and matching property/value copies within the approved DTO graph.
      *
-     * <p>This strategy has the lowest overhead and the clearest boundary because it avoids
-     * traversing the full response graph.</p>
+     * <p>Copied DTOs and wrappers require explicit traversal registration unless they declare
+     * SensitiveField annotations. Unknown objects are opaque.</p>
      */
     RECORDED_ONLY,
 
     /**
-     * Traverses the returned object graph and masks all annotated {@code String} fields.
+     * Traverses the approved response DTO graph and masks annotated {@code String} fields.
      *
      * <p>Use this for DTOs assembled outside MyBatis result mapping, for example controller or
      * service level aggregation objects.</p>

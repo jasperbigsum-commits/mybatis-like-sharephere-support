@@ -3,6 +3,7 @@ package io.github.jasper.mybatis.encrypt.config;
 import io.github.jasper.mybatis.encrypt.algorithm.AlgorithmRegistry;
 import io.github.jasper.mybatis.encrypt.core.mask.JdbcStoredSensitiveValueResolver;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker;
+import io.github.jasper.mybatis.encrypt.core.mask.SensitiveTraversalPolicy;
 import io.github.jasper.mybatis.encrypt.core.mask.SensitiveFieldMasker;
 import io.github.jasper.mybatis.encrypt.core.mask.StoredSensitiveValueResolver;
 import io.github.jasper.mybatis.encrypt.support.SensitiveResponseTriggerAspect;
@@ -25,11 +26,19 @@ import java.util.Map;
         havingValue = "true", matchIfMissing = true)
 public class SensitiveMaskingAutoConfiguration {
 
+    /** Default boundary: annotated DTOs and explicit recorded properties; unknown objects are opaque. */
+    @Bean
+    @ConditionalOnMissingBean
+    public SensitiveTraversalPolicy sensitiveTraversalPolicy() {
+        return SensitiveTraversalPolicy.builder().build();
+    }
+
     /**
      * 注入敏感信息脱敏器
      * @param storedSensitiveValueResolver 存储敏感信息解决器
      * @param algorithmRegistry 算法注册表
      * @param sensitiveFieldMaskers 敏感字段脱敏器
+     * @param traversalPolicy 明确的业务 DTO 遍历边界
      * @return 敏感信息脱敏器
      */
     @Bean
@@ -39,8 +48,9 @@ public class SensitiveMaskingAutoConfiguration {
             StoredSensitiveValueResolver storedSensitiveValueResolver,
             AlgorithmRegistry algorithmRegistry,
             @org.springframework.beans.factory.annotation.Autowired(required = false)
-            Map<String, SensitiveFieldMasker> sensitiveFieldMaskers) {
-        return new SensitiveDataMasker(storedSensitiveValueResolver, algorithmRegistry, sensitiveFieldMaskers);
+            Map<String, SensitiveFieldMasker> sensitiveFieldMaskers,
+            SensitiveTraversalPolicy traversalPolicy) {
+        return new SensitiveDataMasker(storedSensitiveValueResolver, algorithmRegistry, sensitiveFieldMaskers, traversalPolicy);
     }
 
     /**

@@ -30,6 +30,42 @@ class SensitiveResponseAutoConfigurationTest {
             });
 
     @Test
+    void shouldMaskTemplateModelWithoutTraversingMvcInfrastructure() {
+        contextRunner.run(context -> {
+            for (io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy strategy
+                    : io.github.jasper.mybatis.encrypt.core.mask.SensitiveResponseStrategy.values()) {
+                TemplatePerson source = new TemplatePerson();
+                TemplatePerson copy = new TemplatePerson();
+                TemplatePerson helperOnly = new TemplatePerson();
+                org.springframework.web.servlet.ModelAndView view =
+                        new org.springframework.web.servlet.ModelAndView("template");
+                view.addObject("person", copy);
+                view.addObject("saxLocator", new org.xml.sax.helpers.LocatorImpl());
+                view.addObject("org.springframework.validation.BindingResult.person",
+                        new org.springframework.validation.BeanPropertyBindingResult(helperOnly, "person"));
+                org.springframework.mock.web.MockHttpServletRequest request =
+                        new org.springframework.mock.web.MockHttpServletRequest(context.getServletContext());
+                request.setAttribute(org.springframework.web.servlet.DispatcherServlet.WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+                        context.getSourceApplicationContext());
+                view.addObject("requestContext", new org.springframework.web.servlet.support.RequestContext(request));
+                try (java.net.URLClassLoader loader = new java.net.URLClassLoader(new java.net.URL[0]) { };
+                     SensitiveDataContext.Scope scope = SensitiveDataContext.open(false, strategy)) {
+                    view.addObject("loader", loader);
+                    SensitiveDataContext.record(source, "phone", source.phone, null);
+                    context.getBean(SensitiveDataMasker.class).mask(view.getModel());
+                    org.junit.jupiter.api.Assertions.assertEquals("*******8000", copy.phone);
+                    org.junit.jupiter.api.Assertions.assertEquals("13800138000", helperOnly.phone);
+                }
+            }
+        });
+    }
+
+    static class TemplatePerson {
+        @io.github.jasper.mybatis.encrypt.annotation.SensitiveField
+        String phone = "13800138000";
+    }
+
+    @Test
     void shouldRegisterRequestHydrationBeansWhenLookupServiceExists() {
         contextRunner.run(context -> {
             assertNotNull(context.getBean(SensitiveRequestPayloadResolver.class));

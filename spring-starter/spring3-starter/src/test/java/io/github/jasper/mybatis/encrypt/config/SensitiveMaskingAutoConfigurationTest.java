@@ -67,6 +67,30 @@ class SensitiveMaskingAutoConfigurationTest {
         });
     }
 
+    @Test
+    void shouldUseApplicationTraversalPolicyForExplicitWrapperOnly() {
+        io.github.jasper.mybatis.encrypt.core.mask.SensitiveTraversalPolicy policy =
+                io.github.jasper.mybatis.encrypt.core.mask.SensitiveTraversalPolicy.builder()
+                        .adapt(Wrapper.class, value -> value.data).build();
+        contextRunner.withBean(io.github.jasper.mybatis.encrypt.core.mask.SensitiveTraversalPolicy.class, () -> policy)
+                .run(context -> {
+                    org.junit.jupiter.api.Assertions.assertSame(policy,
+                            context.getBean(io.github.jasper.mybatis.encrypt.core.mask.SensitiveTraversalPolicy.class));
+                    Wrapper wrapper = new Wrapper();
+                    try (SensitiveDataContext.Scope scope = SensitiveDataContext.open(false,
+                            SensitiveResponseStrategy.ANNOTATED_FIELDS)) {
+                        context.getBean(io.github.jasper.mybatis.encrypt.core.mask.SensitiveDataMasker.class).mask(wrapper);
+                    }
+                    assertEquals("*******8000", wrapper.data.phone);
+                    assertEquals("13800138000", wrapper.helper.phone);
+                });
+    }
+
+    static class Wrapper {
+        MaskedPhoneView data = new MaskedPhoneView("13800138000");
+        MaskedPhoneView helper = new MaskedPhoneView("13800138000");
+    }
+
     @Configuration
     static class TestConfiguration {
 

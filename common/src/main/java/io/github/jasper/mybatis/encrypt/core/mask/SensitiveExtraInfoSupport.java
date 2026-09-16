@@ -8,8 +8,8 @@ import java.util.Map;
  */
 public abstract class SensitiveExtraInfoSupport {
 
-    private final Map<String, SensitiveDataContext.SensitiveLookupMeta> sensitiveLookupMeta =
-            new LinkedHashMap<String, SensitiveDataContext.SensitiveLookupMeta>();
+    private transient final Map<String, SensitiveDataContext.SensitiveLookupMeta> sensitiveLookupMeta =
+            new LinkedHashMap<>();
 
     /**
      * Returns response lookup metadata keyed by property name.

@@ -92,6 +92,9 @@
   - 没有 controller 先打开上下文时，不做任何操作
 - `SensitiveResponseBodyAdvice`
   - 在响应写回前触发 `SensitiveDataMasker`
+- `SensitiveTraversalPolicy`
+  - 显式限定响应 DTO 声明类/包，并允许以公开 API 适配第三方包装数据；未知对象不展开。
+  - Spring 2/3 支持覆盖策略 Bean；业务模块字段不可直接访问时只尝试公开 JavaBean 访问器，仍不可访问则阻止响应。
 - `SensitiveDataMasker`
   - 优先使用数据库 `maskedColumn` 的存储态脱敏值替换已解密字段
   - 再按 `maskedAlgorithm` / `@SensitiveField` 作为回退策略

@@ -107,6 +107,35 @@ class EncryptedJdbcExecutorIntegrationTest {
         });
     }
 
+    @Test
+    void shouldMaterializePlainAndEncryptedTextLobsBeforeDecryptionAndConnectionRelease() {
+        org.springframework.jdbc.core.JdbcTemplate jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource());
+        jdbc.execute("alter table user_account alter column phone clob");
+        jdbc.execute("alter table user_account add memo clob");
+        jdbc.execute("alter table user_account add national_memo nclob");
+        jdbc.execute("alter table user_account add empty_memo clob");
+        jdbc.execute("alter table user_account add absent_memo clob");
+        jdbc.execute("alter table user_account add payload blob");
+        String longText = String.join("", Collections.nCopies(2000, "中文内容"));
+        jdbc.update("update user_account set memo=?, national_memo=?, empty_memo=?, payload=? where id=1",
+                longText, "中文\uD83D\uDE00", "", new byte[]{1, 2, 3});
+        contextRunner.run(context -> {
+            EncryptedJdbcExecutor executor = context.getBean(EncryptedJdbcExecutor.class);
+            List<Map<String, Object>> rows = executor.select(null,
+                    "select id, phone, name, memo, national_memo, empty_memo, absent_memo, payload "
+                            + "from user_account where phone = ?", PHONE);
+            assertEquals(1, rows.size());
+            assertEquals(PHONE, readIgnoreCase(rows.get(0), "phone"));
+            assertEquals(longText, readIgnoreCase(rows.get(0), "memo"));
+            assertEquals("中文\uD83D\uDE00", readIgnoreCase(rows.get(0), "national_memo"));
+            assertEquals("", readIgnoreCase(rows.get(0), "empty_memo"));
+            org.junit.jupiter.api.Assertions.assertNull(readIgnoreCase(rows.get(0), "absent_memo"));
+            assertEquals("alice", readIgnoreCase(rows.get(0), "name"));
+            assertEquals(1L, readIgnoreCase(rows.get(0), "id"));
+            org.junit.jupiter.api.Assertions.assertTrue(readIgnoreCase(rows.get(0), "payload") instanceof java.sql.Blob);
+        });
+    }
+
     private static DataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.h2.Driver");

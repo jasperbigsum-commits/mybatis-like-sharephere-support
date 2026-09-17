@@ -14,7 +14,8 @@ public interface EncryptedJdbcExecutor {
      * @param dataSourceName encryption configuration datasource name
      * @param sql raw SQL
      * @param args positional bind arguments
-     * @return query rows
+     * @return query rows; CLOB/NCLOB columns are materialized as String (or null) before
+     *         decryption, while other JDBC types retain their driver-provided value types
      */
     List<Map<String, Object>> select(String dataSourceName, String sql, Object... args);
 

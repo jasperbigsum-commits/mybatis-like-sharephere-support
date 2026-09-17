@@ -186,6 +186,9 @@ mvn -Dmaven.repo.local=.m2repo -pl spring-starter/spring3-starter -am test
 更多开发和验收建议见 [开发与验收](docs/development.md)。
 ## 显式 JDBC 门面
 
+`select` 会在关闭结果集前将 CLOB/NCLOB 读为 `String`（SQL NULL 保持 null），再执行解密，避免驱动 LOB 携带连接对象进入业务响应。其他 JDBC 类型保持原来的读取行为；二进制或显式流式数据应由调用方按接口契约处理。此行为仅适用于显式 JDBC 门面，MyBatis Mapper 的无类型 Map 查询仍需配置文本 LOB 类型映射或明确 resultMap。
+
+
 如果你的代码路径通过 `JdbcTemplate` 或原生 JDBC 直接访问数据库，`EncryptedJdbcExecutor`
 可以作为显式 Spring Bean 使用。它接收配置里的 `dataSourceName`，复用现有 SQL 重写和
 结果解密能力，但不会改变正常的 MyBatis 拦截器链。

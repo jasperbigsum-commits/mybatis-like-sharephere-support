@@ -178,6 +178,9 @@ mvn -Dmaven.repo.local=.m2repo -pl spring-starter/spring3-starter -am test
 More maintenance guidance is available in [Development And Verification](docs/development.md).
 ## Explicit JDBC Facade
 
+`select` materializes CLOB/NCLOB columns as `String` (preserving SQL NULL) before result-set closure and decryption, so driver LOBs cannot carry connection objects into business responses. Other JDBC types retain their existing read behavior; callers must handle binary or explicitly streamed data according to their API contract. This applies only to the explicit JDBC facade. Untyped MyBatis Mapper results still need text-LOB type mappings or an explicit resultMap.
+
+
 If a code path uses `JdbcTemplate` or raw JDBC directly, `EncryptedJdbcExecutor` is available as
 an explicit Spring bean. It takes the configured `dataSourceName`, reuses the existing SQL rewrite
 and result decryption pipeline, and does not change the normal MyBatis interceptor flow.

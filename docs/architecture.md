@@ -214,6 +214,9 @@
 能力边界的细化说明见 [sql-support-matrix.md](sql-support-matrix.md)。
 ### 7. Explicit JDBC Facade
 
+The facade materializes CLOB/NCLOB columns using JDBC text getters while the result set is open, before hydration/decryption. Other JDBC value types and parameter writes are unchanged. This is not a global MyBatis type-handler registration.
+
+
 - `EncryptedJdbcExecutor`
   - exposes a Spring bean for callers that bypass MyBatis and use `JdbcTemplate` or raw JDBC
   - resolves the target datasource by the encryption configuration `dataSourceName`

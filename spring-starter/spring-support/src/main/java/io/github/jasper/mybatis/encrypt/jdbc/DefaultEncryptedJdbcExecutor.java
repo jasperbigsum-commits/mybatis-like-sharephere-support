@@ -27,6 +27,7 @@ import javax.sql.DataSource;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -259,7 +260,12 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
             int columnCount = metaData.getColumnCount();
             Map<String, Object> row = new LinkedCaseInsensitiveMap<Object>(columnCount);
             for (int index = 1; index <= columnCount; index++) {
-                row.put(metaData.getColumnLabel(index), rs.getObject(index));
+                // Read text while the ResultSet is open, before decryption and connection release.
+                // A driver Clob can expose its connection/configuration to JSON serializers.
+                int jdbcType = metaData.getColumnType(index);
+                Object value = jdbcType == Types.CLOB ? rs.getString(index)
+                        : jdbcType == Types.NCLOB ? rs.getNString(index) : rs.getObject(index);
+                row.put(metaData.getColumnLabel(index), value);
             }
             return row;
         }

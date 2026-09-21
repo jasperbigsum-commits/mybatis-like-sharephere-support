@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.sql.CallableStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Collections;
 import java.util.List;
@@ -479,6 +480,34 @@ class DatabaseEncryptionInterceptorTest {
         assertSame(handler.result, result);
         assertEquals(0, decryptor.resolvePlanCalls);
         assertEquals(0, decryptor.decryptWithPlanCalls);
+    }
+
+    @Test
+    void shouldResolveResultContextThroughNestedHandlerWrappers() throws Throwable {
+        Configuration configuration = new Configuration();
+        RecordingResultDecryptor decryptor = recordingDecryptor();
+        DatabaseEncryptionInterceptor interceptor = interceptor(null, decryptor);
+        MappedStatement mappedStatement = mappedStatement(
+                configuration,
+                DatabaseEncryptionInterceptorTest.class.getName() + "$SkipTestMapper.normalMethod",
+                SqlCommandType.SELECT,
+                Map.class,
+                "select id from user_account where id = ?",
+                List.of(new ParameterMapping.Builder(configuration, "id", Long.class).build())
+        );
+        BoundSql boundSql = mappedStatement.getBoundSql(Map.of("id", 1L));
+        TestResultSetHandler handler = new TestResultSetHandler(mappedStatement, boundSql, List.of(Map.of("id", 1L)));
+        ResultSetHandler wrapped = new ResultSetHandlerWrapper(new ResultSetHandlerWrapper(handler));
+
+        Object result = interceptor.intercept(new Invocation(
+                wrapped,
+                resultSetHandlerMethod("handleResultSets", Statement.class),
+                new Object[]{null}
+        ));
+
+        assertSame(handler.result, result);
+        assertEquals(1, decryptor.resolvePlanCalls);
+        assertEquals(1, decryptor.decryptWithPlanCalls);
     }
 
     /**
@@ -936,5 +965,32 @@ class DatabaseEncryptionInterceptorTest {
             throw new UnsupportedOperationException();
         }
 
+    }
+
+    static class ResultSetHandlerWrapper implements ResultSetHandler {
+        private final ResultSetHandler delegate;
+
+        ResultSetHandlerWrapper(ResultSetHandler delegate) {
+            this.delegate = delegate;
+        }
+
+        public ResultSetHandler getDelegate() {
+            return delegate;
+        }
+
+        @Override
+        public <E> List<E> handleResultSets(Statement stmt) throws SQLException {
+            return delegate.handleResultSets(stmt);
+        }
+
+        @Override
+        public <E> Cursor<E> handleCursorResultSets(Statement stmt) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void handleOutputParameters(CallableStatement cs) {
+            throw new UnsupportedOperationException();
+        }
     }
 }

@@ -34,8 +34,11 @@ import java.lang.reflect.Method;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -254,45 +257,58 @@ public class DatabaseEncryptionInterceptor implements Interceptor {
     }
 
     private MappedStatement resolveResultSetMappedStatement(Object target) {
-        if (target == null) {
-            return null;
-        }
-        // Each SystemMetaObject.forObject(...) call wraps only the current target.
-        // There is no cross-invocation shared state here.
-        MetaObject metaObject = SystemMetaObject.forObject(target);
-        if (metaObject.hasGetter("mappedStatement")) {
-            Object mappedStatement = metaObject.getValue("mappedStatement");
-            if (mappedStatement instanceof MappedStatement) {
-                return (MappedStatement) mappedStatement;
-            }
-        }
-        if (metaObject.hasGetter("delegate.mappedStatement")) {
-            Object mappedStatement = metaObject.getValue("delegate.mappedStatement");
-            if (mappedStatement instanceof MappedStatement) {
-                return (MappedStatement) mappedStatement;
-            }
-        }
-        return null;
+        return findResultSetContext(target, MappedStatement.class, "mappedStatement");
     }
 
     private BoundSql resolveResultSetBoundSql(Object target) {
+        return findResultSetContext(target, BoundSql.class, "boundSql");
+    }
+
+    /**
+     * Finds result-set state through MyBatis and MyBatis-Plus wrapper layers.
+     * ResultSetHandler is commonly wrapped by several plugin proxies; only
+     * checking the first delegate leaves the decryption plan without the
+     * statement or final BoundSql.
+     */
+    private <T> T findResultSetContext(Object target, Class<T> type, String property) {
         if (target == null) {
             return null;
         }
-        // MyBatis versions may expose boundSql directly or through delegate.
-        // Both lookups read only the current invocation object graph and are not cached.
-        MetaObject metaObject = SystemMetaObject.forObject(target);
-        if (metaObject.hasGetter("boundSql")) {
-            Object boundSql = metaObject.getValue("boundSql");
-            if (boundSql instanceof BoundSql) {
-                return (BoundSql) boundSql;
-            }
+        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        return findResultSetContext(target, type, property, visited, 0);
+    }
+
+    private <T> T findResultSetContext(Object target,
+                                       Class<T> type,
+                                       String property,
+                                       Set<Object> visited,
+                                       int depth) {
+        if (target == null || depth > 8 || !visited.add(target)) {
+            return null;
         }
-        if (metaObject.hasGetter("delegate.boundSql")) {
-            Object boundSql = metaObject.getValue("delegate.boundSql");
-            if (boundSql instanceof BoundSql) {
-                return (BoundSql) boundSql;
+        if (type.isInstance(target)) {
+            return type.cast(target);
+        }
+        MetaObject metaObject;
+        try {
+            metaObject = SystemMetaObject.forObject(target);
+            if (metaObject.hasGetter(property)) {
+                Object value = metaObject.getValue(property);
+                if (type.isInstance(value)) {
+                    return type.cast(value);
+                }
             }
+            for (String wrapper : new String[]{"delegate", "target", "wrapped", "handler"}) {
+                if (metaObject.hasGetter(wrapper)) {
+                    T value = findResultSetContext(metaObject.getValue(wrapper), type, property, visited, depth + 1);
+                    if (value != null) {
+                        return value;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // A proxy can expose a property which is not readable in the current
+            // MyBatis version. Continue with the other wrapper paths.
         }
         return null;
     }

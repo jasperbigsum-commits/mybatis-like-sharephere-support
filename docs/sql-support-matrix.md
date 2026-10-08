@@ -56,6 +56,7 @@ through real MyBatis execution tests.
 | `WITH RECURSIVE` without encrypted fields | Supported | Recursive CTEs that do not reference encrypted fields are left alone or processed normally by the surrounding query block. |
 | `UNION` / `UNION ALL` | Supported | Each branch is rewritten recursively. |
 | Same-table decryption | Supported | Query results are decrypted back into entity properties. |
+| Pagination-derived result decryption | Supported for single-source wrappers | The result planner recursively traces projected columns through named and anonymous derived tables, including Oracle/DM `ROWNUM` pagination added after encryption rewrite. Camel-case/snake-case DTO aliases and Map results are supported. Anonymous sources are only inferred when they are the sole FROM source; inner table aliases and omitted columns do not escape a derived scope. This does not relax SQL rewrite restrictions on unaliased derived queries. |
 | Separate-table hydration | Supported | Separate-table ciphertext is synchronized on write and hydrated on read by entity id. |
 | `@SkipSqlRewrite` annotation | Supported | Method-level annotation that bypasses the entire SQL rewrite and result decryption pipeline for the annotated mapper method. |
 
@@ -105,7 +106,7 @@ Avoid these if the field is encrypted:
 
 | Category | Status | Notes |
 | --- | --- | --- |
-| Deep multi-level derived table chains | Partial | Core derived-table predicate rewriting is supported, but highly nested alias chains are still conservative. |
+| Deep multi-level derived table chains | Partial | Result decryption supports traceable column renaming and wildcard pass-through across nested single-source named/anonymous wrappers. Ambiguous sources and complex expressions remain conservative; SQL rewrite restrictions still apply. |
 | Complex function-wrapped expressions | Partial | Simple recursive traversal exists, but not every database-specific function form is covered. |
 | `CASE` used as a projected expression and then referenced again outside | Partial | Common predicate forms are supported; more exotic alias chaining remains conservative. |
 | Vendor-specific clauses beyond current test matrix | Partial | The plugin has explicit dialect quoting support, but advanced clause coverage is still driven by tested AST paths. |

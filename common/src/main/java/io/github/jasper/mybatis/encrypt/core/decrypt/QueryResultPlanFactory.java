@@ -36,7 +36,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>推断遵循保守原则：优先使用实体元数据、ResultMap、SQL 投影列和
  * {@link io.github.jasper.mybatis.encrypt.annotation.EncryptResultHint}；如果列来源在多表 join、
  * set operation、复杂表达式或嵌套派生表中无法唯一确定，就返回更小的计划甚至空计划，而不是
- * 进行高风险猜测。</p>
+ * 进行高风险猜测。单一来源的无别名派生表（例如 Oracle/DM 分页包装）按输出列逐层追溯，
+ * 不把内层表别名暴露到外层，也不扩展 SQL 改写阶段的支持范围。</p>
  */
 public final class QueryResultPlanFactory {
 
@@ -424,12 +425,7 @@ public final class QueryResultPlanFactory {
                 return;
             }
             PlainSelect plainSelect = (PlainSelect) select;
-            registerLookupFromItem(tableContext, plainSelect.getFromItem());
-            if (plainSelect.getJoins() != null) {
-                for (Join join : plainSelect.getJoins()) {
-                    registerLookupFromItem(tableContext, join.getRightItem());
-                }
-            }
+            registerLookupSources(tableContext, plainSelect);
             List<SelectItem<?>> selectItems = plainSelect.getSelectItems();
             if (selectItems == null) {
                 return;
@@ -511,6 +507,27 @@ public final class QueryResultPlanFactory {
             }
         }
 
+        private void registerLookupSources(ProjectionTableContext tableContext, PlainSelect select) {
+            FromItem fromItem = select.getFromItem();
+            boolean singleSource = select.getJoins() == null || select.getJoins().isEmpty();
+            if (singleSource && fromItem instanceof ParenthesedSelect
+                    && fromItem.getAlias() == null) {
+                ParenthesedSelect derived = (ParenthesedSelect) fromItem;
+                if (derived.getSelect() != null) {
+                    // Oracle/DM pagination has an anonymous outer FROM. Preserve only the
+                    // child's projected columns; inner table aliases must not escape this scope.
+                    tableContext.anonymousRule = buildDerivedRule(null, derived.getSelect());
+                }
+            } else {
+                registerLookupFromItem(tableContext, fromItem);
+            }
+            if (select.getJoins() != null) {
+                for (Join join : select.getJoins()) {
+                    registerLookupFromItem(tableContext, join.getRightItem());
+                }
+            }
+        }
+
         private void registerLookupFromItem(ProjectionTableContext tableContext, FromItem fromItem) {
             if (fromItem instanceof Table) {
                 Table table = (Table) fromItem;
@@ -549,12 +566,7 @@ public final class QueryResultPlanFactory {
             }
             PlainSelect plainSelect = (PlainSelect) select;
             ProjectionTableContext tableContext = new ProjectionTableContext();
-            registerLookupFromItem(tableContext, plainSelect.getFromItem());
-            if (plainSelect.getJoins() != null) {
-                for (Join join : plainSelect.getJoins()) {
-                    registerLookupFromItem(tableContext, join.getRightItem());
-                }
-            }
+            registerLookupSources(tableContext, plainSelect);
             EncryptTableRule derivedRule = new EncryptTableRule(alias);
             List<SelectItem<?>> selectItems = plainSelect.getSelectItems();
             if (selectItems == null) {
@@ -627,6 +639,7 @@ public final class QueryResultPlanFactory {
     private static final class ProjectionTableContext {
 
         private final Map<String, EncryptTableRule> ruleByAlias = new LinkedHashMap<>();
+        private EncryptTableRule anonymousRule;
 
         private void register(String tableName, String alias, EncryptTableRule rule) {
             ruleByAlias.put(NameUtils.normalizeIdentifier(tableName), rule);
@@ -722,7 +735,11 @@ public final class QueryResultPlanFactory {
         }
 
         private Collection<EncryptTableRule> uniqueRules() {
-            return new LinkedHashSet<>(ruleByAlias.values());
+            Set<EncryptTableRule> rules = new LinkedHashSet<>(ruleByAlias.values());
+            if (anonymousRule != null) {
+                rules.add(anonymousRule);
+            }
+            return rules;
         }
     }
 

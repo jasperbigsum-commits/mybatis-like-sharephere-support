@@ -133,11 +133,14 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
                                                       Object[] args) {
         Object parameterObject = parameterObject(args);
         MappedStatement mappedStatement = mappedStatement(dataSourceName, commandType, sql, args);
-        BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
-        RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
-        if (rewriteResult.changed()) {
-            rewriteResult.applyTo(boundSql);
-            sql = boundSql.getSql();
+            MappedStatement mappedStatement = mappedStatement(resolvedDataSourceName, commandType, sql, args);
+            BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
+            RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
+            if (rewriteResult.changed()) {
+                rewriteResult.applyTo(boundSql);
+                sql = boundSql.getSql();
+            }
+            return new ExecutionContext(resolvedDataSourceName, sql, extractArguments(boundSql, parameterObject), boundSql);
         }
         return new ExecutionContext(dataSourceName, sql, extractArguments(boundSql, parameterObject), boundSql);
     }

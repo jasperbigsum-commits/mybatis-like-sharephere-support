@@ -128,19 +128,16 @@ public class DefaultEncryptedJdbcExecutor implements EncryptedJdbcExecutor {
     }
 
     private ExecutionContext rewriteInCurrentDialect(String dataSourceName,
-                                                      SqlCommandType commandType,
-                                                      String sql,
-                                                      Object[] args) {
+                                                     SqlCommandType commandType,
+                                                     String sql,
+                                                     Object[] args) {
         Object parameterObject = parameterObject(args);
         MappedStatement mappedStatement = mappedStatement(dataSourceName, commandType, sql, args);
-            MappedStatement mappedStatement = mappedStatement(resolvedDataSourceName, commandType, sql, args);
-            BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
-            RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
-            if (rewriteResult.changed()) {
-                rewriteResult.applyTo(boundSql);
-                sql = boundSql.getSql();
-            }
-            return new ExecutionContext(resolvedDataSourceName, sql, extractArguments(boundSql, parameterObject), boundSql);
+        BoundSql boundSql = mappedStatement.getBoundSql(parameterObject);
+        RewriteResult rewriteResult = sqlRewriteEngine.rewrite(mappedStatement, boundSql);
+        if (rewriteResult.changed()) {
+            rewriteResult.applyTo(boundSql);
+            sql = boundSql.getSql();
         }
         return new ExecutionContext(dataSourceName, sql, extractArguments(boundSql, parameterObject), boundSql);
     }
